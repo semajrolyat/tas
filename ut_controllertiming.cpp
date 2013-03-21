@@ -79,6 +79,7 @@ void initialize_timer_pipes( void ) {
 
 // Nanoseconds/Second
 #define NSECS_PER_SEC 1E9
+#define USECS_PER_SEC 1E6
 
 // Quantum for Controller Timer
 //#define DEFAULT_NSEC_QUANTUM_CONTROLLER         3E7         // 30 milliseconds
@@ -267,7 +268,22 @@ void suspend_controller( ) {
 
     // NOTE : gettimeofday is not an accurate metric.  Need process time!
     // may only be able to know from messaging via timer pipe
-    gettimeofday( &tv_controller_quantum_end_time, NULL );
+    //gettimeofday( &tv_controller_quantum_end_time, NULL );
+
+    struct rusage ru;
+
+    //int result = getrusage( RUSAGE_SELF, &ru );
+    int result = getrusage( RUSAGE_THREAD, &ru );
+    //int result = getrusage( RUSAGE_CHILDREN, &ru );
+
+    tv_controller_quantum_end_time.tv_sec = ru.ru_stime.tv_sec + ru.ru_utime.tv_sec;
+    tv_controller_quantum_end_time.tv_usec = ru.ru_stime.tv_usec + ru.ru_utime.tv_usec;
+
+    if( result != 0 ) {
+        printf( "tv_controller_quantum_end_time query failed" );
+    } else {
+        printf( "tv_controller_quantum_end_time : %d, %06d\n", tv_controller_quantum_end_time.tv_sec, tv_controller_quantum_end_time.tv_usec );
+    }
 }
 
 //-----------------------------------------------------------------------------
@@ -275,7 +291,22 @@ void suspend_controller( ) {
 void resume_controller( ) {
     // NOTE : gettimeofday is not an accurate metric.  Need process time!
     // may only be able to know from messaging via timer pipe
-    gettimeofday( &tv_controller_quantum_start_time, NULL );
+    //gettimeofday( &tv_controller_quantum_start_time, NULL );
+
+    struct rusage ru;
+
+    //int result = getrusage( RUSAGE_SELF, &ru );
+    int result = getrusage( RUSAGE_THREAD, &ru );
+    //int result = getrusage( RUSAGE_CHILDREN, &ru );
+
+    tv_controller_quantum_start_time.tv_sec = ru.ru_stime.tv_sec + ru.ru_utime.tv_sec;
+    tv_controller_quantum_start_time.tv_usec = ru.ru_stime.tv_usec + ru.ru_utime.tv_usec;
+
+    if( result != 0 ) {
+        printf( "tv_controller_quantum_start_time query failed" );
+    } else {
+        printf( "tv_controller_quantum_start_time : %d, %06d\n", tv_controller_quantum_start_time.tv_sec, tv_controller_quantum_start_time.tv_usec );
+    }
 
     kill( controller_pid, SIGCONT );
 }
@@ -317,6 +348,7 @@ int main( int argc, char* argv[] ) {
     // NOTE: the controller process may need time to run through initialization
     // which may be delayed by blocking s.t. the initial quantum may get out of
     // step as a result.  I don't have a solution to this potential problem at the moment.
+    // FOLLOW UP: Wait to start timing controller on initial perception request
     fork_controller( );
     suspend_controller( );
 
@@ -351,11 +383,24 @@ int main( int argc, char* argv[] ) {
             printf( "Controller Suspended\n" );
 
             // calculate the controller interval
-            // NOTE: the below computation is not right!  For now not actually using the
-            // time differential.  Included as a note that this will be critical down the road
-            // to measure how long the controller actually ran for
+
             tv_controller_quantum_interval.tv_usec = tv_controller_quantum_end_time.tv_usec - tv_controller_quantum_start_time.tv_usec;
             tv_controller_quantum_interval.tv_sec = tv_controller_quantum_end_time.tv_sec - tv_controller_quantum_start_time.tv_sec;
+
+            printf( "tv_controller_quantum_interval : %d, %06d\n", tv_controller_quantum_interval.tv_sec, tv_controller_quantum_interval.tv_usec );
+
+            /*
+            int dusec;
+            int dsec = tv_controller_quantum_end_time.tv_sec - tv_controller_quantum_start_time.tv_sec;
+
+            if( dsec > 0 ) {
+                dusec = USECS_PER_SEC - tv_controller_quantum_start_time.tv_usec + tv_controller_quantum_end_time.tv_usec;
+            } else {
+                dusec = tv_controller_quantum_end_time.tv_usec - tv_controller_quantum_start_time.tv_usec;
+            }
+
+            printf( "%d\n", dusec );
+            */
 
             // Run Dynamics
             int dt = 1;
