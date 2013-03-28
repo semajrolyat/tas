@@ -9,10 +9,25 @@ SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -g")
 set( CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake_modules ${CMAKE_MODULE_PATH} )
 
 find_package( RT REQUIRED )
+find_package( DL REQUIRED )
 find_package( Pthread REQUIRED )
+find_package( Moby REQUIRED )
+
+find_package (LibXml2 REQUIRED)
+
+if (LIBXML2_FOUND)
+  set (CMAKE_CXX_FLAGS ${CMAKE_CXX_FLAGS} ${LIBXML2_DEFINITIONS})
+  set (CMAKE_CXX_FLAGS_DEBUG ${CMAKE_CXX_FLAGS_DEBUG} ${LIBXML2_DEFINITIONS})
+  set (CMAKE_CXX_FLAGS_RELWITHDEBINFO ${CMAKE_CXX_FLAGS_RELWITHDEBINFO} ${LIBXML2_DEFINITIONS})
+  set (CMAKE_CXX_FLAGS_RELEASE ${CMAKE_CXX_FLAGS_RELEASE} ${LIBXML2_DEFINITIONS})
+  set (CMAKE_CXX_FLAGS_MINSIZEREL ${CMAKE_CXX_FLAGS_MINSIZEREL} ${LIBXML2_DEFINITIONS})
+  include_directories (${LIBXML2_INCLUDE_DIR})
+endif (LIBXML2_FOUND)
+
 
 set( TAS_LIBRARIES
     ${RT_LIBRARIES}
+    ${DL_LIBRARIES}
     ${PTHREAD_LIBRARIES}
 )
 
@@ -37,3 +52,5 @@ target_link_libraries( ut_controllertiming ${TAS_LIBRARIES} )
 add_executable( proto_threading proto_threading.cpp )
 target_link_libraries( proto_threading ${TAS_LIBRARIES} )
 
+add_library( plugin "MODULE" plugin.cpp )
+target_link_libraries( plugin ${TAS_LIBRARIES} ${MOBY_LIBRARIES} )

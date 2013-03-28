@@ -18,13 +18,17 @@ slicing of the controller process.
 #include <sys/resource.h>
 #include <errno.h>
 #include <sched.h>
+#include <dlfcn.h>
 
+#include <sstream>
 #include <fstream>
+#include <iostream>
+#include <list>
 
 //-----------------------------------------------------------------------------
 
-// Debugging flag.  0 -> Off. ~0 -> On.
-#define _DEBUG_TO_STDOUT 1
+// Verbose
+#define VERBOSE 0
 
 //-----------------------------------------------------------------------------
 
@@ -43,6 +47,201 @@ struct timeval tv_controller_quantum_start_time;
 struct timeval tv_controller_quantum_end_time;
 
 struct timeval tv_controller_quantum_interval;
+
+
+//-----------------------------------------------------------------------------
+struct statStuff {
+    int pid;			// %d
+    char comm[256];		// %s
+    char state;			// %c
+    int ppid;			// %d
+    int pgrp;			// %d
+    int session;		// %d
+    int tty_nr;			// %d
+    int tpgid;			// %d
+    unsigned long flags;	// %lu
+    unsigned long minflt;	// %lu
+    unsigned long cminflt;	// %lu
+    unsigned long majflt;	// %lu
+    unsigned long cmajflt;	// %lu
+    unsigned long utime;	// %lu
+    unsigned long stime; 	// %lu
+    long cutime;		// %ld
+    long cstime;		// %ld
+    long priority;		// %ld
+    long nice;			// %ld
+    long num_threads;		// %ld
+    long itrealvalue;		// %ld
+    unsigned long starttime;	// %lu
+    unsigned long vsize;	// %lu
+    long rss;			// %ld
+    unsigned long rlim;		// %lu
+    unsigned long startcode;	// %lu
+    unsigned long endcode;	// %lu
+    unsigned long startstack;	// %lu
+    unsigned long kstkesp;	// %lu
+    unsigned long kstkeip;	// %lu
+    unsigned long signal;	// %lu
+    unsigned long blocked;	// %lu
+    unsigned long sigignore;	// %lu
+    unsigned long sigcatch;	// %lu
+    unsigned long wchan;	// %lu
+    unsigned long nswap;	// %lu
+    unsigned long cnswap;	// %lu
+    int exit_signal;		// %d
+    int processor;		// %d
+    unsigned long rt_priority;	// %lu
+    unsigned long policy;	// %lu
+    unsigned long long delayacct_blkio_ticks;	// %llu
+} ;
+
+static int readStat(std::string fname, struct statStuff *s) {
+
+    // "d s c d d d d d u lu lu lu lu"
+    //const char *format = "%d %s %c %d %d %d %d %d %lu %lu %lu %lu %lu %lu %lu %ld %ld %ld %ld %ld %ld %lu %lu %ld %lu %lu %lu %lu %lu %lu %lu %lu %lu %lu %lu %lu %lu %d %d %lu %lu %llu";
+    const char *format = "%d %s %c %d %d %d %d %d %u %lu %lu %lu %lu %lu %lu %ld %ld %ld %ld %ld %ld %llu %lu %ld %lu %lu %lu %lu %lu %lu %lu %lu %lu %lu %lu %lu %lu %d %d %u %u %llu"; // new ones" %lu %ld"
+
+    FILE *proc;
+    proc = fopen( fname.c_str(),"r");
+    if (proc) {
+        if (42==fscanf(proc, format,
+        &s->pid,
+        s->comm,
+        &s->state,
+        &s->ppid,
+        &s->pgrp,
+        &s->session,
+        &s->tty_nr,
+        &s->tpgid,
+        &s->flags,
+        &s->minflt,
+        &s->cminflt,
+        &s->majflt,
+        &s->cmajflt,
+        &s->utime,
+        &s->stime,
+        &s->cutime,
+        &s->cstime,
+        &s->priority,
+        &s->nice,
+        &s->num_threads,
+        &s->itrealvalue,
+        &s->starttime,
+        &s->vsize,
+        &s->rss,
+        &s->rlim,
+        &s->startcode,
+        &s->endcode,
+        &s->startstack,
+        &s->kstkesp,
+        &s->kstkeip,
+        &s->signal,
+        &s->blocked,
+        &s->sigignore,
+        &s->sigcatch,
+        &s->wchan,
+        &s->nswap,
+        &s->cnswap,
+        &s->exit_signal,
+        &s->processor,
+        &s->rt_priority,
+        &s->policy,
+        &s->delayacct_blkio_ticks
+    )) {
+       fclose(proc);
+       return 1;
+        } else {
+       fclose(proc);
+       return 0;
+        }
+     } else {
+    return 0;
+     }
+}
+
+static void printStat(struct statStuff *stuff) {
+    printf("pid = %d\n", stuff->pid);
+    printf("comm = %s\n", stuff->comm);
+    printf("state = %c\n", stuff->state);
+    printf("ppid = %d\n", stuff->ppid);
+    printf("pgrp = %d\n", stuff->pgrp);
+    printf("session = %d\n", stuff->session);
+    printf("tty_nr = %d\n", stuff->tty_nr);
+    printf("tpgid = %d\n", stuff->tpgid);
+    printf("flags = %lu\n", stuff->flags);
+    printf("minflt = %lu\n", stuff->minflt);
+    printf("cminflt = %lu\n", stuff->cminflt);
+    printf("majflt = %lu\n", stuff->majflt);
+    printf("cmajflt = %lu\n", stuff->cmajflt);
+    printf("utime = %lu\n", stuff->utime);
+    printf("stime = %lu\n", stuff->stime);
+    printf("cutime = %ld\n", stuff->cutime);
+    printf("cstime = %ld\n", stuff->cstime);
+    printf("priority = %ld\n", stuff->priority);
+    printf("nice = %ld\n", stuff->nice);
+    printf("num_threads = %ld\n", stuff->num_threads);
+    printf("itrealvalue = %ld\n", stuff->itrealvalue);
+    printf("starttime = %lu\n", stuff->starttime);
+    printf("vsize = %lu\n", stuff->vsize);
+    printf("rss = %ld\n", stuff->rss);
+    printf("rlim = %lu\n", stuff->rlim);
+    printf("startcode = %lu\n", stuff->startcode);
+    printf("endcode = %lu\n", stuff->endcode);
+    printf("startstack = %lu\n", stuff->startstack);
+    printf("kstkesp = %lu\n", stuff->kstkesp);
+    printf("kstkeip = %lu\n", stuff->kstkeip);
+    printf("signal = %lu\n", stuff->signal);
+    printf("blocked = %lu\n", stuff->blocked);
+    printf("sigignore = %lu\n", stuff->sigignore);
+    printf("sigcatch = %lu\n", stuff->sigcatch);
+    printf("wchan = %lu\n", stuff->wchan);
+    printf("nswap = %lu\n", stuff->nswap);
+    printf("cnswap = %lu\n", stuff->cnswap);
+    printf("exit_signal = %d\n", stuff->exit_signal);
+    printf("processor = %d\n", stuff->processor);
+    printf("rt_priority = %lu\n", stuff->rt_priority);
+    printf("policy = %lu\n", stuff->policy);
+    printf("delayacct_blkio_ticks = %llu\n", stuff->delayacct_blkio_ticks);
+}
+
+
+
+//-----------------------------------------------------------------------------
+// PLUGIN MANAGEMENT
+//-----------------------------------------------------------------------------
+
+void* HANDLE = NULL;
+typedef void (*init_t)( void* );
+std::list<init_t> plugins;
+
+//-----------------------------------------------------------------------------
+
+// attempts to read control code plugin
+void read_plugin( const char* filename ) {
+    // attempt to read the file
+    HANDLE = dlopen( filename, RTLD_LAZY );
+    if ( !HANDLE ) {
+        std::cerr << " failed to read plugin from " << filename << std::endl;
+        std::cerr << "  " << dlerror( ) << std::endl;
+        exit( -1 );
+    }
+
+    // attempt to load the initializer
+    dlerror( );
+    plugins.push_back( (init_t) dlsym(HANDLE, "init") );
+    const char* dlsym_error = dlerror( );
+    if ( dlsym_error ) {
+        std::cerr << " warning: cannot load symbol 'init' from " << filename << std::endl;
+        std::cerr << "        error follows: " << std::endl << dlsym_error << std::endl;
+        plugins.pop_back( );
+    }
+}
+
+void initialize_plugins( ) {
+    for( std::list<init_t>::iterator it = plugins.begin(); it != plugins.end(); it++ ) {
+        (*it)(NULL);
+    }
+}
 
 //-----------------------------------------------------------------------------
 // INTERPROCESS COMMUNICATION
@@ -85,6 +284,7 @@ void initialize_timer_pipes( void ) {
 //#define DEFAULT_NSEC_QUANTUM_CONTROLLER         3E7         // 30 milliseconds
 //#define DEFAULT_SEC_QUANTUM_CONTROLLER          1           // 1 second
 #define DEFAULT_QUANTUM_CONTROLLER_NSEC         1E8         // 0.1 second
+//#define DEFAULT_QUANTUM_CONTROLLER_NSEC         1E7         // 0.01 second
 #define DEFAULT_QUANTUM_CONTROLLER_SEC          0           // 0 second
 
 // Initial Delay for Controller Timer
@@ -257,6 +457,10 @@ void fork_controller( ) {
     }
 }
 
+std::stringstream ss_controller_proc_filename("");
+int interval_start_time;
+int interval_end_time;
+
 //-----------------------------------------------------------------------------
 // Block/wait the controller process
 // Note: Timer signal will be blocked if the controller is blocked due to
@@ -267,9 +471,13 @@ void suspend_controller( ) {
     kill( controller_pid, SIGSTOP );
 
     // NOTE : gettimeofday is not an accurate metric.  Need process time!
-    // may only be able to know from messaging via timer pipe
     //gettimeofday( &tv_controller_quantum_end_time, NULL );
 
+    statStuff stats;
+    readStat( ss_controller_proc_filename.str(), &stats );
+    interval_end_time = stats.utime;
+
+    /*
     struct rusage ru;
 
     //int result = getrusage( RUSAGE_SELF, &ru );
@@ -279,20 +487,27 @@ void suspend_controller( ) {
     tv_controller_quantum_end_time.tv_sec = ru.ru_stime.tv_sec + ru.ru_utime.tv_sec;
     tv_controller_quantum_end_time.tv_usec = ru.ru_stime.tv_usec + ru.ru_utime.tv_usec;
 
+    /*
     if( result != 0 ) {
         printf( "tv_controller_quantum_end_time query failed" );
     } else {
         printf( "tv_controller_quantum_end_time : %d, %06d\n", tv_controller_quantum_end_time.tv_sec, tv_controller_quantum_end_time.tv_usec );
     }
+    */
+
 }
 
 //-----------------------------------------------------------------------------
 // Unpause the controller process
 void resume_controller( ) {
     // NOTE : gettimeofday is not an accurate metric.  Need process time!
-    // may only be able to know from messaging via timer pipe
     //gettimeofday( &tv_controller_quantum_start_time, NULL );
 
+    statStuff stats;
+    readStat( ss_controller_proc_filename.str(), &stats );
+    interval_start_time = stats.utime;
+
+    /*
     struct rusage ru;
 
     //int result = getrusage( RUSAGE_SELF, &ru );
@@ -302,12 +517,13 @@ void resume_controller( ) {
     tv_controller_quantum_start_time.tv_sec = ru.ru_stime.tv_sec + ru.ru_utime.tv_sec;
     tv_controller_quantum_start_time.tv_usec = ru.ru_stime.tv_usec + ru.ru_utime.tv_usec;
 
+    /*
     if( result != 0 ) {
         printf( "tv_controller_quantum_start_time query failed" );
     } else {
         printf( "tv_controller_quantum_start_time : %d, %06d\n", tv_controller_quantum_start_time.tv_sec, tv_controller_quantum_start_time.tv_usec );
     }
-
+*/
     kill( controller_pid, SIGCONT );
 }
 
@@ -329,12 +545,14 @@ void run_dynamics( int dt ) {
     }
 }
 
-
 //-----------------------------------------------------------------------------
 // Simulator Entry Point
 //-----------------------------------------------------------------------------
 
 int main( int argc, char* argv[] ) {
+
+    read_plugin( "/home/james/tas/build/libplugin.so" );
+    initialize_plugins();
 
     controller_pid = 0;
 
@@ -363,55 +581,49 @@ int main( int argc, char* argv[] ) {
 
     char input_buffer;
 
-    int TICKS_PER_QUANTUM = 10;
-    int num_ticks_this_quantum = 0;
-
     // unblock the controller timer and unblock the controller process
     unblock_controller_timer( );
     resume_controller( );
 
+    ss_controller_proc_filename << "/proc" << "/" << controller_pid << "/stat";
+
     while( 1 ) {
-        read( fd_timercontroller_to_coordinator[0], &input_buffer, 1 );
-        num_ticks_this_quantum++;
-
-        if( num_ticks_this_quantum == TICKS_PER_QUANTUM ) {
-            printf( "Controller Quantum has expired\n" );
-            num_ticks_this_quantum = 0;
-
-            // suspend controller
-            suspend_controller( );
-            printf( "Controller Suspended\n" );
-
-            // calculate the controller interval
-
-            tv_controller_quantum_interval.tv_usec = tv_controller_quantum_end_time.tv_usec - tv_controller_quantum_start_time.tv_usec;
-            tv_controller_quantum_interval.tv_sec = tv_controller_quantum_end_time.tv_sec - tv_controller_quantum_start_time.tv_sec;
-
-            printf( "tv_controller_quantum_interval : %d, %06d\n", tv_controller_quantum_interval.tv_sec, tv_controller_quantum_interval.tv_usec );
-
-            /*
-            int dusec;
-            int dsec = tv_controller_quantum_end_time.tv_sec - tv_controller_quantum_start_time.tv_sec;
-
-            if( dsec > 0 ) {
-                dusec = USECS_PER_SEC - tv_controller_quantum_start_time.tv_usec + tv_controller_quantum_end_time.tv_usec;
-            } else {
-                dusec = tv_controller_quantum_end_time.tv_usec - tv_controller_quantum_start_time.tv_usec;
+        if( read( fd_timercontroller_to_coordinator[0], &input_buffer, 1 ) == -1 ) {
+            switch(errno) {
+            case EINTR:
+                // The read operation was terminated due to the receipt of a signal, and no data was transferred.
+                //printf( "error : EINTR \n" );
+                continue;
+            default:
+                printf( "EXCEPTION: unhandled read error in main loop reading from fd_timercontroller_to_coordinator\n" );
+                break;
             }
-
-            printf( "%d\n", dusec );
-            */
-
-            // Run Dynamics
-            int dt = 1;
-            run_dynamics( dt );
-
-            // Resume Controller
-            resume_controller( );
-            printf( "Controller Resumed\n" );
-        } else {
-            printf( "Controller Tick\n" );
         }
+        if( VERBOSE ) printf( "Controller Quantum has expired\n" );
+
+        // suspend controller
+        suspend_controller( );
+        if( VERBOSE ) printf( "Controller Suspended\n" );
+
+        // calculate the controller interval
+        struct timeval tv_controller_now;
+        gettimeofday( &tv_controller_now, NULL );
+        int controller_interval = interval_end_time - interval_start_time;
+        if( VERBOSE ) printf( "controller_interval : %d, %06d : %d\n", tv_controller_now.tv_sec, tv_controller_now.tv_usec, controller_interval );
+
+        /*
+        tv_controller_quantum_interval.tv_sec = tv_controller_quantum_end_time.tv_sec - tv_controller_quantum_start_time.tv_sec;
+        tv_controller_quantum_interval.tv_usec = tv_controller_quantum_end_time.tv_usec - tv_controller_quantum_start_time.tv_usec;
+
+        if( VERBOSE ) printf( "tv_controller_quantum_interval : %d, %06d\n", tv_controller_quantum_interval.tv_sec, tv_controller_quantum_interval.tv_usec );
+        */
+        // Run Dynamics
+        int dt = 1;
+        run_dynamics( dt );
+
+        // Resume Controller
+        resume_controller( );
+        if( VERBOSE ) printf( "Controller Resumed\n" );
     }
 
     return 0;

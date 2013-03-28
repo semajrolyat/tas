@@ -66,7 +66,7 @@ int main( int argc, char* argv[] ) {
             dusec = tv_timenow.tv_usec - tv_timelast.tv_usec;
         }
 
-        //printf( "%03d : %d : %d : %d\n", it, tv_timenow.tv_sec, tv_timenow.tv_usec, dusec );
+        printf( "%03d : %d : %d : %d\n", it, tv_timenow.tv_sec, tv_timenow.tv_usec, dusec );
     }
 
     return 0;
