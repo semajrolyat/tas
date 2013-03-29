@@ -5,6 +5,5 @@
 
 add_definitions (-DBUILD_DOUBLE)
 
-set(MOBY_INCLUDE_DIR /home/james/Moby/include/Moby)
+set(MOBY_INCLUDE_DIR /home/james/Moby/include)
 set(MOBY_LIBRARIES /home/james/Moby/build/libMoby.so)
-

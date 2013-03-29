@@ -12,8 +12,10 @@ find_package( RT REQUIRED )
 find_package( DL REQUIRED )
 find_package( Pthread REQUIRED )
 find_package( Moby REQUIRED )
-
 find_package (LibXml2 REQUIRED)
+
+message( ${MOBY_LIBRARIES} )
+message( ${MOBY_INCLUDE_DIR} )
 
 if (LIBXML2_FOUND)
   set (CMAKE_CXX_FLAGS ${CMAKE_CXX_FLAGS} ${LIBXML2_DEFINITIONS})
@@ -24,6 +26,7 @@ if (LIBXML2_FOUND)
   include_directories (${LIBXML2_INCLUDE_DIR})
 endif (LIBXML2_FOUND)
 
+include_directories( ${MOBY_INCLUDE_DIR} )
 
 set( TAS_LIBRARIES
     ${RT_LIBRARIES}

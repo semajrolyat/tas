@@ -593,6 +593,12 @@ int main( int argc, char* argv[] ) {
             case EINTR:
                 // The read operation was terminated due to the receipt of a signal, and no data was transferred.
                 //printf( "error : EINTR \n" );
+
+                // in this case, there us a read event due to an undetermined reason causing the system to unblock,
+                // but the event is not actually triggered by the controller running for the specified interval.  Instead,
+                // the read event is occurring 'immediately' after the last loop cycle, the duration is effectively zero,
+                // and the controller is not actually running for any significant amount of time.  Trapping this event
+                // prevents a false positive.
                 continue;
             default:
                 printf( "EXCEPTION: unhandled read error in main loop reading from fd_timercontroller_to_coordinator\n" );
