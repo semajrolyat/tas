@@ -221,6 +221,7 @@ std::list<init_t> plugins;
 void read_plugin( const char* filename ) {
     // attempt to read the file
     HANDLE = dlopen( filename, RTLD_LAZY );
+    //HANDLE = dlopen( filename, RTLD_NOW );
     if ( !HANDLE ) {
         std::cerr << " failed to read plugin from " << filename << std::endl;
         std::cerr << "  " << dlerror( ) << std::endl;

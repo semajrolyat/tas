@@ -39,10 +39,8 @@ Prototype of a Plugin for the Time Accurate Simulator system.
 #include <Moby/EventDrivenSimulator.h>
 
 
-// Plugins have to extern "C"
-extern "C" {
-
 using namespace Moby;
+
 
 /// Handle for dynamic library loading
 void* HANDLE = NULL;
@@ -143,6 +141,7 @@ std::map<std::string, BasePtr> READ_MAP;
 typedef void (*init_t)(void*, const std::map<std::string, BasePtr>&, Real);
 std::list<init_t> INIT;
 
+
 /*
 /// The default simulation step size
 const Real DEFAULT_STEP_SIZE = .001;
@@ -236,9 +235,6 @@ Real get_current_time()
 /// runs the simulator and updates all transforms
 void step(void* arg)
 {
-
-    return;
-
   // get the simulator pointer
   boost::shared_ptr<Simulator> s = *(boost::shared_ptr<Simulator>*) arg;
 
@@ -534,6 +530,10 @@ void process_xml_options(const std::string& xml_fname)
   chdir(cwd.get());
 }
 
+// Plugins have to extern "C"
+extern "C" {
+
+
 void init( int argc, char** argv ) {
     printf( "Hello Plugin!\n" );
 
@@ -783,5 +783,6 @@ void init( int argc, char** argv ) {
       dlclose(HANDLE);
 
 }
+
 
 } // close extern "C"
