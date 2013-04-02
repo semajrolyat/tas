@@ -211,7 +211,8 @@ static void printStat(struct statStuff *stuff) {
 //-----------------------------------------------------------------------------
 
 void* HANDLE = NULL;
-typedef void (*init_t)( void* );
+//typedef void (*init_t)( void* );
+typedef void (*init_t)( int argv, char** argc );
 std::list<init_t> plugins;
 
 //-----------------------------------------------------------------------------
@@ -237,9 +238,10 @@ void read_plugin( const char* filename ) {
     }
 }
 
-void initialize_plugins( ) {
+void initialize_plugins( int argc, char** argv ) {
     for( std::list<init_t>::iterator it = plugins.begin(); it != plugins.end(); it++ ) {
-        (*it)(NULL);
+        //(*it)(NULL);
+        (*it)( argc, argv );
     }
 }
 
@@ -486,7 +488,7 @@ void suspend_controller( ) {
 
     tv_controller_quantum_end_time.tv_sec = ru.ru_stime.tv_sec + ru.ru_utime.tv_sec;
     tv_controller_quantum_end_time.tv_usec = ru.ru_stime.tv_usec + ru.ru_utime.tv_usec;
-
+*/
     /*
     if( result != 0 ) {
         printf( "tv_controller_quantum_end_time query failed" );
@@ -516,7 +518,7 @@ void resume_controller( ) {
 
     tv_controller_quantum_start_time.tv_sec = ru.ru_stime.tv_sec + ru.ru_utime.tv_sec;
     tv_controller_quantum_start_time.tv_usec = ru.ru_stime.tv_usec + ru.ru_utime.tv_usec;
-
+*/
     /*
     if( result != 0 ) {
         printf( "tv_controller_quantum_start_time query failed" );
@@ -551,8 +553,9 @@ void run_dynamics( int dt ) {
 
 int main( int argc, char* argv[] ) {
 
-    read_plugin( "/home/james/tas/build/libplugin.so" );
-    initialize_plugins();
+    //read_plugin( "/home/james/tas/build/libplugin.so" );
+    read_plugin( "/home/james/tas/build/libmoby_driver.so" );
+    initialize_plugins( argc, argv );
 
     controller_pid = 0;
 
@@ -631,6 +634,9 @@ int main( int argc, char* argv[] ) {
         resume_controller( );
         if( VERBOSE ) printf( "Controller Resumed\n" );
     }
+
+    if( HANDLE != NULL )
+        dlclose( HANDLE );
 
     return 0;
 }

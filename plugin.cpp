@@ -72,7 +72,7 @@ void initialize_plugins( ) {
 //-----------------------------------------------------------------------------
 
 // Entry Point - defined by plugin interface exposed by TAS system
-void init( void* p ) {
+void init( int argc, char** argv ) {
     printf( "Hello Plugin!\n" );
 
     //Vector3 x_hat = Vector3( 1.0, 0.0, 0.0 );
