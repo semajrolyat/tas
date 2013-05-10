@@ -153,6 +153,8 @@ void initialize_dynamics( int argc, char** argv ) {
   invokes the run function (run_fun_t) of all the registered dynamics plugins
 */
 void run_dynamics( ) {
+    if(VERBOSE) printf( "(coordinator) Running Dynamics\n" );
+
     for( std::list< DynamicsPlugin >::iterator it = plugins.begin(); it != plugins.end(); it++ ) {
         (*it->run)( );
     }
@@ -412,12 +414,22 @@ void fork_controller( ) {
 // this method effectively pauses the timer as well so this function is
 // a catch all for managing signal suspension and process suspension
 void suspend_controller( ) {
+    // should block here until a command issued.  Reading in coordinator is only
+    // necessary to ensure timing in this architecture
+    Command cmd = cmdbuffer.read();
+    if(VERBOSE) cmd.print();
+
     kill( controller_pid, SIGSTOP );
+
+    if(VERBOSE) printf( "(coordinator) Suspended Controller\n" );
 }
 
 //-----------------------------------------------------------------------------
 // Unpause the controller process
 void resume_controller( ) {
+
+    if(VERBOSE) printf( "(coordinator) Resuming Controller\n" );
+
     kill( controller_pid, SIGCONT );
 }
 
@@ -474,18 +486,12 @@ int main( int argc, char* argv[] ) {
     cmdbuffer.open();   // TODO : sanity/safety checking
 
     // have to publish the initial state so that the controller has data to work with
-    // otherwise in this particular architecture controller is blocking on read and
+    // otherwise in this particular architecture the controller is blocking on read and
     // coordinator is blocking on read so nothing happens.
     publish_state( );
 
     /// 4. Start main loop
     while( 1 ) {
-
-        // should block here until a command issued.  Reading in coordinator is only
-        // necessary to ensure timing in this architecture
-        if(VERBOSE) printf( "(coordinator) Reading Command\n" );
-        Command cmd = cmdbuffer.read();
-        if(VERBOSE) cmd.print();
 
         // without listening to commands then the problem here is the controller
         // may not have completed a computation by the time the suspend is issued
@@ -495,13 +501,11 @@ int main( int argc, char* argv[] ) {
         // now that a command has been issued and the controller is suspended
         // can run dynamics.
         // Note: dynamics needs to accept a Real time dt to run for.
-        if(VERBOSE) printf( "(coordinator) Running Dynamics\n" );
         run_dynamics( );
 
         // now that dynamics has run for its time slice, resume the controller and
         // go back to the beginning of the coordinator loop
         resume_controller( );
-        if(VERBOSE) printf( "(coordinator) Running Controller\n" );
     }
 
     if( HANDLE != NULL )
