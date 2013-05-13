@@ -14,7 +14,7 @@ intensive computation to simulate time passing and processer load
 #include <Moby/Simulator.h>
 #include <Moby/RCArticulatedBody.h>
 
-#include "CommandBuffer.h"
+#include "ActuatorMessage.h"
 
 //-----------------------------------------------------------------------------
 
@@ -39,7 +39,7 @@ Real position_trajectory( Real t, Real tfinal, Real q0, Real qdes ) {
 
   if( t > tfinal )
     return qdes;
-  return -2 * (qdes - q0) / (tfinal*tfinal*tfinal) * t*t*t + 3 * (qdes - q0) / (tfinal*tfinal) * t*t + q0;
+  return -2 * (qdes - q0) / (tfinal*tfinal*tfinal) * (t*t*t) + 3 * (qdes - q0) / (tfinal*tfinal) * (t*t) + q0;
 }
 
 //-----------------------------------------------------------------------------
@@ -49,7 +49,7 @@ Real velocity_trajectory( Real t, Real tfinal, Real q0, Real qdes ) {
 
   if( t > tfinal )
     return 0.0;
-  return -6 * (qdes - q0) / (tfinal*tfinal*tfinal) * t*t + 6 * (qdes - q0) / (tfinal*tfinal) * t;
+  return -6 * (qdes - q0) / (tfinal*tfinal*tfinal) * (t*t) + 6 * (qdes - q0) / (tfinal*tfinal) * (t);
 }
 
 //-----------------------------------------------------------------------------
@@ -90,19 +90,19 @@ void control( DynamicBodyPtr pendulum, Real time, void* data ) {
 //-----------------------------------------------------------------------------
 
 /// The main control loop for standalone controller
-void control( Command& cmd ) {
+void control( ActuatorMessage& msg ) {
 
   const Real Kp = 1.0;
   const Real Kv = 0.1;
 
-  Real time = cmd.state.time;
-  Real measured_position = cmd.state.position;
-  Real measured_velocity = cmd.state.velocity;
+  Real time = msg.state.time;
+  Real measured_position = msg.state.position;
+  Real measured_velocity = msg.state.velocity;
 
   Real desired_position = position_trajectory( time, 0.5, 0.0, PI );
   Real desired_velocity = velocity_trajectory( time, 0.5, 0.0, PI );
 
-  cmd.state.torque = Kp * ( desired_position - measured_position ) + Kv * ( desired_velocity - measured_velocity );
+  msg.command.torque = Kp * ( desired_position - measured_position ) + Kv * ( desired_velocity - measured_velocity );
 }
 
 //-----------------------------------------------------------------------------
@@ -143,23 +143,24 @@ void init( void* separator, const std::map<std::string, BasePtr>& read_map, Real
 */
 int main( int argc, char* argv[] ) {
 
-    CommandBuffer cmdbuffer = CommandBuffer( getpid( ) );
-    cmdbuffer.open();   // TODO : sanity/safety checking
+    ActuatorMessageBuffer amsgbuffer = ActuatorMessageBuffer( 8811, getpid( ) );
+    amsgbuffer.open();   // TODO : sanity/safety checking
 
     //printf( "(controller::initialized)\n" );
 
     while( 1 ) {
         //printf( "(controller) Reading Command\n" );
-        Command cmd = cmdbuffer.read( );
+
+        ActuatorMessage msg = amsgbuffer.read( );
 
         //printf( "(controller) Generating Command\n" );
-        control( cmd );
+        control( msg );
         //printf( "(controller) Writing Command\n" );
 
-        cmdbuffer.write( cmd );
+        amsgbuffer.write( msg );
     }
 
-    cmdbuffer.close( );  // TODO : figure out a way to force a clean up
+    amsgbuffer.close( );  // TODO : figure out a way to force a clean up
 
     return 0;
 }

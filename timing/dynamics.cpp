@@ -32,7 +32,7 @@ Prototype of a Plugin for the Time Accurate Simulator system.
 #include <Moby/EventDrivenSimulator.h>
 #include <Moby/RCArticulatedBody.h>
 
-#include "CommandBuffer.h"
+#include "ActuatorMessage.h"
 
 using namespace Moby;
 using boost::shared_ptr;
@@ -147,7 +147,7 @@ std::list<init_t> INIT;
 
 /// The shared memory buffer where control commands arrive from the controller
 /// and where state for the controller is published
-CommandBuffer cmdbuffer;
+ActuatorMessageBuffer amsgbuffer;
 
 //-----------------------------------------------------------------------------
 
@@ -732,8 +732,8 @@ void init( int argc, char** argv ) {
         printf( "dynamics.cpp:init()- unable to cast pendulum to type RCArticulatedBody\n" );
 
     // open the command buffer
-    cmdbuffer = CommandBuffer( getpid( ) );
-    cmdbuffer.open();   // TODO : sanity/safety checking
+    amsgbuffer = ActuatorMessageBuffer( 8811, getpid( ) );
+    amsgbuffer.open();   // TODO : sanity/safety checking
 
     //printf( "(dynamics::initialized)\n" );
 }
@@ -749,12 +749,12 @@ void publish_state( void ) {
     JointPtr pivot = pendulum->find_joint( "pivot" );
 
     // write the actuator state out to the command buffer
-    Command cmd = Command( );
-    cmd.state.position = pivot->q[0];
-    cmd.state.velocity = pivot->qd[0];
-    cmd.state.time = sim->current_time;
+    ActuatorMessage msg = ActuatorMessage( );
+    msg.state.position = pivot->q[0];
+    msg.state.velocity = pivot->qd[0];
+    msg.state.time = sim->current_time;
     //cmd.print();
-    cmdbuffer.write( cmd );
+    amsgbuffer.write( msg );
 
     // this was a part of the Dynamic ode_both(.) procedure but if the accumulators are
     // cleared there they can never change from zero.  So, had to relocate the reset procedure
@@ -771,14 +771,14 @@ void get_command( void ) {
     //printf( "(dynamics::get_command) " );
 
     // get the command from the controller
-    Command cmd = cmdbuffer.read( );
+    ActuatorMessage msg = amsgbuffer.read( );
 
-    //cmd.print();
+    //msg.print();
 
     // apply any force determined by the controller to the actuator
     JointPtr pivot = pendulum->find_joint( "pivot" );
     VectorN tau( 1 );
-    tau[0] = cmd.state.torque;
+    tau[0] = msg.command.torque;
     pivot->add_force( tau );
 }
 

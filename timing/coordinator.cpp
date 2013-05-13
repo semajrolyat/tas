@@ -30,7 +30,7 @@ slicing of the controller process.
 #include <Moby/Simulator.h>
 #include <Moby/RCArticulatedBody.h>
 
-#include "CommandBuffer.h"
+#include "ActuatorMessage.h"
 #include "DynamicsPlugin.h"
 
 //-----------------------------------------------------------------------------
@@ -62,7 +62,7 @@ struct timeval tv_controller_quantum_interval;
 
 //-----------------------------------------------------------------------------
 
-CommandBuffer cmdbuffer;
+ActuatorMessageBuffer amsgbuffer;
 
 //-----------------------------------------------------------------------------
 // PLUGIN MANAGEMENT
@@ -323,7 +323,7 @@ int create_controller_timer( ) {
 //-----------------------------------------------------------------------------
 
 // controller defaults
-#define DEFAULT_CONTROLLER_PROGRAM      "commandbuffer_controller"
+#define DEFAULT_CONTROLLER_PROGRAM      "timing_controller"
 #define DEFAULT_CONTROLLER_PROCESSOR    0
 
 //-----------------------------------------------------------------------------
@@ -412,7 +412,7 @@ void resume_controller( ) {
 int main( int argc, char* argv[] ) {
 
     /// 1. load dynamics references (plugins)
-    read_dynamics_plugin( "/home/james/tas/build/commandbuffer/libcommandbuffer_dynamics.so" );
+    read_dynamics_plugin( "/home/james/tas/build/timing/libtiming_dynamics.so" );
 
     /// 2. initialize dynamics references
     initialize_dynamics( argc, argv );
@@ -452,8 +452,8 @@ int main( int argc, char* argv[] ) {
     // Create a commandbuffer to listen to the commands.  With no timing, in this architecture
     // need to snoop on the issuing of commands so the coordinator knows when to switch between
     // processes.
-    cmdbuffer = CommandBuffer( sim_pid );
-    cmdbuffer.open();   // TODO : sanity/safety checking
+    amsgbuffer = ActuatorMessageBuffer( 8811, sim_pid );
+    amsgbuffer.open();   // TODO : sanity/safety checking
 
     // have to publish the initial state so that the controller has data to work with
     // otherwise in this particular architecture the controller is blocking on read and
@@ -464,8 +464,8 @@ int main( int argc, char* argv[] ) {
     while( 1 ) {
         // should block here until a command issued.  Reading in coordinator is only
         // necessary to ensure timing in this architecture
-        Command cmd = cmdbuffer.read();
-        if(VERBOSE) cmd.print();
+        ActuatorMessage msg = amsgbuffer.read();
+        if(VERBOSE) msg.print();
 
         // without listening to commands then the problem here is the controller
         // may not have completed a computation by the time the suspend is issued
