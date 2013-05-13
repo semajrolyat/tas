@@ -121,6 +121,15 @@ void read_dynamics_plugin( const char* filename ) {
         failed = true;
     }
 
+    // locate the get command function
+    plugin.getcommand = (get_command_fun_t) dlsym(HANDLE, "get_command");
+    const char* dlsym_error4 = dlerror( );
+    if ( dlsym_error4 ) {
+        std::cerr << " warning: cannot load symbol 'get_command' from " << filename << std::endl;
+        std::cerr << "        error follows: " << std::endl << dlsym_error3 << std::endl;
+        failed = true;
+    }
+
     // if both functions were located then push the pair into the list of plugins
     if( !failed ) plugins.push_back( plugin );
 }
@@ -142,11 +151,11 @@ void initialize_dynamics( int argc, char** argv ) {
 /**
   invokes the run function (run_fun_t) of all the registered dynamics plugins
 */
-void run_dynamics( ) {
+void run_dynamics( Real dt ) {
     if(VERBOSE) printf( "(coordinator) Running Dynamics\n" );
 
     for( std::list< DynamicsPlugin >::iterator it = plugins.begin(); it != plugins.end(); it++ ) {
-        (*it->run)( );
+        (*it->run)( dt );
     }
 }
 
@@ -163,6 +172,15 @@ void publish_state( ) {
 
     for( std::list< DynamicsPlugin >::iterator it = plugins.begin(); it != plugins.end(); it++ ) {
         (*it->pubstate)( );
+    }
+}
+
+
+void get_command( ) {
+    if(VERBOSE) printf( "(coordinator) Getting Command\n" );
+
+    for( std::list< DynamicsPlugin >::iterator it = plugins.begin(); it != plugins.end(); it++ ) {
+        (*it->getcommand)( );
     }
 }
 
@@ -403,11 +421,27 @@ void resume_controller( ) {
     kill( controller_pid, SIGCONT );
 }
 
+
+//-----------------------------------------------------------------------------
+//-----------------------------------------------------------------------------
+
+void request_command( void ) {
+
+    // ?send the controller a command request?
+
+    // in response, the controller should send a state request
+
+    // when the state request comes in, the dynamics will send a state reply
+
+    // once the controller receives the state reply it can compute control
+
+    // controller then services the command request with a command reply
+}
+
+
 //-----------------------------------------------------------------------------
 // Simulator Entry Point
 //-----------------------------------------------------------------------------
-
-//extern boost::shared_ptr<Moby::Simulator> sim;
 
 int main( int argc, char* argv[] ) {
 
@@ -458,7 +492,7 @@ int main( int argc, char* argv[] ) {
     // have to publish the initial state so that the controller has data to work with
     // otherwise in this particular architecture the controller is blocking on read and
     // coordinator is blocking on read so nothing happens.
-    publish_state( );
+    //publish_state( );
 
     /// 4. Start main loop
     while( 1 ) {
@@ -467,19 +501,42 @@ int main( int argc, char* argv[] ) {
         ActuatorMessage msg = amsgbuffer.read();
         if(VERBOSE) msg.print();
 
+        switch( msg.header.type ) {
+        case MSG_TYPE_COMMAND:
+            suspend_controller( );
+            get_command();
+            run_dynamics( 0.001 );
+            resume_controller( );
+            break;
+        case MSG_TYPE_STATE_REQUEST:
+            suspend_controller( );
+            publish_state( );
+            resume_controller( );
+            //usleep(1);
+            break;
+        case MSG_TYPE_STATE_REPLY:
+            // should be received directly by controller
+            resume_controller( );
+        default:
+            //run_dynamics( 0.001 );
+            //run_dynamics( 0.1 );
+            // discard
+            break;
+        }
+
         // without listening to commands then the problem here is the controller
         // may not have completed a computation by the time the suspend is issued
         // and in fact may never have time to issue a command due to rapid blocking
-        suspend_controller( );
+        //suspend_controller( );
 
         // now that a command has been issued and the controller is suspended
         // can run dynamics.
         // Note: dynamics needs to accept a Real time dt to run for.
-        run_dynamics( );
+        //run_dynamics( 0.001 );
 
         // now that dynamics has run for its time slice, resume the controller and
         // go back to the beginning of the coordinator loop
-        resume_controller( );
+        //resume_controller( );
     }
 
     if( HANDLE != NULL )

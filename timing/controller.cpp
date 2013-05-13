@@ -90,7 +90,9 @@ void control( DynamicBodyPtr pendulum, Real time, void* data ) {
 //-----------------------------------------------------------------------------
 
 /// The main control loop for standalone controller
-void control( ActuatorMessage& msg ) {
+ActuatorMessage control( const ActuatorMessage& msg ) {
+
+  ActuatorMessage reply = ActuatorMessage( msg );
 
   const Real Kp = 1.0;
   const Real Kv = 0.1;
@@ -102,7 +104,12 @@ void control( ActuatorMessage& msg ) {
   Real desired_position = position_trajectory( time, 0.5, 0.0, PI );
   Real desired_velocity = velocity_trajectory( time, 0.5, 0.0, PI );
 
-  msg.command.torque = Kp * ( desired_position - measured_position ) + Kv * ( desired_velocity - measured_velocity );
+  reply.command.torque = Kp * ( desired_position - measured_position ) + Kv * ( desired_velocity - measured_velocity );
+
+  //printf( "(controller::control) " );
+  //reply.print();
+
+  return reply;
 }
 
 //-----------------------------------------------------------------------------
@@ -146,18 +153,35 @@ int main( int argc, char* argv[] ) {
     ActuatorMessageBuffer amsgbuffer = ActuatorMessageBuffer( 8811, getpid( ) );
     amsgbuffer.open();   // TODO : sanity/safety checking
 
-    //printf( "(controller::initialized)\n" );
+    ActuatorMessage msg_request, msg_state, msg_command;
 
     while( 1 ) {
-        //printf( "(controller) Reading Command\n" );
 
-        ActuatorMessage msg = amsgbuffer.read( );
+        //printf( "(controller) requesting state\n" );
+        // request the state of the actuator
+        msg_request.header.type = MSG_TYPE_STATE_REQUEST;
+        amsgbuffer.write( msg_request );
 
-        //printf( "(controller) Generating Command\n" );
-        control( msg );
-        //printf( "(controller) Writing Command\n" );
+        do {
+            // read the state out of the buffer
+            msg_state = amsgbuffer.read( );
+            // Note: due to asynchronicity and multiple controllers, here should check the
+            // type and id of the message to confirm it is reply
+        } while( msg_state.header.type != MSG_TYPE_STATE_REPLY );
 
-        amsgbuffer.write( msg );
+        //printf( "(controller) received state reply\n" );
+        //msg_state.print();
+
+        // compute the command message
+        msg_command = control( msg_state );
+        msg_command.header.type = MSG_TYPE_COMMAND;
+
+        //printf( "(controller) writing command\n" );
+        // send the command message to the actuator
+        amsgbuffer.write( msg_command );
+
+        // consume some time.
+        usleep( 1000 );
     }
 
     amsgbuffer.close( );  // TODO : figure out a way to force a clean up

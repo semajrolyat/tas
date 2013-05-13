@@ -750,15 +750,14 @@ void publish_state( void ) {
 
     // write the actuator state out to the command buffer
     ActuatorMessage msg = ActuatorMessage( );
+    msg.header.type = MSG_TYPE_STATE_REPLY;
     msg.state.position = pivot->q[0];
     msg.state.velocity = pivot->qd[0];
     msg.state.time = sim->current_time;
-    //cmd.print();
+    //printf( "(dynamics::publish_state)" );
+    //msg.print();
     amsgbuffer.write( msg );
 
-    // this was a part of the Dynamic ode_both(.) procedure but if the accumulators are
-    // cleared there they can never change from zero.  So, had to relocate the reset procedure
-    // here.
     pendulum->reset_accumulators();
 }
 
@@ -768,11 +767,17 @@ void publish_state( void ) {
   interface
 */
 void get_command( void ) {
-    //printf( "(dynamics::get_command) " );
+    // this was a part of the Dynamic ode_both(.) procedure but if the accumulators are
+    // cleared there they can never change from zero as they were also originally added there.
+    // So, had to relocate the reset procedure here.
+    //pendulum->reset_accumulators();
+
+    //printf( "(dynamics::get_command)\n" );
 
     // get the command from the controller
     ActuatorMessage msg = amsgbuffer.read( );
 
+    //printf( "(dynamics::get_command) " );
     //msg.print();
 
     // apply any force determined by the controller to the actuator
@@ -785,10 +790,10 @@ void get_command( void ) {
 /**
   Run the dynamics for a cycle.
 */
-void run( void ) {
+void run( Real dt ) {
 
     // fetch the command in the buffer
-    get_command();
+    //get_command();
 
     #ifdef USE_OSG
     if (ONSCREEN_RENDER)
@@ -799,15 +804,17 @@ void run( void ) {
     }
     #endif
 
+    //sim->step( dt );
     // step the sim forward
     step((void*) &sim);
 
     // publish any state change
-    publish_state();
+    //publish_state();
 
     //#ifdef USE_OSG
     //usleep(DYNAMICS_FREQ);
     //#endif
+
 }
 
 //-----------------------------------------------------------------------------

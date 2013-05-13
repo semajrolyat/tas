@@ -13,11 +13,19 @@ typedef double Real;
 //-----------------------------------------------------------------------------
 // Structures to support ActuatorMessage
 //-----------------------------------------------------------------------------
+enum ActuatorMessageTypes {
+    MSG_TYPE_UNDEFINED,
+    MSG_TYPE_COMMAND,
+    MSG_TYPE_STATE_REQUEST,
+    MSG_TYPE_STATE_REPLY
+};
+
 /**
   Header data the composes an ActuatorMessage
 */
 struct ActuatorMessageHeader {
     int publisher;
+    ActuatorMessageTypes type;
 };
 
 //-----------------------------------------------------------------------------
@@ -60,6 +68,7 @@ public:
     /// Default Constructor
     ActuatorMessage( void ) {
         header.publisher = 0;
+        header.type = MSG_TYPE_UNDEFINED;
 
         state.position = 0.0;
         state.velocity = 0.0;
@@ -72,6 +81,7 @@ public:
     /// Copy Constructor
     ActuatorMessage( const ActuatorMessage& msg ) {
         header.publisher = msg.header.publisher;
+        header.type = msg.header.type;
 
         state.position = msg.state.position;
         state.velocity = msg.state.velocity;
@@ -79,11 +89,12 @@ public:
 
         command.torque = msg.command.torque;
     }
-
+/*
     //-------------------------------------------------------------------------
     /// Publisher Override (to Republish) Copy Constructor
     ActuatorMessage( const int& publisher, const ActuatorMessage& msg ) {
         header.publisher = publisher;
+        header.type = msg.header.type;
 
         state.position = msg.state.position;
         state.velocity = msg.state.velocity;
@@ -91,7 +102,7 @@ public:
 
         command.torque = msg.command.torque;
     }
-
+*/
     //-------------------------------------------------------------------------
     // Destructor
     //-------------------------------------------------------------------------
@@ -215,11 +226,13 @@ public:
     //-------------------------------------------------------------------------
     // Write to the shared memory 'device'
     void write( const ActuatorMessage& msg ) {
-        // copy the state first
+        // copy the state and commands first
         memcpy( &shared_buffer->state, &msg.state, sizeof(struct ActuatorMessageState) );
         memcpy( &shared_buffer->command, &msg.command, sizeof(struct ActuatorMessageCommand) );
-        // write the publisher LAST because reading is listening for a change to publisher
-        // and don't want to trigger the reading of incomplete data
+        // write the header (in particular publisher) LAST because reading is listening for a
+        // change to publisher and don't want to trigger the reading of incomplete data
+        // So copy each property in header individually
+        shared_buffer->header.type = msg.header.type;
         shared_buffer->header.publisher = owner;
 
         // Should ultimately be protected with a mutex
@@ -229,7 +242,7 @@ public:
     // Read from the shared memory 'device'
     ActuatorMessage read( void ) {
         // loop until another publisher writes into the buffer
-        // publisher is initialized to NULL or when a command is written a publisher gets tagged
+        // publisher is initialized to 0 or when a command is written a publisher gets tagged
         while( shared_buffer->header.publisher == owner || shared_buffer->header.publisher == NULL ) {
             // block until someone writes
             usleep(1);
