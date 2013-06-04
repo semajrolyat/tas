@@ -388,17 +388,35 @@ void coordinator_init( void ) {
     CPU_ZERO( &cpuset_mask );
     // set the cpu set s.t. controller only runs on 1 processor specified by DEFAULT_PROCESSOR
     CPU_SET( DEFAULT_PROCESSOR, &cpuset_mask );
-    if ( sched_setaffinity( controller_pid, sizeof(cpuset_mask), &cpuset_mask ) == -1 ) {
-        // there was an error setting the affinity for the controller
+    if ( sched_setaffinity( 0, sizeof(cpuset_mask), &cpuset_mask ) == -1 ) {
+        // there was an error setting the affinity for the coordinator
         // NOTE: can check errno if this occurs
-        printf( "ERROR: Failed to set affinity for controller process.\n" );
+        printf( "ERROR: Failed to set affinity for coordinator process.\n" );
         // could throw or exit or perror
     }
     */
 
+    // set the scheduling policy and the priority where priority should be the
+    // highest possible priority, i.e. min, for the round robin scheduler
     struct sched_param param;
     param.sched_priority = sched_get_priority_min( SCHED_RR );
     sched_setscheduler( sim_pid, SCHED_RR, &param );
+
+
+    // validate hte scheduling policy
+    int policy = sched_getscheduler( 0 );
+    printf( "coordinator schedule policy: %s\n",
+            (policy == SCHED_OTHER) ? "SCHED_OTHER" :
+            (policy == SCHED_RR) ? "SCHED_RR" :
+            (policy == SCHED_FIFO) ? "SCHED_FIFO" :
+            "UNDEFINED" );
+
+
+    // validate the priority
+    // generally the expected value is 1 with SCHED_RR, but it may not be the a case depending on platform
+    sched_getparam( 0, &param );
+    sim_priority = param.sched_priority;
+    printf( "sim_priority: %d\n", sim_priority );
 
     /*
     // testing sanity check ... TO BE COMMENTED
@@ -406,7 +424,9 @@ void coordinator_init( void ) {
     printf( " sched_getaffinity = %d, cpuset_mask = %08lx\n", sizeof(cpuset_mask), cpuset_mask );
     */
 
-    sim_priority = getpriority( PRIO_PROCESS, sim_pid );
+
+
+
 
     printf( "coordinator initialized\n" );
 }
