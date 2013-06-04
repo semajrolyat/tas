@@ -483,7 +483,7 @@ void controller_rttimer_init( void ) {
 
 //-----------------------------------------------------------------------------
 
-static void* wakeup_coordinator( void* arg ) {
+static void* wakeup_coordinator_on_a_blocked_controller( void* arg ) {
     while( 1 ) {
         // write to pipe
         // sleep?  Think that must block somehow!  Write should transfer control back to coordinator though.
@@ -492,10 +492,26 @@ static void* wakeup_coordinator( void* arg ) {
 
 //-----------------------------------------------------------------------------
 //struct thread_info *tinfo;
-pthread_t* pt;
+pthread_t pt;
 
 void create_wakeup_thread( void ) {
-    pthread_create( pt, NULL, wakeup_coordinator, NULL );
+
+    int result;
+    pthread_attr_t attributes;
+
+    struct sched_param param;
+    param.sched_priority = sim_priority + 2;
+    result = pthread_attr_setschedparam( &attributes, &param);
+
+    if( result != 0 ) {
+        printf( "Failed to set schedule priority for wakeup thread." );
+    }
+
+    pthread_attr_init( &attributes );
+
+    pthread_create( &pt, &attributes, wakeup_coordinator_on_a_blocked_controller, NULL );
+
+    pthread_attr_destroy( &attributes );
 }
 
 //-----------------------------------------------------------------------------
@@ -530,11 +546,12 @@ int main( int argc, char* argv[] ) {
     amsgbuffer = ActuatorMessageBuffer( 8811, sim_pid, 0 );
     amsgbuffer.open();   // TODO : sanity/safety checking
 
-    /*
     dynamics_init( argc, argv );
     controller_init( );
     controller_rttimer_init( );
+    create_wakeup_thread( );
 
+    /*
     while( 1 ) {
         // should block here until a command issued.  Reading in coordinator is only
         // necessary to ensure timing in this architecture
