@@ -499,15 +499,26 @@ void create_wakeup_thread( void ) {
     int result;
     pthread_attr_t attributes;
 
-    struct sched_param param;
-    param.sched_priority = sim_priority + 2;
-    result = pthread_attr_setschedparam( &attributes, &param);
+    pthread_attr_init( &attributes );
 
+    result = pthread_attr_setinheritsched( &attributes, PTHREAD_EXPLICIT_SCHED );
     if( result != 0 ) {
-        printf( "Failed to set schedule priority for wakeup thread." );
+        printf( "Failed to set explicit schedule attribute for wakeup thread.\n" );
     }
 
-    pthread_attr_init( &attributes );
+    struct sched_param param;
+
+    result = pthread_attr_setschedpolicy( &attributes, SCHED_RR );
+    if( result != 0 ) {
+        printf( "Failed to set schedule policy attribute for wakeup thread.\n" );
+    }
+
+    param.sched_priority = sim_priority + 2;
+
+    result = pthread_attr_setschedparam( &attributes, &param);
+    if( result != 0 ) {
+        printf( "Failed to set schedule priority attribute for wakeup thread.\n" );
+    }
 
     pthread_create( &pt, &attributes, wakeup_coordinator_on_a_blocked_controller, NULL );
 
