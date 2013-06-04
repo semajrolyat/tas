@@ -376,59 +376,53 @@ void resume_controller( void ) {
 }
 
 
-//
-
+//-----------------------------------------------------------------------------
+/// Initialize the scheduling policy, priority and affinity for the coordinator
+/// process
 void coordinator_init( void ) {
     sim_pid = getpid( );
 
-    /*
     // restrict the cpu set s.t. controller only runs on a single processor
     cpu_set_t cpuset_mask;
     // zero out the cpu set
     CPU_ZERO( &cpuset_mask );
     // set the cpu set s.t. controller only runs on 1 processor specified by DEFAULT_PROCESSOR
     CPU_SET( DEFAULT_PROCESSOR, &cpuset_mask );
+
     if ( sched_setaffinity( 0, sizeof(cpuset_mask), &cpuset_mask ) == -1 ) {
         // there was an error setting the affinity for the coordinator
         // NOTE: can check errno if this occurs
-        printf( "ERROR: Failed to set affinity for coordinator process.\n" );
-        // could throw or exit or perror
+        perror( "sched_setaffinity" );
     }
+
+    /*
+    // testing sanity check ... TO BE COMMENTED
+    int ret = sched_getaffinity( 0, sizeof(cpuset_mask), &cpuset_mask );
+    printf( " sched_getaffinity = %d, cpuset_mask = %08lx\n", sizeof(cpuset_mask), cpuset_mask );
     */
 
     // set the scheduling policy and the priority where priority should be the
     // highest possible priority, i.e. min, for the round robin scheduler
     struct sched_param param;
     param.sched_priority = sched_get_priority_min( SCHED_RR );
-    sched_setscheduler( sim_pid, SCHED_RR, &param );
+    sched_setscheduler( 0, SCHED_RR, &param );
 
-
-    // validate hte scheduling policy
+    // validate the scheduling policy
     int policy = sched_getscheduler( 0 );
-    printf( "coordinator schedule policy: %s\n",
-            (policy == SCHED_OTHER) ? "SCHED_OTHER" :
-            (policy == SCHED_RR) ? "SCHED_RR" :
-            (policy == SCHED_FIFO) ? "SCHED_FIFO" :
-            "UNDEFINED" );
-
+    if( policy != SCHED_RR ) {
+        printf( "There was an error setting the scheduling policy to SCHED_RR for the coordinator.  The actual policy is%s\n",
+                (policy == SCHED_OTHER) ? "SCHED_OTHER" :
+                (policy == SCHED_FIFO) ? "SCHED_FIFO" :
+                "UNDEFINED" );
+    }
 
     // validate the priority
     // generally the expected value is 1 with SCHED_RR, but it may not be the a case depending on platform
     sched_getparam( 0, &param );
     sim_priority = param.sched_priority;
-    printf( "sim_priority: %d\n", sim_priority );
+    //printf( "sim_priority: %d\n", sim_priority );
 
-    /*
-    // testing sanity check ... TO BE COMMENTED
-    int ret = sched_getaffinity( controller_pid, sizeof(cpuset_mask), &cpuset_mask );
-    printf( " sched_getaffinity = %d, cpuset_mask = %08lx\n", sizeof(cpuset_mask), cpuset_mask );
-    */
-
-
-
-
-
-    printf( "coordinator initialized\n" );
+    if( VERBOSE ) printf( "coordinator initialized\n" );
 }
 //-----------------------------------------------------------------------------
 
@@ -522,19 +516,13 @@ void clear_buffer( void ) {
 
 int main( int argc, char* argv[] ) {
 
+    // Due to realtime scheduling, et al, this program must have root access to run.
     if( geteuid() != 0 ) {
-        printf( "This program requires root access.\nExiting.\n" );
+        printf( "This program requires root access.  Re-run with sudo.\nExiting.\n" );
         return 0;
     }
 
     coordinator_init();
-
-    /*
-    sim_pid = getpid( );
-    // hopefully this is highest priority value, i.e. 0.
-    // in testing, this has been true, but it's possible the OS will assign a lower priority
-    // which may not have significant impact on the coordinator but may affect controller
-    sim_priority = getpriority( PRIO_PROCESS, sim_pid );
 
     // Create a commandbuffer to listen to the commands.  With no timing, in this architecture
     // need to snoop on the issuing of commands so the coordinator knows when to switch between
@@ -542,6 +530,7 @@ int main( int argc, char* argv[] ) {
     amsgbuffer = ActuatorMessageBuffer( 8811, sim_pid, 0 );
     amsgbuffer.open();   // TODO : sanity/safety checking
 
+    /*
     dynamics_init( argc, argv );
     controller_init( );
     controller_rttimer_init( );
