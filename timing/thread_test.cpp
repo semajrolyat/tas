@@ -330,12 +330,15 @@ void fork_controller( void ) {
             printf( "ERROR: Failed to get scheduler policy for controller process.\n" );
             // could throw or exit or perror
         } else {
-            struct sched_param params;
-            params.sched_priority = sim_priority - 1;
+            struct sched_param param;
+            param.sched_priority = sim_priority - 1;
             // set the policy
             // NOTE: Round Robin is opted for in this case.  FIFO an option.
             // man pages claim that either of these policies are real-time
-            sched_setscheduler( controller_pid, SCHED_RR, &params );
+            sched_setscheduler( controller_pid, SCHED_RR, &param );
+
+            sched_getparam( controller_pid, &param );
+            printf( "controller priority: %d\n", param.sched_priority );
         }
 
         /*
@@ -420,7 +423,7 @@ void coordinator_init( void ) {
     // generally the expected value is 1 with SCHED_RR, but it may not be the a case depending on platform
     sched_getparam( 0, &param );
     sim_priority = param.sched_priority;
-    //printf( "sim_priority: %d\n", sim_priority );
+    printf( "coordinator priority: %d\n", sim_priority );
 
     if( VERBOSE ) printf( "coordinator initialized\n" );
 }
@@ -525,6 +528,10 @@ void create_wakeup_thread( void ) {
     pthread_create( &pt, &attributes, wakeup_coordinator_on_a_blocked_controller, NULL );
 
     printf( "wakeup created\n" );
+
+    int policy;
+    pthread_getschedparam( pt, &policy, &param );
+    printf( "wakeup priority: %d\n", param.sched_priority );
 
     pthread_attr_destroy( &attributes );
 }
