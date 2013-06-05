@@ -331,7 +331,7 @@ void fork_controller( void ) {
             // could throw or exit or perror
         } else {
             struct sched_param params;
-            params.sched_priority = sim_priority + 1;
+            params.sched_priority = sim_priority - 1;
             // set the policy
             // NOTE: Round Robin is opted for in this case.  FIFO an option.
             // man pages claim that either of these policies are real-time
@@ -404,7 +404,7 @@ void coordinator_init( void ) {
     // set the scheduling policy and the priority where priority should be the
     // highest possible priority, i.e. min, for the round robin scheduler
     struct sched_param param;
-    param.sched_priority = sched_get_priority_min( SCHED_RR );
+    param.sched_priority = sched_get_priority_max( SCHED_RR );
     sched_setscheduler( 0, SCHED_RR, &param );
 
     // validate the scheduling policy
@@ -513,14 +513,18 @@ void create_wakeup_thread( void ) {
         printf( "Failed to set schedule policy attribute for wakeup thread.\n" );
     }
 
-    param.sched_priority = sim_priority + 2;
+    param.sched_priority = sim_priority - 2;
 
     result = pthread_attr_setschedparam( &attributes, &param);
     if( result != 0 ) {
         printf( "Failed to set schedule priority attribute for wakeup thread.\n" );
     }
 
+    printf( "creating wakeup\n" );
+
     pthread_create( &pt, &attributes, wakeup_coordinator_on_a_blocked_controller, NULL );
+
+    printf( "wakeup created\n" );
 
     pthread_attr_destroy( &attributes );
 }
