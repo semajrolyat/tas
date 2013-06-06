@@ -42,11 +42,11 @@ using boost::dynamic_pointer_cast;
 
 //-----------------------------------------------------------------------------
 
-// Sim/Coordinator process information
+// Parent process information
 static pid_t parent_pid;
 static int parent_priority;
 
-// Controller process information
+// Child process information
 static int child_pid;
 
 int fd_timer_to_parent[2];
@@ -82,6 +82,7 @@ struct sigaction child_rttimer_sigaction;
 
 // The actual signal handler for the controller timer
 void child_rttimer_sighandler( int signum, siginfo_t *si, void *data ) {
+    printf( "(timer) event\n" );
     char buf;
     write( fd_timer_to_parent[1], &buf, 1 );
 }
@@ -90,7 +91,7 @@ void child_rttimer_sighandler( int signum, siginfo_t *si, void *data ) {
 //-----------------------------------------------------------------------------
 // Forks off a the controller process.  Executes the external controller
 // program
-void spawn_childprocess( void ) {
+void fork_child( void ) {
 
     child_pid = fork( );
     if ( child_pid < 0 ) {
@@ -139,13 +140,8 @@ void spawn_childprocess( void ) {
 
         if( VERBOSE ) printf( "child process initialized\n" );
 
-        int i = 0;
         while( 1 ) {
             printf( "(child) working\n" );
-            if( i++ == 100 ) {
-                usleep(100);
-                i = 0;
-            }
         }
 
     }
@@ -163,10 +159,15 @@ void spawn_childprocess( void ) {
 #define DEFAULT_QUANTUM_RTTIMER_NSEC         1E8         // 0.1 second
 #define DEFAULT_QUANTUM_RTTIMER_SEC          0           // 0 second
 
+//#define DEFAULT_QUANTUM_RTTIMER_NSEC         0
+//#define DEFAULT_QUANTUM_RTTIMER_SEC          10
+
 // Initial Delay for Controller Timer
 // NOTE: There has to be some delay otherwise timer is disarmed
 #define DEFAULT_INITDELAY_RTTIMER_NSEC       1           // 1 nanoseconds
 #define DEFAULT_INITDELAY_RTTIMER_SEC        0           // 0 second
+
+//-----------------------------------------------------------------------------
 
 // Error codes for timer control
 #define ERR_TIMER_NOERROR                       0
@@ -269,73 +270,16 @@ void resume_child( void ) {
 
 void child_rttimer_init( void ) {
 
-    // unblock the controller timer and unblock the controller process
-    child_unblock_signal_rttimer( );
-    resume_child( );
-
     if( child_create_rttimer( ) != ERR_TIMER_NOERROR ) {
-        printf( "Failed to create controller timer\n" );
+        printf( "Failed to create timer\n" );
         // should probably throw or exit but possible to create a zombie controller as artifact
     }
 
-    if( VERBOSE ) printf("(coordinator) controller rttimer initialized\n");
-}
+    if( VERBOSE ) printf("(parent) rttimer initialized\n");
 
-//-----------------------------------------------------------------------------
-
-static void* wakeup_coordinator_on_a_blocked_controller( void* arg ) {
-
-    char buf;
-    while( 1 ) {
-        // write to pipe
-        // sleep?  Think that must block somehow!  Write should transfer control back to coordinator though.
-
-        buf = 1;        // some data to write for testing.  Future this will be sensor state
-        write( fd_timer_to_parent[1], &buf, 1 );
-    }
-}
-
-//-----------------------------------------------------------------------------
-//struct thread_info *tinfo;
-pthread_t pt;
-
-void create_wakeup_thread( void ) {
-
-    int result;
-    pthread_attr_t attributes;
-
-    pthread_attr_init( &attributes );
-
-    result = pthread_attr_setinheritsched( &attributes, PTHREAD_EXPLICIT_SCHED );
-    if( result != 0 ) {
-        printf( "Failed to set explicit schedule attribute for wakeup thread.\n" );
-    }
-
-    struct sched_param param;
-
-    result = pthread_attr_setschedpolicy( &attributes, SCHED_RR );
-    if( result != 0 ) {
-        printf( "Failed to set schedule policy attribute for wakeup thread.\n" );
-    }
-
-    param.sched_priority = parent_priority - 2;
-
-    result = pthread_attr_setschedparam( &attributes, &param);
-    if( result != 0 ) {
-        printf( "Failed to set schedule priority attribute for wakeup thread.\n" );
-    }
-
-    printf( "creating wakeup\n" );
-
-    pthread_create( &pt, &attributes, wakeup_coordinator_on_a_blocked_controller, NULL );
-
-    printf( "wakeup created\n" );
-
-    int policy;
-    pthread_getschedparam( pt, &policy, &param );
-    printf( "wakeup priority: %d\n", param.sched_priority );
-
-    pthread_attr_destroy( &attributes );
+    // unblock the timer and unblock the child process
+    child_unblock_signal_rttimer( );
+    resume_child( );
 }
 
 //-----------------------------------------------------------------------------
@@ -393,24 +337,17 @@ int main( int argc, char* argv[] ) {
 
     if( VERBOSE ) printf( "parent process initialized\n" );
 
-    spawn_childprocess( );
+    fork_child( );
     initialize_pipes( );
 
-    if( child_create_rttimer( ) != ERR_TIMER_NOERROR ) {
-        printf( "Failed to create controller timer\n" );
-        // should probably throw or exit but possible to create a zombie controller as artifact
-    }
-
-    // unblock the timer therefore unblock the child process
-    child_unblock_signal_rttimer( );
-
-    close( fd_timer_to_parent[1] );
+    child_rttimer_init( );
 
     char input_buffer;
     int i = 0;
     while( 1 ) {
+        //read( fd_timer_to_parent[0], &input_buffer, 1 );
+
         if( read( fd_timer_to_parent[0], &input_buffer, 1 ) == -1 ) {
-            child_block_signal_rttimer( );
             switch(errno) {
             case EINTR:
                 // The read operation was terminated due to the receipt of a signal, and no data was transferred.
@@ -427,11 +364,10 @@ int main( int argc, char* argv[] ) {
                 break;
             }
         }
+        suspend_child( );
 
-        for( unsigned int i = 0; i < 10; i++ ) {
-            printf( "(parent) working\n" );
-        }
+        printf( "(parent) working\n" );
 
-        child_unblock_signal_rttimer( );
+        resume_child( );
     }
 }
