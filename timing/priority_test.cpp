@@ -34,25 +34,19 @@ coordinator.cpp
 #define VERBOSE 1
 
 //-----------------------------------------------------------------------------
+// INTERPROCESS COMMUNICATION (IPC)
+//-----------------------------------------------------------------------------
 
-// Parent process information
-static pid_t parent_pid;
-static int parent_priority;
-
-// Child process information
-static int child_pid;
-
-int fd_timer_to_parent[2];
-int fd_wakeup_to_parent[2];
+// Comm channels for IPC
+int fd_timer_to_parent[2];      // channel to send data from timer to parent
+int fd_wakeup_to_parent[2];     // channel to send data from wakeup to parent
 
 //-----------------------------------------------------------------------------
 
-int fd_child_blocker[2];
-int fd_wakeup_blocker[2];
-
-//-----------------------------------------------------------------------------
-
-void initialize_pipes( void ) {
+/// Initializes all interprocess communication channels.  This must be done
+/// before any child processes are forked or threads are spawned so that they
+/// will inherit the file descriptors from the parent.
+void parent_initialize_pipes( void ) {
     int flags;
 
     // Open the controller timer to coordinator channel
@@ -79,26 +73,6 @@ void initialize_pipes( void ) {
     flags = fcntl( fd_wakeup_to_parent[1], F_GETFL, 0 );
     fcntl( fd_wakeup_to_parent[1], F_SETFL, flags | O_NONBLOCK );
 
-    //+++++BOGUS TEST PIPES FOR BLOCKING+++++
-/*
-    if( pipe( fd_child_blocker ) != 0 )
-        throw std::runtime_error( "Failed to open timercontroller_to_coordinator pipe." ) ;
-
-    flags = fcntl( fd_child_blocker[0], F_GETFL, 0 );
-    fcntl( fd_child_blocker[0], F_SETFL, flags );
-
-    flags = fcntl( fd_child_blocker[1], F_GETFL, 0 );
-    fcntl( fd_child_blocker[1], F_SETFL, flags | O_NONBLOCK );
-
-    if( pipe( fd_wakeup_blocker ) != 0 )
-        throw std::runtime_error( "Failed to open timercontroller_to_coordinator pipe." ) ;
-
-    flags = fcntl( fd_wakeup_blocker[0], F_GETFL, 0 );
-    fcntl( fd_wakeup_blocker[0], F_SETFL, flags );
-
-    flags = fcntl( fd_wakeup_blocker[1], F_GETFL, 0 );
-    fcntl( fd_wakeup_blocker[1], F_SETFL, flags | O_NONBLOCK );
-*/
 }
 
 //-----------------------------------------------------------------------------
@@ -107,29 +81,26 @@ void initialize_pipes( void ) {
 
 #define DEFAULT_PROCESSOR    0
 
-// The signal action to reference controller's process signal handler
-struct sigaction child_rttimer_sigaction;
+//-----------------------------------------------------------------------------
+
+// Parent process information
+static pid_t parent_pid;
+static int parent_priority;
+
+// Child process information
+static int child_pid;
 
 //-----------------------------------------------------------------------------
 
-// The actual signal handler for the controller timer
-void child_rttimer_sighandler( int signum, siginfo_t *si, void *data ) {
-    printf( "(timer) event\n" );
-    char buf = 0;
-    write( fd_timer_to_parent[1], &buf, 1 );
-}
-
-
-//-----------------------------------------------------------------------------
-// Forks off a the controller process.  Executes the external controller
-// program
-void fork_child( void ) {
+/// Creates the child process with a priority level one step below the parent.
+void parent_fork_child( void ) {
 
     child_pid = fork( );
     if ( child_pid < 0 ) {
         throw std::runtime_error( "Failed to fork controller." ) ;
     }
     if ( child_pid == 0 ) {
+        // Note: this is the child process
 
         child_pid = getpid( );
 
@@ -176,10 +147,10 @@ void fork_child( void ) {
         while( 1 ) {
             i++;
             //printf( "(child) working\n" );
-            if( i % 10000 == 0 ) {
+            if( i % 1000000 == 0 ) {
                 printf( "(child) blocking\n" );
+                // simulate blocking for validating the wakeup thread
                 usleep( 1000 );
-                //sched_yield( );
             }
         }
 
@@ -190,21 +161,18 @@ void fork_child( void ) {
 // TIMER CONTROL
 //-----------------------------------------------------------------------------
 
-// Nanoseconds/Second
+// Time conversions if necessary
 #define NSECS_PER_SEC 1E9
 #define USECS_PER_SEC 1E6
 
-// Quantum for Controller Timer
-#define DEFAULT_QUANTUM_RTTIMER_NSEC         1E8         // 0.1 second
-#define DEFAULT_QUANTUM_RTTIMER_SEC          0           // 0 second
+// Time budget for child process
+#define DEFAULT_BUDGET_RTTIMER_NSEC             1E8         // 0.1 second
+#define DEFAULT_BUDGET_RTTIMER_SEC              0           // 0 second
 
-//#define DEFAULT_QUANTUM_RTTIMER_NSEC         0
-//#define DEFAULT_QUANTUM_RTTIMER_SEC          10
-
-// Initial Delay for Controller Timer
-// NOTE: There has to be some delay otherwise timer is disarmed
-#define DEFAULT_INITDELAY_RTTIMER_NSEC       1           // 1 nanoseconds
-#define DEFAULT_INITDELAY_RTTIMER_SEC        0           // 0 second
+// Initial delay for timer
+// NOTE: There must be some delay otherwise timer is disarmed
+#define DEFAULT_INITDELAY_RTTIMER_NSEC          1           // 1 nanoseconds
+#define DEFAULT_INITDELAY_RTTIMER_SEC           0           // 0 second
 
 //-----------------------------------------------------------------------------
 
@@ -219,67 +187,83 @@ void fork_child( void ) {
 //-----------------------------------------------------------------------------
 
 // The signal identifier for the controller's real-time timer
-#define RTTIMER_SIGNAL                    SIGRTMIN + 4
+#define RTTIMER_SIGNAL                          SIGRTMIN + 4
 
 // timer variables
-clockid_t child_clock;
-sigset_t child_rttimer_mask;
+clockid_t childs_clock;
+sigset_t childs_rttimer_mask;
+
+// The signal action to reference child's process signal handler
+struct sigaction childs_rttimer_sigaction;
 
 //-----------------------------------------------------------------------------
-// Blocks the timer signal if it is necessary to suppress the timer
-int child_block_signal_rttimer( void ) {
-    if( sigprocmask( SIG_SETMASK, &child_rttimer_mask, NULL ) == -1 )
+
+/// The signal handler for the child's timer.  Is called only when the child's
+/// budget is exhausted.  Puts a message out onto the comm channel the parent
+/// is listening to for notifications about this event
+void parent_rttimer_child_budget_monitor_sighandler( int signum, siginfo_t *si, void *data ) {
+    printf( "(timer) event\n" );
+    char buf = 0;
+    write( fd_timer_to_parent[1], &buf, 1 );
+}
+
+//-----------------------------------------------------------------------------
+
+/// Blocks the timer signal if it is necessary to suppress the timer
+int parent_block_childs_signal_rttimer( void ) {
+    if( sigprocmask( SIG_SETMASK, &childs_rttimer_mask, NULL ) == -1 )
        return ERR_TIMER_FAILURE_SIGPROCMASK;
     return ERR_TIMER_NOERROR;
 }
 
 //-----------------------------------------------------------------------------
-// Unblocks a blocked timer signal
-int child_unblock_signal_rttimer( void ) {
-    if( sigprocmask( SIG_UNBLOCK, &child_rttimer_mask, NULL ) == -1 )
+
+/// Unblocks a blocked timer signal
+int parent_unblock_childs_signal_rttimer( void ) {
+    if( sigprocmask( SIG_UNBLOCK, &childs_rttimer_mask, NULL ) == -1 )
        return ERR_TIMER_FAILURE_SIGPROCMASK;
     return ERR_TIMER_NOERROR;
 }
 
 //-----------------------------------------------------------------------------
-// Create the timer to monitor the controller process
-int child_create_rttimer( void ) {
+
+/// Create the timer to monitor the child process
+int parent_create_rttimer_child_monitor( void ) {
     timer_t timerid;
     struct sigevent sevt;
     struct itimerspec its;
 
     // Establish handler for timer signal
-    child_rttimer_sigaction.sa_flags = SA_SIGINFO;
-    child_rttimer_sigaction.sa_sigaction = child_rttimer_sighandler;
-    sigemptyset( &child_rttimer_sigaction.sa_mask );
-    if( sigaction( RTTIMER_SIGNAL, &child_rttimer_sigaction, NULL ) == -1 )
+    childs_rttimer_sigaction.sa_flags = SA_SIGINFO;
+    childs_rttimer_sigaction.sa_sigaction = parent_rttimer_child_budget_monitor_sighandler;
+    sigemptyset( &childs_rttimer_sigaction.sa_mask );
+    if( sigaction( RTTIMER_SIGNAL, &childs_rttimer_sigaction, NULL ) == -1 )
        return ERR_TIMER_FAILURE_SIGACTION;
 
     // intialize the signal mask
-    sigemptyset( &child_rttimer_mask );
-    sigaddset( &child_rttimer_mask, RTTIMER_SIGNAL );
+    sigemptyset( &childs_rttimer_mask );
+    sigaddset( &childs_rttimer_mask, RTTIMER_SIGNAL );
 
     // Block timer signal temporarily
-    if( child_block_signal_rttimer() != ERR_TIMER_NOERROR )
+    if( parent_block_childs_signal_rttimer() != ERR_TIMER_NOERROR )
         return ERR_TIMER_FAILURE_SIGPROCMASK;
 
-    if( clock_getcpuclockid( child_pid, &child_clock ) != 0 )
+    if( clock_getcpuclockid( child_pid, &childs_clock ) != 0 )
         return ERR_TIMER_FAILURE_GETCLOCKID;
 
     // Create the timer
     sevt.sigev_notify = SIGEV_SIGNAL;
     sevt.sigev_signo = RTTIMER_SIGNAL;
     sevt.sigev_value.sival_ptr = &timerid;
-    if( timer_create( child_clock, &sevt, &timerid ) == -1 )
+    if( timer_create( childs_clock, &sevt, &timerid ) == -1 )
        return ERR_TIMER_FAILURE_CREATE;
 
     // intial delay for the timer
     its.it_value.tv_sec = DEFAULT_INITDELAY_RTTIMER_SEC;
     its.it_value.tv_nsec = DEFAULT_INITDELAY_RTTIMER_NSEC;
-    // quantum interval for the timer
-    // NOTE: technically in this implementation this is a tick not the quantum
-    its.it_interval.tv_sec = DEFAULT_QUANTUM_RTTIMER_SEC;
-    its.it_interval.tv_nsec = DEFAULT_QUANTUM_RTTIMER_NSEC;
+    // budget for the child
+    its.it_interval.tv_sec = DEFAULT_BUDGET_RTTIMER_SEC;
+    its.it_interval.tv_nsec = DEFAULT_BUDGET_RTTIMER_NSEC;
 
     // Set up the timer
     if( timer_settime( timerid, 0, &its, NULL ) == -1 )
@@ -292,24 +276,28 @@ int child_create_rttimer( void ) {
 }
 
 //-----------------------------------------------------------------------------
-// Pause the child
-void suspend_child( void ) {
+
+/// Pause the child from the parent process
+void parent_suspend_child( void ) {
 
     kill( child_pid, SIGSTOP );
 }
 
 //-----------------------------------------------------------------------------
-// Continue the child
-void resume_child( void ) {
+
+/// Continue the child from the parent process
+void parent_resume_child( void ) {
 
     kill( child_pid, SIGCONT );
 }
 
 //-----------------------------------------------------------------------------
 
-void child_rttimer_init( void ) {
+/// Initializes the child monitoring timer which determines when the child has
+/// exhausted its budget
+void parent_init_rttimer_child_monitor( void ) {
 
-    if( child_create_rttimer( ) != ERR_TIMER_NOERROR ) {
+    if( parent_create_rttimer_child_monitor( ) != ERR_TIMER_NOERROR ) {
         printf( "Failed to create timer\n" );
         // should probably throw or exit but possible to create a zombie controller as artifact
     }
@@ -317,24 +305,28 @@ void child_rttimer_init( void ) {
     if( VERBOSE ) printf("(parent) rttimer initialized\n");
 
     // unblock the timer and unblock the child process
-    child_unblock_signal_rttimer( );
-    resume_child( );
+    parent_unblock_childs_signal_rttimer( );
+    parent_resume_child( );
 }
 
 //-----------------------------------------------------------------------------
 // WAKEUP THREAD
 //-----------------------------------------------------------------------------
 
-//struct thread_info *tinfo;
+// the reference to the wakeup thread
 pthread_t wakeup_thread;
 
+//-----------------------------------------------------------------------------
+
+/// the wakeup thread function itself.  Established at the priority level one
+/// below the child (therefore two below parent), this thread is unblocked when
+/// the child blocks and therefore can detect when the child thread is not
+/// consuming budget but is not directly suspended by the parent.
 static void* wakeup_parent_on_a_blocked_child( void* arg ) {
     while( 1 ) {
         printf( "(wakeup) event\n" );
         char buf = 0;
         write( fd_wakeup_to_parent[1], &buf, 1 );
-        //sleep( 1 );
-        //read( fd_wakeup_blocker[0], &buf, 1 )
 
         usleep( 1000 );
     }
@@ -342,7 +334,10 @@ static void* wakeup_parent_on_a_blocked_child( void* arg ) {
 
 //-----------------------------------------------------------------------------
 
-void create_wakeup_thread( void ) {
+/// Spawns the wakeup thread with a priority level one below the child thread
+/// (therefore two below the parent).  For more information see
+/// wakeup_parent_on_a_blocked_child( void* ) above
+void parent_create_wakeup_thread( void ) {
 
     int result;
     pthread_attr_t attributes;
@@ -437,12 +432,12 @@ int main( int argc, char* argv[] ) {
     if( VERBOSE ) printf( "parent process initialized\n" );
 
     // Must be before any forking or thread creation
-    initialize_pipes( );
+    parent_initialize_pipes( );
 
-    fork_child( );
-    child_rttimer_init( );
+    parent_fork_child( );
+    parent_init_rttimer_child_monitor( );
 
-    create_wakeup_thread( );
+    parent_create_wakeup_thread( );
 
     char input_buffer;
     int i = 0;
@@ -463,45 +458,45 @@ int main( int argc, char* argv[] ) {
             if( FD_ISSET( fd_timer_to_parent[0], &fds_children ) ) {
                 // timer event
                 if( read( fd_timer_to_parent[0], &input_buffer, 1 ) == -1 ) {
-                    switch(errno) {
+                    switch( errno ) {
                     case EINTR:
                         // The read operation was terminated due to the receipt of a signal, and no data was transferred.
                         //printf( "error : EINTR \n" );
 
                         // in this case, there us a read event due to an undetermined reason causing the system to unblock,
-                        // but the event is not actually triggered by the controller running for the specified interval.  Instead,
+                        // but the event is not actually triggered by the child running for the budget interval.  Instead,
                         // the read event is occurring 'immediately' after the last loop cycle, the duration is effectively zero,
-                        // and the controller is not actually running for any significant amount of time.  Trapping this event
+                        // and the child is not actually running for any significant amount of time.  Trapping this event
                         // prevents a false positive.
                         continue;
                     default:
-                        printf( "EXCEPTION: unhandled read error in main loop reading from fd_timercontroller_to_coordinator\n" );
+                        printf( "EXCEPTION: unhandled read error in main loop reading from fd_timer_to_parent" );
                         break;
                     }
                 }
-                suspend_child( );
+                parent_suspend_child( );
 
                 printf( "(parent) received a timer event on a child\n" );
                 //printf( "(parent) working\n" );
 
-                resume_child( );
+                parent_resume_child( );
 
             } else if( FD_ISSET( fd_wakeup_to_parent[0], &fds_children ) ) {
                 // wakeup event
                 if( read( fd_wakeup_to_parent[0], &input_buffer, 1 ) == -1 ) {
-                    switch(errno) {
+                    switch( errno ) {
                     case EINTR:
                         // The read operation was terminated due to the receipt of a signal, and no data was transferred.
                         //printf( "error : EINTR \n" );
 
                         // in this case, there us a read event due to an undetermined reason causing the system to unblock,
-                        // but the event is not actually triggered by the controller running for the specified interval.  Instead,
+                        // but the event is not actually triggered by the wakeup sending a message.  Instead,
                         // the read event is occurring 'immediately' after the last loop cycle, the duration is effectively zero,
-                        // and the controller is not actually running for any significant amount of time.  Trapping this event
+                        // and the wakeup is not actually running for any significant amount of time.  Trapping this event
                         // prevents a false positive.
                         continue;
                     default:
-                        printf( "EXCEPTION: unhandled read error in main loop reading from fd_timercontroller_to_coordinator\n" );
+                        printf( "EXCEPTION: unhandled read error in main loop reading from fd_wakeup_to_parent" );
                         break;
                     }
                 }
