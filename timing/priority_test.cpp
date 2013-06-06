@@ -28,17 +28,10 @@ coordinator.cpp
 
 #include <pthread.h>
 
-#include <Moby/Simulator.h>
-#include <Moby/RCArticulatedBody.h>
-
 //-----------------------------------------------------------------------------
 
 // Verbose
 #define VERBOSE 1
-
-//-----------------------------------------------------------------------------
-
-using boost::dynamic_pointer_cast;
 
 //-----------------------------------------------------------------------------
 
@@ -51,6 +44,13 @@ static int child_pid;
 
 int fd_timer_to_parent[2];
 int fd_wakeup_to_parent[2];
+
+//-----------------------------------------------------------------------------
+
+int fd_child_blocker[2];
+int fd_wakeup_blocker[2];
+
+//-----------------------------------------------------------------------------
 
 void initialize_pipes( void ) {
     int flags;
@@ -70,19 +70,35 @@ void initialize_pipes( void ) {
 
     //+++++++++++++++++++
 
-    // Open the controller timer to coordinator channel
     if( pipe( fd_wakeup_to_parent ) != 0 )
         throw std::runtime_error( "Failed to open timercontroller_to_coordinator pipe." ) ;
 
-    // NOTE: read channel needs to be blocking to cause coordinator to block waiting for
-    // timer expiration message
     flags = fcntl( fd_wakeup_to_parent[0], F_GETFL, 0 );
     fcntl( fd_wakeup_to_parent[0], F_SETFL, flags );
 
-    // NOTE: write channel should be non-blocking
     flags = fcntl( fd_wakeup_to_parent[1], F_GETFL, 0 );
     fcntl( fd_wakeup_to_parent[1], F_SETFL, flags | O_NONBLOCK );
 
+    //+++++BOGUS TEST PIPES FOR BLOCKING+++++
+/*
+    if( pipe( fd_child_blocker ) != 0 )
+        throw std::runtime_error( "Failed to open timercontroller_to_coordinator pipe." ) ;
+
+    flags = fcntl( fd_child_blocker[0], F_GETFL, 0 );
+    fcntl( fd_child_blocker[0], F_SETFL, flags );
+
+    flags = fcntl( fd_child_blocker[1], F_GETFL, 0 );
+    fcntl( fd_child_blocker[1], F_SETFL, flags | O_NONBLOCK );
+
+    if( pipe( fd_wakeup_blocker ) != 0 )
+        throw std::runtime_error( "Failed to open timercontroller_to_coordinator pipe." ) ;
+
+    flags = fcntl( fd_wakeup_blocker[0], F_GETFL, 0 );
+    fcntl( fd_wakeup_blocker[0], F_SETFL, flags );
+
+    flags = fcntl( fd_wakeup_blocker[1], F_GETFL, 0 );
+    fcntl( fd_wakeup_blocker[1], F_SETFL, flags | O_NONBLOCK );
+*/
 }
 
 //-----------------------------------------------------------------------------
@@ -99,7 +115,7 @@ struct sigaction child_rttimer_sigaction;
 // The actual signal handler for the controller timer
 void child_rttimer_sighandler( int signum, siginfo_t *si, void *data ) {
     printf( "(timer) event\n" );
-    char buf;
+    char buf = 0;
     write( fd_timer_to_parent[1], &buf, 1 );
 }
 
@@ -156,8 +172,15 @@ void fork_child( void ) {
 
         if( VERBOSE ) printf( "child process initialized\n" );
 
+        long long i = 0;
         while( 1 ) {
-            printf( "(child) working\n" );
+            i++;
+            //printf( "(child) working\n" );
+            if( i % 10000 == 0 ) {
+                printf( "(child) blocking\n" );
+                usleep( 1000 );
+                //sched_yield( );
+            }
         }
 
     }
@@ -302,17 +325,22 @@ void child_rttimer_init( void ) {
 // WAKEUP THREAD
 //-----------------------------------------------------------------------------
 
+//struct thread_info *tinfo;
+pthread_t wakeup_thread;
+
 static void* wakeup_parent_on_a_blocked_child( void* arg ) {
     while( 1 ) {
         printf( "(wakeup) event\n" );
-        char buf;
+        char buf = 0;
         write( fd_wakeup_to_parent[1], &buf, 1 );
+        //sleep( 1 );
+        //read( fd_wakeup_blocker[0], &buf, 1 )
+
+        usleep( 1000 );
     }
 }
 
 //-----------------------------------------------------------------------------
-//struct thread_info *tinfo;
-pthread_t wakeup_thread;
 
 void create_wakeup_thread( void ) {
 
@@ -408,13 +436,19 @@ int main( int argc, char* argv[] ) {
 
     if( VERBOSE ) printf( "parent process initialized\n" );
 
-    fork_child( );
+    // Must be before any forking or thread creation
     initialize_pipes( );
 
+    fork_child( );
     child_rttimer_init( );
+
+    create_wakeup_thread( );
 
     char input_buffer;
     int i = 0;
+
+    int max_fd = std::max( fd_timer_to_parent[0], fd_wakeup_to_parent[0] );
+
     while( 1 ) {
 
         fd_set fds_children;
@@ -423,7 +457,8 @@ int main( int argc, char* argv[] ) {
         FD_SET( fd_timer_to_parent[0], &fds_children );
         FD_SET( fd_wakeup_to_parent[0], &fds_children );
 
-        int result = select( 2, &fds_children, NULL, NULL, NULL );
+        // TODO: review the following code
+        int result = select( max_fd + 1, &fds_children, NULL, NULL, NULL );
         if( result ) {
             if( FD_ISSET( fd_timer_to_parent[0], &fds_children ) ) {
                 // timer event
@@ -453,7 +488,7 @@ int main( int argc, char* argv[] ) {
 
             } else if( FD_ISSET( fd_wakeup_to_parent[0], &fds_children ) ) {
                 // wakeup event
-                if( read( fd_timer_to_parent[0], &input_buffer, 1 ) == -1 ) {
+                if( read( fd_wakeup_to_parent[0], &input_buffer, 1 ) == -1 ) {
                     switch(errno) {
                     case EINTR:
                         // The read operation was terminated due to the receipt of a signal, and no data was transferred.
@@ -472,7 +507,6 @@ int main( int argc, char* argv[] ) {
                 }
 
                 printf( "(parent) received a wakeup from a blocked child\n" );
-
             }
         }
 
