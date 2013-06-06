@@ -50,6 +50,7 @@ static int parent_priority;
 static int child_pid;
 
 int fd_timer_to_parent[2];
+int fd_wakeup_to_parent[2];
 
 void initialize_pipes( void ) {
     int flags;
@@ -66,6 +67,21 @@ void initialize_pipes( void ) {
     // NOTE: write channel should be non-blocking
     flags = fcntl( fd_timer_to_parent[1], F_GETFL, 0 );
     fcntl( fd_timer_to_parent[1], F_SETFL, flags | O_NONBLOCK );
+
+    //+++++++++++++++++++
+
+    // Open the controller timer to coordinator channel
+    if( pipe( fd_wakeup_to_parent ) != 0 )
+        throw std::runtime_error( "Failed to open timercontroller_to_coordinator pipe." ) ;
+
+    // NOTE: read channel needs to be blocking to cause coordinator to block waiting for
+    // timer expiration message
+    flags = fcntl( fd_wakeup_to_parent[0], F_GETFL, 0 );
+    fcntl( fd_wakeup_to_parent[0], F_SETFL, flags );
+
+    // NOTE: write channel should be non-blocking
+    flags = fcntl( fd_wakeup_to_parent[1], F_GETFL, 0 );
+    fcntl( fd_wakeup_to_parent[1], F_SETFL, flags | O_NONBLOCK );
 
 }
 
@@ -283,7 +299,62 @@ void child_rttimer_init( void ) {
 }
 
 //-----------------------------------------------------------------------------
-// Entry Point
+// WAKEUP THREAD
+//-----------------------------------------------------------------------------
+
+static void* wakeup_parent_on_a_blocked_child( void* arg ) {
+    while( 1 ) {
+        printf( "(wakeup) event\n" );
+        char buf;
+        write( fd_wakeup_to_parent[1], &buf, 1 );
+    }
+}
+
+//-----------------------------------------------------------------------------
+//struct thread_info *tinfo;
+pthread_t wakeup_thread;
+
+void create_wakeup_thread( void ) {
+
+    int result;
+    pthread_attr_t attributes;
+
+    pthread_attr_init( &attributes );
+
+    result = pthread_attr_setinheritsched( &attributes, PTHREAD_EXPLICIT_SCHED );
+    if( result != 0 ) {
+        printf( "Failed to set explicit schedule attribute for wakeup thread.\n" );
+    }
+
+    struct sched_param param;
+
+    result = pthread_attr_setschedpolicy( &attributes, SCHED_RR );
+    if( result != 0 ) {
+        printf( "Failed to set schedule policy attribute for wakeup thread.\n" );
+    }
+
+    param.sched_priority = parent_priority - 2;
+
+    result = pthread_attr_setschedparam( &attributes, &param);
+    if( result != 0 ) {
+        printf( "Failed to set schedule priority attribute for wakeup thread.\n" );
+    }
+
+    printf( "creating wakeup\n" );
+
+    pthread_create( &wakeup_thread, &attributes, wakeup_parent_on_a_blocked_child, NULL );
+
+    printf( "wakeup created\n" );
+
+    int policy;
+    pthread_getschedparam( wakeup_thread, &policy, &param );
+    printf( "wakeup priority: %d\n", param.sched_priority );
+
+    pthread_attr_destroy( &attributes );
+}
+
+//-----------------------------------------------------------------------------
+// ENTRY POINT
 //-----------------------------------------------------------------------------
 
 int main( int argc, char* argv[] ) {
@@ -345,29 +416,65 @@ int main( int argc, char* argv[] ) {
     char input_buffer;
     int i = 0;
     while( 1 ) {
-        //read( fd_timer_to_parent[0], &input_buffer, 1 );
 
-        if( read( fd_timer_to_parent[0], &input_buffer, 1 ) == -1 ) {
-            switch(errno) {
-            case EINTR:
-                // The read operation was terminated due to the receipt of a signal, and no data was transferred.
-                //printf( "error : EINTR \n" );
+        fd_set fds_children;
 
-                // in this case, there us a read event due to an undetermined reason causing the system to unblock,
-                // but the event is not actually triggered by the controller running for the specified interval.  Instead,
-                // the read event is occurring 'immediately' after the last loop cycle, the duration is effectively zero,
-                // and the controller is not actually running for any significant amount of time.  Trapping this event
-                // prevents a false positive.
-                continue;
-            default:
-                printf( "EXCEPTION: unhandled read error in main loop reading from fd_timercontroller_to_coordinator\n" );
-                break;
+        FD_ZERO( &fds_children );
+        FD_SET( fd_timer_to_parent[0], &fds_children );
+        FD_SET( fd_wakeup_to_parent[0], &fds_children );
+
+        int result = select( 2, &fds_children, NULL, NULL, NULL );
+        if( result ) {
+            if( FD_ISSET( fd_timer_to_parent[0], &fds_children ) ) {
+                // timer event
+                if( read( fd_timer_to_parent[0], &input_buffer, 1 ) == -1 ) {
+                    switch(errno) {
+                    case EINTR:
+                        // The read operation was terminated due to the receipt of a signal, and no data was transferred.
+                        //printf( "error : EINTR \n" );
+
+                        // in this case, there us a read event due to an undetermined reason causing the system to unblock,
+                        // but the event is not actually triggered by the controller running for the specified interval.  Instead,
+                        // the read event is occurring 'immediately' after the last loop cycle, the duration is effectively zero,
+                        // and the controller is not actually running for any significant amount of time.  Trapping this event
+                        // prevents a false positive.
+                        continue;
+                    default:
+                        printf( "EXCEPTION: unhandled read error in main loop reading from fd_timercontroller_to_coordinator\n" );
+                        break;
+                    }
+                }
+                suspend_child( );
+
+                printf( "(parent) received a timer event on a child\n" );
+                //printf( "(parent) working\n" );
+
+                resume_child( );
+
+            } else if( FD_ISSET( fd_wakeup_to_parent[0], &fds_children ) ) {
+                // wakeup event
+                if( read( fd_timer_to_parent[0], &input_buffer, 1 ) == -1 ) {
+                    switch(errno) {
+                    case EINTR:
+                        // The read operation was terminated due to the receipt of a signal, and no data was transferred.
+                        //printf( "error : EINTR \n" );
+
+                        // in this case, there us a read event due to an undetermined reason causing the system to unblock,
+                        // but the event is not actually triggered by the controller running for the specified interval.  Instead,
+                        // the read event is occurring 'immediately' after the last loop cycle, the duration is effectively zero,
+                        // and the controller is not actually running for any significant amount of time.  Trapping this event
+                        // prevents a false positive.
+                        continue;
+                    default:
+                        printf( "EXCEPTION: unhandled read error in main loop reading from fd_timercontroller_to_coordinator\n" );
+                        break;
+                    }
+                }
+
+                printf( "(parent) received a wakeup from a blocked child\n" );
+
             }
         }
-        suspend_child( );
 
-        printf( "(parent) working\n" );
-
-        resume_child( );
     }
 }
