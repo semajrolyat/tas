@@ -10,10 +10,6 @@ coordinator.cpp
 
 using boost::dynamic_pointer_cast;
 
-//-----------------------------------------------------------------------------
-
-#define DYNAMICS_PLUGIN "/home/james/tas/build/timing/libtiming_dynamics.so"
-#define DEFAULT_CONTROLLER_PROGRAM      "timing_controller"
 
 //-----------------------------------------------------------------------------
 // SHARED RESOURCE MANAGEMENT

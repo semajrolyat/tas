@@ -62,7 +62,7 @@ typedef double Real;
 
 #define PI 3.14159265359
 
-#define VERBOSE 0
+#define VERBOSE 1
 
 //-----------------------------------------------------------------------------
 // IPC Channels
@@ -77,6 +77,11 @@ typedef double Real;
 //-----------------------------------------------------------------------------
 
 #define CONTROLLER_FREQUENCY_HERTZ                  1000
+
+//-----------------------------------------------------------------------------
+
+#define DYNAMICS_PLUGIN "/home/james/tas/build/libdynamics.so"
+#define DEFAULT_CONTROLLER_PROGRAM      "controller"
 
 //-----------------------------------------------------------------------------
 
