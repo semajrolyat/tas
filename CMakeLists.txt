@@ -16,22 +16,17 @@ find_package( Moby REQUIRED )
 #message( ${MOBY_LIBRARIES} )
 #message( ${MOBY_INCLUDE_DIR} )
 
-#set( TAS_HEADERS ) #individual files are set in the CMakeLists.txt in ./include
-#set( TAS_SOURCES ) #individual files are set in the CMakeLists.txt in ./src
-#add_subdirectory( "include" )
-#add_subdirectory( "src" )
-
 set( TAS_HEADERS
-    ${CMAKE_CURRENT_SOURCE_DIR}/TAS.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/ActuatorMessage.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/DynamicsPlugin.h
+    TAS.h
+    ActuatorMessage.h
+    DynamicsPlugin.h
 )
 
 set( TAS_SOURCES )
 
 set( TAS_INCLUDE_DIRS
-    #${CMAKE_CURRENT_SOURCE_DIR}/include
     ${MOBY_INCLUDE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}
 )
 
 set( TAS_LIBRARIES

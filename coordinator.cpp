@@ -4,7 +4,7 @@ author: James R. Taylor                                             jrt@gwu.edu
 coordinator.cpp
 -----------------------------------------------------------------------------*/
 
-#include "TAS.h"
+#include <TAS.h>
 
 //-----------------------------------------------------------------------------
 
@@ -214,6 +214,9 @@ void coordinator_fork_controller( void ) {
 
         // duplicate the default fd's into known fd's so that the controller explicitly knows
         // what the channels are.
+        // Note: dup2 explicitly closes the channel you are duping into so there is no need
+        // for a seperate close call preceding the dup2 call unless some kernel programmer
+        // didn't meet the spec.
         dup2( fd_coordinator_to_controller[0], FD_COORDINATOR_TO_CONTROLLER_READ_CHANNEL );
         dup2( fd_controller_to_coordinator[1], FD_CONTROLLER_TO_COORDINATOR_WRITE_CHANNEL );
 
@@ -230,23 +233,8 @@ void coordinator_fork_controller( void ) {
         // execute the controller program
         execl( DEFAULT_CONTROLLER_PROGRAM, "controller", 0 );
 
-        // exit on fail to exec
+        // exit on fail to exec.  Can only get here if execl fails.
         _exit( 1 );
-
-/*
-        if( VERBOSE ) printf( "controller process initialized\n" );
-
-        long long i = 0;
-        while( 1 ) {
-            i++;
-            //printf( "(controller) working\n" );
-            if( i % 1000000 == 0 ) {
-                printf( "(controller) blocking\n" );
-                // simulate blocking for validating the wakeup thread
-                usleep( 1000 );
-            }
-        }
-*/
     }
 }
 
@@ -635,15 +623,15 @@ int main( int argc, char* argv[] ) {
                     if(VERBOSE) printf( "(coordinator) received MSG_TYPE_COMMAND\n" );
 
                     coordinator_suspend_controller( );
+
                     coordinator_instruct_dynamics_to_get_command( );
-                        //Real dt = DYNAMICS_MIN_STEP;
-                        // Note: may need to store previous msg/time to compute diff for dt
-                        //dt = msg.state.time;
-                    //coordinator_run_dynamics( DYNAMICS_MIN_STEP );
+
                     coordinator_resume_controller( );
                     break;
                 case MSG_TYPE_STATE_REQUEST:
                     if(VERBOSE) printf( "(coordinator) received MSG_TYPE_STATE_REQUEST\n" );
+
+                    // Note: the controller is blocking now on read from fd_coordinator_to_controller[0]
 
                     if( !controller_fully_initialized ) {
                         // indicates that the controller is fully initialized and timing can begin
@@ -661,7 +649,7 @@ int main( int argc, char* argv[] ) {
 
                         if(VERBOSE) printf( "(coordinator) notifying controller state available\n" );
 
-                        //coordinator_resume_controller( );  // paired with above suspend in if( !controller_fully_initialized )...
+                        //coordinator_resume_controller( );  // paired with above suspend
                         write( fd_coordinator_to_controller[1], &buf, 1 );
                     } else {
                         // How do we objectively convert system time to sim time?
@@ -670,6 +658,7 @@ int main( int argc, char* argv[] ) {
                         // if dynamics behind controller [
                         // Need an objective query.
 
+                        // right now this time is based on the frequency and cycle of the controller
                         current_t = msg.state.time;
 
                         dt = current_t - previous_t;

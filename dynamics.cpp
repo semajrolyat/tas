@@ -33,8 +33,8 @@ Moby plugin
 #include <Moby/EventDrivenSimulator.h>
 #include <Moby/RCArticulatedBody.h>
 
-#include "TAS.h"
-#include "ActuatorMessage.h"
+#include <TAS.h>
+#include <ActuatorMessage.h>
 
 using namespace Moby;
 using boost::shared_ptr;

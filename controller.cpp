@@ -14,8 +14,8 @@ controller.cpp
 #include <Moby/Simulator.h>
 #include <Moby/RCArticulatedBody.h>
 
-#include "TAS.h"
-#include "ActuatorMessage.h"
+#include <TAS.h>
+#include <ActuatorMessage.h>
 
 //-----------------------------------------------------------------------------
 
@@ -125,22 +125,6 @@ void init( void* separator, const std::map<std::string, BasePtr>& read_map, Real
 // Standalone Controller
 //----------------------------------------------------------------------------
 
-/*
-int fd_coordinator_to_controller[2];
-int fd_controller_to_coordinator[2];
-
-//-----------------------------------------------------------------------------
-
-void attach_pipes( void ) {
-    fd_coordinator_to_controller[0] = FD_COORDINATOR_TO_CONTROLLER_READ_CHANNEL;
-    fd_coordinator_to_controller[1] = FD_COORDINATOR_TO_CONTROLLER_WRITE_CHANNEL;
-
-    fd_controller_to_coordinator[0] = FD_CONTROLLER_TO_COORDINATOR_READ_CHANNEL;
-    fd_controller_to_coordinator[1] = FD_CONTROLLER_TO_COORDINATOR_WRITE_CHANNEL;
-}
-*/
-//-----------------------------------------------------------------------------
-
 ActuatorMessageBuffer amsgbuffer;
 
 //-----------------------------------------------------------------------------
@@ -172,8 +156,6 @@ ActuatorMessage control( const ActuatorMessage& msg ) {
 
 /// Standalone Controller Entry Point
 int main( int argc, char* argv[] ) {
-
-    //attach_pipes( );
 
     amsgbuffer = ActuatorMessageBuffer( ACTUATOR_MESSAGE_BUFFER_NAME, ACTUATOR_MESSAGE_BUFFER_MUTEX_NAME );
     amsgbuffer.open( );
