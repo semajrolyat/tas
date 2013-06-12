@@ -1,0 +1,52 @@
+<XML>
+  <DRIVER>
+    <camera position="0 0 5" target="0 0 0" up="0 1 0" />
+    <window location="0 0" size="640 480" />
+  </DRIVER>
+
+  <MOBY>
+    <Cylinder id="cylinder" radius="0.025" height="1" global-axis="y" circle-points="100" density="1.0" />
+    <Sphere id="sphere" radius="0.1" density="1" />
+
+    <EulerIntegrator id="euler" type="VectorN" />
+    <EulerIntegrator id="euler-quat" type="Quat" />
+
+    <GravityForce id="gravity" accel="0 -9.81 0" />
+    <!-- <FSABAlgorithm id="fsab" /> -->
+    <CRBAlgorithm id="crb" />
+
+    <Simulator id="simulator" integrator-id="euler" >
+      <RecurrentForce recurrent-force-id="gravity" enabled="true" /> 
+      <DynamicBody dynamic-body-id="pendulum" />
+    </Simulator>
+
+    <RCArticulatedBody id="pendulum" fdyn-algorithm-id="crb" fdyn-algorithm-frame="link" floating-base="false">
+      <RigidBody id="base" global-position="0 0 0"/>
+
+      <!-- Starts at 6 o'clock -->
+<!--  -->
+      <RigidBody id="bob" transform="1 0 0 0; 0 1 0 -1.0; 0 0 1 0; 0 0 0 1" >
+        <InertiaFromPrimitive primitive-id="sphere" />
+        <CollisionGeometry primitive-id="sphere" />
+        <Visualization visualization-id="sphere" />
+	<Visualization visualization-id="cylinder" visualization-rel-transform="1 0 0 0; 0 1 0 0.5; 0 0 1 0; 0 0 0 1" />
+      </RigidBody>
+<!--  -->
+
+      <!-- Starts at 3 o'clock -->
+<!--
+      <RigidBody id="bob" transform="0 -1 0 1.0; 1 0 0 0; 0 0 1 0; 0 0 0 1" >
+        <InertiaFromPrimitive primitive-id="sphere" />
+        <CollisionGeometry primitive-id="sphere" />
+        <Visualization visualization-id="sphere" />
+	<Visualization visualization-id="cylinder" visualization-rel-transform="1 0 0 0; 0 1 0 0.5; 0 0 1 0; 0 0 0 1" />
+      </RigidBody>
+-->
+
+      <RevoluteJoint id="pivot" q="0" qd="0" global-position="0 0 0" inboard-link-id="base" outboard-link-id="bob" type="revolute" maxforce="10000" coulomb-friction-coeff="0" viscous-friction-coeff="0" restitution-coeff="1" global-axis="0 0 1"/>
+
+    </RCArticulatedBody>
+
+  </MOBY>
+</XML>
+
