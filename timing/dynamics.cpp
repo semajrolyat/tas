@@ -1,7 +1,8 @@
 /*----------------------THE GEORGE WASHINGTON UNIVERSITY-----------------------
 author: James R. Taylor                                             jrt@gwu.edu
 
-Prototype of a Plugin for the Time Accurate Simulator system.
+dynamics.cpp
+Moby plugin
 -----------------------------------------------------------------------------*/
 
 #include <stdio.h>
@@ -32,12 +33,18 @@ Prototype of a Plugin for the Time Accurate Simulator system.
 #include <Moby/EventDrivenSimulator.h>
 #include <Moby/RCArticulatedBody.h>
 
+#include "TAS.h"
 #include "ActuatorMessage.h"
 
 using namespace Moby;
 using boost::shared_ptr;
 using boost::dynamic_pointer_cast;
 
+//-----------------------------------------------------------------------------
+
+/// The shared memory buffer where control commands arrive from the controller
+/// and where state for the controller is published
+ActuatorMessageBuffer amsgbuffer;
 
 //-----------------------------------------------------------------------------
 
@@ -144,10 +151,6 @@ std::map<std::string, BasePtr> READ_MAP;
 typedef void (*init_t)(void*, const std::map<std::string, BasePtr>&, Real);
 std::list<init_t> INIT;
 */
-
-/// The shared memory buffer where control commands arrive from the controller
-/// and where state for the controller is published
-ActuatorMessageBuffer amsgbuffer;
 
 //-----------------------------------------------------------------------------
 
@@ -732,10 +735,16 @@ void init( int argc, char** argv ) {
         printf( "dynamics.cpp:init()- unable to cast pendulum to type RCArticulatedBody\n" );
 
     // open the command buffer
-    amsgbuffer = ActuatorMessageBuffer( 8811, getpid( ) );
-    amsgbuffer.open();   // TODO : sanity/safety checking
+    //amsgbuffer = ActuatorMessageBuffer( &amsgbuffer_mutex, 8811, getpid( ), 0 );
 
-    //printf( "(dynamics::initialized)\n" );
+    //attach_mutex( );
+    //amsgbuffer = ActuatorMessageBuffer( amsgbuffer_mutex );
+    //amsgbuffer.open();   // TODO : sanity/safety checking
+
+    amsgbuffer = ActuatorMessageBuffer( ACTUATOR_MESSAGE_BUFFER_NAME, ACTUATOR_MESSAGE_BUFFER_MUTEX_NAME );
+    amsgbuffer.open( );
+
+    printf( "(dynamics::initialized)\n" );
 }
 
 /**
@@ -743,7 +752,7 @@ void init( int argc, char** argv ) {
   and one controller.
 */
 void publish_state( void ) {
-    //printf( "(dynamics::publish_state)\n" );
+    if( VERBOSE ) printf( "(dynamics::publish_state)\n" );
 
     // get a reference to the actuator
     JointPtr pivot = pendulum->find_joint( "pivot" );
@@ -754,11 +763,14 @@ void publish_state( void ) {
     msg.state.position = pivot->q[0];
     msg.state.velocity = pivot->qd[0];
     msg.state.time = sim->current_time;
-    //printf( "(dynamics::publish_state)" );
-    //msg.print();
-    amsgbuffer.write( msg );
 
+    // this was a part of the Dynamic ode_both(.) procedure but if the accumulators are
+    // cleared there they can never change from zero as they were also originally added there.
+    // So, had to relocate the reset procedure here.
     pendulum->reset_accumulators();
+    
+    // Note: will block on acquiring mutex
+    amsgbuffer.write( msg );
 }
 
 /**
@@ -767,15 +779,12 @@ void publish_state( void ) {
   interface
 */
 void get_command( void ) {
-    // this was a part of the Dynamic ode_both(.) procedure but if the accumulators are
-    // cleared there they can never change from zero as they were also originally added there.
-    // So, had to relocate the reset procedure here.
-    //pendulum->reset_accumulators();
 
-    //printf( "(dynamics::get_command)\n" );
+    if( VERBOSE ) printf( "(dynamics::get_command)\n" );
 
     // get the command from the controller
     ActuatorMessage msg = amsgbuffer.read( );
+    // Note: will block on acquiring mutex
 
     //printf( "(dynamics::get_command) " );
     //msg.print();
@@ -804,8 +813,12 @@ void run( Real dt ) {
     }
     #endif
 
+    // Note: research how the original driver sets up all the parameters that
+    // drive step size.  sim->step(dt) is not sufficient in and of itself so
+    // there must be another or more parameters that manipulate this state info
     //sim->step( dt );
     // step the sim forward
+    STEP_SIZE = dt;
     step((void*) &sim);
 
     // publish any state change

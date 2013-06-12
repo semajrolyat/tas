@@ -1,3 +1,9 @@
+/*----------------------THE GEORGE WASHINGTON UNIVERSITY-----------------------
+author: James R. Taylor                                             jrt@gwu.edu
+
+ActuatorMessage.h
+-----------------------------------------------------------------------------*/
+
 #ifndef _ACTUATORMESSAGE_H_
 #define _ACTUATORMESSAGE_H_
 
@@ -5,6 +11,8 @@
 
 #include <string.h>
 #include <iostream>
+#include <pthread.h>
+#include <assert.h>
 
 //-----------------------------------------------------------------------------
 
@@ -16,6 +24,7 @@ typedef double Real;
 enum ActuatorMessageTypes {
     MSG_TYPE_UNDEFINED,
     MSG_TYPE_COMMAND,
+    MSG_TYPE_NO_COMMAND,
     MSG_TYPE_STATE_REQUEST,
     MSG_TYPE_STATE_REPLY
 };
@@ -24,8 +33,10 @@ enum ActuatorMessageTypes {
   Header data the composes an ActuatorMessage
 */
 struct ActuatorMessageHeader {
-    int publisher;
-    ActuatorMessageTypes type;
+    int pid;					// ProcessIDentifier
+    int tid;					// ThreadIDentifier
+    ActuatorMessageTypes type;	// messageType
+    timespec ts;				// TimeStamp
 };
 
 //-----------------------------------------------------------------------------
@@ -67,7 +78,10 @@ public:
     //-------------------------------------------------------------------------
     /// Default Constructor
     ActuatorMessage( void ) {
-        header.publisher = 0;
+        header.pid = 0;
+        header.tid = 0;
+        header.ts.tv_sec = 0;
+        header.ts.tv_nsec = 0;
         header.type = MSG_TYPE_UNDEFINED;
 
         state.position = 0.0;
@@ -80,7 +94,10 @@ public:
     //-------------------------------------------------------------------------
     /// Copy Constructor
     ActuatorMessage( const ActuatorMessage& msg ) {
-        header.publisher = msg.header.publisher;
+        header.pid = msg.header.pid;
+        header.tid = msg.header.tid;
+        header.ts.tv_sec = msg.header.ts.tv_sec;
+        header.ts.tv_nsec = msg.header.ts.tv_nsec;
         header.type = msg.header.type;
 
         state.position = msg.state.position;
@@ -114,11 +131,18 @@ public:
     //-------------------------------------------------------------------------
     /// Print the datastructure to standard out
     void print( void ) {
-        std::cout << "publisher=" << header.publisher;
+        std::cout << "pid=" << header.pid;
+        std::cout << ", tid=" << header.tid;
+        std::cout << ", ts.tv_sec=" << header.ts.tv_sec;
+        std::cout << ", ts.tv_nsec=" << header.ts.tv_nsec;
+        std::cout << ", type=" << header.type;
+       
         std::cout << ", time=" << state.time;
         std::cout << ", position=" << state.position;
         std::cout << ", velocity=" << state.velocity;
+
         std::cout << ", torque=" << command.torque;
+
         std::cout << std::endl;
     }
 };
@@ -130,6 +154,7 @@ public:
 #include <sys/types.h>
 #include <sys/ipc.h>
 #include <sys/shm.h>
+#include <sys/mman.h>
 #include <unistd.h>
 #include <cstring>
 
@@ -137,129 +162,358 @@ public:
 
 enum ActuatorMessageBufferErrors {
     ERROR_NONE = 0,
-    ERROR_INVALID_KEY,
-    ERROR_INVALID_OWNER,
-    ERROR_COULD_NOT_OPEN_SHARED_MEMORY,
-    ERROR_COULD_NOT_ATTACH_TO_SHARED_MEMORY
+    ERROR_MAPPING_MEMORY,
+    ERROR_UNMAPPING_MEMORY,
+    ERROR_OPENING_SHARED_MEMORY,
+    ERROR_UNLINKING_SHARED_MEMORY,
+    ERROR_SYNCING_MEMORY,
+    ERROR_INITIALIZING_MUTEX
 };
 
 //-----------------------------------------------------------------------------
 
-/*
-Questions:
-How to attach a target identifier to the message so that one message structure
- can be differentiated from another in terms of who is intended to receive the
- message
+#define ACTUATOR_MESSAGE_BUFFERS_MAX 2
+const char* ACTUATOR_MESSAGE_BUFFER_NAME = "/amsgbuffer";
+const char* ACTUATOR_MESSAGE_BUFFER_MUTEX_NAME = "/amsgbuffer_mutex";
 
-How to make a variable sized or set of buffers as a single entity such that
- multiple messages can be sent simultaneously through the same buffer
-
-*/
+//-----------------------------------------------------------------------------
 
 class ActuatorMessageBuffer {
 private:
-    // Member Data
-    key_t               key;                // the key identifier for the shared segment
-    ActuatorMessage     *shared_buffer;     // pointer to the shared data segment
-    int                 buffer_id;          // the index of the buffer returned by shmget
-    bool                is_double_buffered; // whether or not this buffer is double buffered
+
+    bool                initialized;
+    bool                opened;
+
+    std::string         buffer_name;
+    std::string         mutex_name;
+
+    int                 fd_mutex;
+    pthread_mutex_t     *mutex;
+
+    int                 fd_buffer;
+    ActuatorMessage*    buffer;
+
 public:
 
-    // Member Data
-    int                 owner;              // the process identifier where this class is instantiated
-
     //-------------------------------------------------------------------------
-    // Constructor
+    // Constructors
     //-------------------------------------------------------------------------
     /// Default Constructor
-    ActuatorMessageBuffer( ) {
-        this->key = 0;
-        this->owner = 0;
+    ActuatorMessageBuffer( void ) {
+        initialized = false;
+        opened = false;
+        mutex = NULL;
+        buffer = NULL;
     }
 
     //-------------------------------------------------------------------------
-    /// Real Constructor
-    ActuatorMessageBuffer( const key_t& key, const int& owner ) {
-        this->key = key;
-        this->owner = owner;
+
+    ActuatorMessageBuffer( const char* buffer_name, const char* mutex_name, const bool& create = false ) {
+
+        assert( buffer_name != NULL && mutex_name != NULL );
+
+        this->buffer_name = buffer_name;
+        this->mutex_name = mutex_name;
+
+        if( init_mutex( create ) != ERROR_NONE ) {
+            // major problem.  No option but to bomb out.
+            printf( "failed to initialize mutex\n" );
+        }
+        if( init_buffer( create ) != ERROR_NONE ) {
+            // major problem.  No option but to bomb out.
+            printf( "failed to initialize buffer\n" );
+        }
+
+        initialized = true;
     }
 
     //-------------------------------------------------------------------------
     // Destructor
     //-------------------------------------------------------------------------
+
     virtual ~ActuatorMessageBuffer( void ) { }
 
+private:
     //-------------------------------------------------------------------------
-    // 'Device' Operations
+
+    int init_mutex( const bool& create = false ) {
+
+        void* shm_mutex_addr;
+        pthread_mutexattr_t mutexattr;
+
+        if( create )
+            fd_mutex = shm_open( mutex_name.c_str( ), O_CREAT | O_RDWR, S_IRUSR | S_IWUSR );
+        else
+            fd_mutex = shm_open( mutex_name.c_str( ), O_RDWR, S_IRUSR | S_IWUSR );
+
+        ftruncate( fd_mutex, sizeof(pthread_mutex_t) );
+
+        if( fd_mutex != -1 ) {
+            shm_mutex_addr = mmap( NULL, sizeof(pthread_mutex_t), PROT_READ | PROT_WRITE, MAP_SHARED, fd_mutex, 0 );
+            if( shm_mutex_addr != MAP_FAILED ) {
+                mutex = static_cast<pthread_mutex_t*> ( shm_mutex_addr );
+                if( create ) {
+                    pthread_mutexattr_init( &mutexattr );
+
+                    pthread_mutexattr_setpshared( &mutexattr, PTHREAD_PROCESS_SHARED );
+
+                    if( pthread_mutex_init( mutex, &mutexattr ) != 0 ) {
+                        return ERROR_INITIALIZING_MUTEX;
+                    }
+                    pthread_mutexattr_destroy( &mutexattr );
+
+                    if( msync( shm_mutex_addr, sizeof(pthread_mutex_t), MS_SYNC | MS_INVALIDATE ) != 0 ) {
+                        perror( "msync()" );
+                        return ERROR_SYNCING_MEMORY;
+                    }
+                }
+            } else {
+                perror( "mmap()" );
+                return ERROR_MAPPING_MEMORY;
+            }
+        } else {
+            perror( "shm_open()" );
+            return ERROR_OPENING_SHARED_MEMORY;
+        }
+        return ERROR_NONE;
+
+        /*
+        if( create ) {
+            // Creating a mutex in shared memory
+
+            fd_mutex = shm_open( mutex_name, O_CREAT | O_RDWR, S_IRUSR | S_IWUSR );
+            ftruncate( fd_mutex, sizeof(pthread_mutex_t) );
+            if( fd_mutex != -1 ) {
+                //printf( "opened shared region\n" );
+
+                shm_mutex_addr = mmap( NULL, sizeof(pthread_mutex_t), PROT_READ | PROT_WRITE, MAP_SHARED, fd_mutex, 0 );
+                if( shm_mutex_addr != MAP_FAILED ) {
+                    //printf( "mmapped shared region\n" );
+
+                    mutex = static_cast<pthread_mutex_t*> ( shm_mutex_addr );
+                    //printf( "mutex assigned: 0x%x\n", mutex );
+
+                    pthread_mutexattr_init( &mutexattr );
+                    //printf( "mutex attributes initialized\n" );
+
+                    pthread_mutexattr_setpshared( &mutexattr, PTHREAD_PROCESS_SHARED );
+                    //printf( "mutex attributes set\n" );
+
+                    if( pthread_mutex_init( mutex, &mutexattr ) != 0 ) {
+                        return ERROR_INITIALIZING_MUTEX;
+                    }
+                    //printf( "mutex initialized\n" );
+
+                    pthread_mutexattr_destroy( &mutexattr );
+                    //printf( "mutex attributes cleaned up\n" );
+
+                    if( msync( shm_mutex_addr, sizeof(pthread_mutex_t), MS_SYNC | MS_INVALIDATE ) != 0 ) {
+                        perror( "msync()" );
+                        return ERROR_SYNCING_MEMORY;
+                    }
+
+                    //printf( "successfully created mutex\n" );
+                } else {
+                    perror( "mmap()" );
+                    return ERROR_MAPPING_MEMORY;
+                }
+            } else {
+                perror( "shm_open()" );
+                return ERROR_OPENING_SHARED_MEMORY;
+            }
+        } else {
+            // Attaching to an existing mutex.  Some process must create it before
+            // this region is invoked.  Basically, the parent process should
+            // invoke this code before forking or spawning threads with create
+            // and any subsequent child threads or processes invoke this code without
+            // create
+
+            fd_mutex = shm_open( mutex_name, O_RDWR, S_IRUSR | S_IWUSR );
+            ftruncate( fd_mutex, sizeof(pthread_mutex_t) );
+            if( fd_mutex != -1 ) {
+                //printf( "opened mutex shared region\n" );
+
+                shm_mutex_addr = mmap( NULL, sizeof(pthread_mutex_t), PROT_READ | PROT_WRITE, MAP_SHARED, fd_mutex, 0 );
+                if( shm_mutex_addr != MAP_FAILED ) {
+                    //printf( "mmapped mutex shared region\n" );
+
+                    mutex = static_cast<pthread_mutex_t*> ( shm_mutex_addr );
+                    //printf( "mutex assigned: 0x%x\n", mutex );
+
+                    //printf( "successfully attached to mutex\n" );
+                } else {
+                    perror( "mmap()" );
+                    return ERROR_MAPPING_MEMORY;
+                }
+            } else {
+                perror( "shm_open()" );
+                return ERROR_OPENING_SHARED_MEMORY;
+            }
+        }
+        return ERROR_NONE;
+        */
+
+    }
+
     //-------------------------------------------------------------------------
-    // Open the shared memory 'device'
-    int open( void ) {
-        if( key == 0 ) return ERROR_INVALID_KEY;
-        if( owner == 0 ) return ERROR_INVALID_OWNER;
 
-
-        // get the shared memory segment\
-        // Note: open for writing (0666) and create
-        if( ( buffer_id = shmget( (key_t)key, sizeof(ActuatorMessage), IPC_CREAT | 0666 ) ) < 0 ) {
-            perror("shmget");
-            return ERROR_COULD_NOT_OPEN_SHARED_MEMORY;
+    int delete_mutex( void ) {
+        if( munmap( (void*)mutex, sizeof(pthread_mutex_t) ) ) {
+            perror( "munmap()" );
+            return ERROR_UNMAPPING_MEMORY;
         }
 
-        // attach to the shared memory segment
-        if( ( shared_buffer = (ActuatorMessage*)shmat( buffer_id, NULL, 0 ) ) == (ActuatorMessage*) -1 ) {
-            perror("shmat");
-            return ERROR_COULD_NOT_ATTACH_TO_SHARED_MEMORY;
+        if( shm_unlink( mutex_name.c_str( ) ) != 0 ) {
+            return ERROR_UNLINKING_SHARED_MEMORY;
         }
+
         return ERROR_NONE;
     }
 
     //-------------------------------------------------------------------------
-    // Close the shared memory 'device'
-    void close( void ) {
-        // detach from the shared memory segment
-        shmdt( shared_buffer );
 
-        // mark for deletion
-        shmctl( buffer_id, IPC_RMID, NULL );
+    int init_buffer( const bool& create = false ) {
+
+        void* shm_buffer_addr;
+
+        if( create )
+            fd_buffer = shm_open( buffer_name.c_str( ), O_CREAT | O_RDWR, S_IRUSR | S_IWUSR );
+        else
+            fd_buffer = shm_open( buffer_name.c_str( ), O_RDWR, S_IRUSR | S_IWUSR );
+
+        ftruncate( fd_buffer, sizeof(ActuatorMessage) );
+
+        if( fd_buffer != -1 ) {
+            shm_buffer_addr = mmap( NULL, sizeof(ActuatorMessage), PROT_READ | PROT_WRITE, MAP_SHARED, fd_buffer, 0 );
+            if( shm_buffer_addr != MAP_FAILED ) {
+                buffer = static_cast<ActuatorMessage*> ( shm_buffer_addr );
+            } else {
+                perror( "mmap()" );
+                return ERROR_MAPPING_MEMORY;
+            }
+        } else {
+            perror( "shm_open()" );
+            return ERROR_OPENING_SHARED_MEMORY;
+        }
+        return ERROR_NONE;
+
+        /*
+        if( create ) {
+            fd_buffer = shm_open( buffer_name, O_CREAT | O_RDWR, S_IRUSR | S_IWUSR );
+            ftruncate( fd_buffer, sizeof(ActuatorMessage) );
+            if( fd_buffer != -1 ) {
+
+                shm_buffer_addr = mmap( NULL, sizeof(ActuatorMessage), PROT_READ | PROT_WRITE, MAP_SHARED, fd_buffer, 0 );
+                if( shm_buffer_addr != MAP_FAILED ) {
+                    buffer = static_cast<ActuatorMessage*> ( shm_buffer_addr );
+                } else {
+                    perror( "mmap()" );
+                    return ERROR_MAPPING_MEMORY;
+                }
+            } else {
+                perror( "shm_open()" );
+                return ERROR_OPENING_SHARED_MEMORY;
+            }
+        } else {
+            assert( initialized == true );
+
+            fd_buffer = shm_open( buffer_name, O_RDWR, S_IRUSR | S_IWUSR );
+            ftruncate( fd_buffer, sizeof(ActuatorMessage) );
+            if( fd_buffer != -1 ) {
+                shm_buffer_addr = mmap( NULL, sizeof(ActuatorMessage), PROT_READ | PROT_WRITE, MAP_SHARED, fd_buffer, 0 );
+                if( shm_buffer_addr != MAP_FAILED ) {
+                    buffer = static_cast<ActuatorMessage*> ( shm_buffer_addr );
+                } else {
+                    perror( "mmap()" );
+                    return ERROR_MAPPING_MEMORY;
+                }
+
+                opened = true;
+            } else {
+                perror( "shm_open()" );
+                return ERROR_OPENING_SHARED_MEMORY;
+            }
+        }
+        return ERROR_NONE;
+        */
     }
 
     //-------------------------------------------------------------------------
-    // Write to the shared memory 'device'
-    void write( const ActuatorMessage& msg ) {
-        // copy the state and commands first
-        memcpy( &shared_buffer->state, &msg.state, sizeof(struct ActuatorMessageState) );
-        memcpy( &shared_buffer->command, &msg.command, sizeof(struct ActuatorMessageCommand) );
-        // write the header (in particular publisher) LAST because reading is listening for a
-        // change to publisher and don't want to trigger the reading of incomplete data
-        // So copy each property in header individually
-        shared_buffer->header.type = msg.header.type;
-        shared_buffer->header.publisher = owner;
 
-        // Should ultimately be protected with a mutex
-    }
-
-    //-------------------------------------------------------------------------
-    // Read from the shared memory 'device'
-    ActuatorMessage read( void ) {
-        // loop until another publisher writes into the buffer
-        // publisher is initialized to 0 or when a command is written a publisher gets tagged
-        while( shared_buffer->header.publisher == owner || shared_buffer->header.publisher == NULL ) {
-            // block until someone writes
-            usleep(1);
+    int delete_buffer( void ) {
+        if( munmap( (void*)buffer, sizeof(ActuatorMessage) ) ) {
+            perror("munmap()");
+            return ERROR_UNMAPPING_MEMORY;
         }
 
-        // define a command to return
+        if( shm_unlink( buffer_name.c_str( ) ) != 0 ) {
+            return ERROR_UNLINKING_SHARED_MEMORY;
+        }
+
+        return ERROR_NONE;
+    }
+
+    //-------------------------------------------------------------------------
+
+public:
+
+    //-------------------------------------------------------------------------
+
+    int open( void ) {
+        assert( initialized );
+
+        opened = true;
+
+        return ERROR_NONE;
+    }
+
+    //-------------------------------------------------------------------------
+
+    void close( void ) {
+
+        opened = false;
+    }
+
+    //-------------------------------------------------------------------------
+
+    int write( const ActuatorMessage& msg ) {
+        assert( opened == true );
+
+        pthread_mutex_lock( mutex );
+
+        memcpy( &buffer->state, &msg.state, sizeof(struct ActuatorMessageState) );
+        memcpy( &buffer->command, &msg.command, sizeof(struct ActuatorMessageCommand) );
+        memcpy( &buffer->header, &msg.header, sizeof(struct ActuatorMessageHeader) );
+
+        if( msync( (void*)buffer, sizeof(ActuatorMessage), MS_SYNC ) != 0 ) {
+            perror( "msync()" );
+            return ERROR_SYNCING_MEMORY;
+        }
+
+        pthread_mutex_unlock( mutex );
+
+        return ERROR_NONE;
+    }
+
+    //-------------------------------------------------------------------------
+
+    ActuatorMessage read( void ) {
+        assert( opened == true );
+
+        pthread_mutex_lock( mutex );
+
         ActuatorMessage msg;
-        // unlike in write() don't need to be too particular about order YET.
-        // So copy all the header and the state info out with memcpy
-        memcpy( &msg.header, &shared_buffer->header, sizeof(struct ActuatorMessageHeader) );
-        memcpy( &msg.state, &shared_buffer->state, sizeof(struct ActuatorMessageState) );
-        memcpy( &msg.command, &shared_buffer->command, sizeof(struct ActuatorMessageCommand) );
+
+        memcpy( &msg.header, &buffer->header, sizeof(struct ActuatorMessageHeader) );
+        memcpy( &msg.state, &buffer->state, sizeof(struct ActuatorMessageState) );
+        memcpy( &msg.command, &buffer->command, sizeof(struct ActuatorMessageCommand) );
+
+        pthread_mutex_unlock( mutex );
 
         return msg;
     }
 
-    // NOTE: Remember the suggestion on creating a double buffer.
+    //-------------------------------------------------------------------------
 
 };
 

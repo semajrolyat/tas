@@ -1,19 +1,20 @@
 /*----------------------THE GEORGE WASHINGTON UNIVERSITY-----------------------
 author: James R. Taylor                                             jrt@gwu.edu
 
-This is a simple program to act as the controller process for testing purposes.
-It only prints the current system time to the console after doing a relatively
-intensive computation to simulate time passing and processer load
+controller.cpp
 -----------------------------------------------------------------------------*/
 
 #include <assert.h>
 #include <stdexcept>
 #include <stdio.h>
 #include <stdlib.h>
+#include <pthread.h>
+#include <errno.h>
 
 #include <Moby/Simulator.h>
 #include <Moby/RCArticulatedBody.h>
 
+#include "TAS.h"
 #include "ActuatorMessage.h"
 
 //-----------------------------------------------------------------------------
@@ -53,10 +54,12 @@ Real velocity_trajectory( Real t, Real tfinal, Real q0, Real qdes ) {
 }
 
 //-----------------------------------------------------------------------------
-// Control Functions
+// Moby Control Functions
 //-----------------------------------------------------------------------------
 
+
 /// Controls the pendulum
+/// Note: Moby Plugin Code
 void control_PD( RCArticulatedBodyPtr pendulum, Real time ) {
 
   const Real Kp = 1.0;
@@ -82,14 +85,67 @@ void control_PD( RCArticulatedBodyPtr pendulum, Real time ) {
 //-----------------------------------------------------------------------------
 
 /// The main control loop for Moby plugin controller
+/// Note: Moby Plugin Code
 void control( DynamicBodyPtr pendulum, Real time, void* data ) {
 
   control_PD( dynamic_pointer_cast<RCArticulatedBody>(pendulum), time );
 }
 
 //-----------------------------------------------------------------------------
+// Mody Plugin Interface
+//-----------------------------------------------------------------------------
 
-/// The main control loop for standalone controller
+// plugin must be "extern C"
+extern "C" {
+
+/**
+    Interface to compile as a Moby Plugin
+/// Note: Moby Plugin Code
+*/
+void init( void* separator, const std::map<std::string, BasePtr>& read_map, Real time ) {
+
+  if( read_map.find("simulator") == read_map.end() )
+    throw std::runtime_error( "controller.cpp:init()- unable to find simulator!" );
+
+  // find the pendulum
+  if( read_map.find("pendulum") == read_map.end() )
+    throw std::runtime_error( "controller.cpp:init()- unable to find pendulum!" );
+  DynamicBodyPtr pendulum = dynamic_pointer_cast<DynamicBody>( read_map.find("pendulum")->second );
+  if( !pendulum )
+    throw std::runtime_error( "controller.cpp:init()- unable to cast pendulum to type DynamicBody" );
+
+  // setup the control function
+  pendulum->controller = control;
+
+}
+
+} // end extern C
+
+//-----------------------------------------------------------------------------
+// Standalone Controller
+//----------------------------------------------------------------------------
+
+/*
+int fd_coordinator_to_controller[2];
+int fd_controller_to_coordinator[2];
+
+//-----------------------------------------------------------------------------
+
+void attach_pipes( void ) {
+    fd_coordinator_to_controller[0] = FD_COORDINATOR_TO_CONTROLLER_READ_CHANNEL;
+    fd_coordinator_to_controller[1] = FD_COORDINATOR_TO_CONTROLLER_WRITE_CHANNEL;
+
+    fd_controller_to_coordinator[0] = FD_CONTROLLER_TO_COORDINATOR_READ_CHANNEL;
+    fd_controller_to_coordinator[1] = FD_CONTROLLER_TO_COORDINATOR_WRITE_CHANNEL;
+}
+*/
+//-----------------------------------------------------------------------------
+
+ActuatorMessageBuffer amsgbuffer;
+
+//-----------------------------------------------------------------------------
+
+/// Control function for Standalone Controller
 ActuatorMessage control( const ActuatorMessage& msg ) {
 
   ActuatorMessage reply = ActuatorMessage( msg );
@@ -113,78 +169,77 @@ ActuatorMessage control( const ActuatorMessage& msg ) {
 }
 
 //-----------------------------------------------------------------------------
-// Moby Plugin Interface
-//-----------------------------------------------------------------------------
 
-// plugin must be "extern C"
-extern "C" {
-
-/**
-    Interface to compile as a Moby Plugin
-*/
-void init( void* separator, const std::map<std::string, BasePtr>& read_map, Real time ) {
-
-  if( read_map.find("simulator") == read_map.end() )
-    throw std::runtime_error( "controller.cpp:init()- unable to find simulator!" );
-
-  // find the pendulum
-  if( read_map.find("pendulum") == read_map.end() )
-    throw std::runtime_error( "controller.cpp:init()- unable to find pendulum!" );
-  DynamicBodyPtr pendulum = dynamic_pointer_cast<DynamicBody>( read_map.find("pendulum")->second );
-  if( !pendulum )
-    throw std::runtime_error( "controller.cpp:init()- unable to cast pendulum to type DynamicBody" );
-
-  // setup the controller
-  pendulum->controller = control;
-
-}
-
-} // end extern C
-
-//-----------------------------------------------------------------------------
-// Controller Entry Point
-//-----------------------------------------------------------------------------
-
-/**
-    Interface to compile as a Standalone Application
-*/
+/// Standalone Controller Entry Point
 int main( int argc, char* argv[] ) {
 
-    ActuatorMessageBuffer amsgbuffer = ActuatorMessageBuffer( 8811, getpid( ) );
-    amsgbuffer.open();   // TODO : sanity/safety checking
+    //attach_pipes( );
+
+    amsgbuffer = ActuatorMessageBuffer( ACTUATOR_MESSAGE_BUFFER_NAME, ACTUATOR_MESSAGE_BUFFER_MUTEX_NAME );
+    amsgbuffer.open( );
 
     ActuatorMessage msg_request, msg_state, msg_command;
 
+    char buf;
+
+    int cycle = 0;
+    Real time = 0.0;
+
     while( 1 ) {
 
-        //printf( "(controller) requesting state\n" );
+        if( VERBOSE ) printf( "(controller) requesting state\n" );
         // request the state of the actuator
         msg_request.header.type = MSG_TYPE_STATE_REQUEST;
+        msg_request.state.time = time;
+
         amsgbuffer.write( msg_request );
 
-        do {
-            // read the state out of the buffer
-            msg_state = amsgbuffer.read( );
-            // Note: due to asynchronicity and multiple controllers, here should check the
-            // type and id of the message to confirm it is reply
-        } while( msg_state.header.type != MSG_TYPE_STATE_REPLY );
+        buf = 0;
+        // send a notification to the coordinator
+        write( FD_CONTROLLER_TO_COORDINATOR_WRITE_CHANNEL, &buf, 1 );
 
-        //printf( "(controller) received state reply\n" );
-        //msg_state.print();
+        // wait for the reply meaning the state request fulfilled and written to the buffer
+        if( read( FD_COORDINATOR_TO_CONTROLLER_READ_CHANNEL, &buf, 1 ) == -1 ) {
+            switch( errno ) {
+            case EINTR:
+                // yet to determine appropriate course of action if this happens
+                break;
+            default:
+                printf( "EXCEPTION: unhandled read error in controller reading from FD_COORDINATOR_TO_CONTROLLER_READ_CHANNEL" );
+                break;
+            }
+        }
+        if( VERBOSE ) printf( "(controller) received notification of published state\n" );
+
+        // At this point a message was sent from the coordinator.  Attempt to read from buffer
+        // read the state out of the buffer
+        msg_state = amsgbuffer.read( );
+
+        if( VERBOSE ) printf( "(controller) received state reply\n" );
+        if( VERBOSE ) msg_state.print();
 
         // compute the command message
         msg_command = control( msg_state );
         msg_command.header.type = MSG_TYPE_COMMAND;
 
-        //printf( "(controller) writing command\n" );
+        if( VERBOSE ) printf( "(controller) writing command\n" );
         // send the command message to the actuator
         amsgbuffer.write( msg_command );
+        // Note: will block waiting to acquire mutex
+	
+        // send a notification to the coordinator
+        write( FD_CONTROLLER_TO_COORDINATOR_WRITE_CHANNEL, &buf, 1 );
 
         // consume some time.
-        usleep( 1000 );
+        //usleep( 1000 );
+
+        time = (double)cycle / (double)CONTROLLER_FREQUENCY_HERTZ;
+        cycle++;
     }
 
     amsgbuffer.close( );  // TODO : figure out a way to force a clean up
 
     return 0;
 }
+
+//-----------------------------------------------------------------------------
