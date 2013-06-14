@@ -232,6 +232,12 @@ struct timeval get_process_time( void ) {
 
 //-----------------------------------------------------------------------------
 
+Real timeval_to_real( const struct timeval& tv ) {
+    return (Real) tv.tv_sec + (Real) tv.tv_usec / (Real) USECS_PER_SEC;
+}
+
+//-----------------------------------------------------------------------------
+
 /// Standalone Controller Entry Point
 int main( int argc, char* argv[] ) {
 
@@ -287,7 +293,8 @@ int main( int argc, char* argv[] ) {
     	timersub( &tv_current, &tv_start, &tv_control );
 
         // Compute the time
-        Real t = (Real) tv_control.tv_sec + (Real) tv_control.tv_usec / (Real) USECS_PER_SEC;
+        //Real t = (Real) tv_control.tv_sec + (Real) tv_control.tv_usec / (Real) USECS_PER_SEC;
+        Real t = timeval_to_real( tv_control );
         if( VERBOSE ) printf( "(controller) Requesting state at time: %f\n", t );
 
         state = get_state( t );
@@ -307,6 +314,10 @@ int main( int argc, char* argv[] ) {
 
         // recompute the end of the interval
     	timeradd( &tv_interval_start, &tv_interval, &tv_interval_end );
+
+        if( VERBOSE ) printf( "(controller) Interval: %f\n", timeval_to_real( tv_interval ) );
+        if( VERBOSE ) printf( "(controller) Next interval start: %f\n", timeval_to_real( tv_interval_start ) );
+        if( VERBOSE ) printf( "(controller) Next interval end: %f\n", timeval_to_real( tv_interval_end ) );
 
         cycle++;
     }
