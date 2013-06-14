@@ -223,9 +223,11 @@ struct timeval get_process_time( void ) {
     struct rusage ru;
     struct timeval tv;
 
-    int result = getrusage( RUSAGE_SELF, &ru );
+    //int result = getrusage( RUSAGE_SELF, &ru );
+    //memcpy( &tv, &ru.ru_utime, sizeof(timeval) );
 
-    memcpy( &tv, &ru.ru_utime, sizeof(timeval) );
+    gettimeofday( &tv, NULL );
+
 
     return tv;
 }
@@ -246,6 +248,9 @@ int main( int argc, char* argv[] ) {
     // Real time = 0.0;
     struct timeval tv_start, tv_current, tv_control;
     struct timeval tv_interval, tv_interval_start, tv_interval_end, tv_interval_elapsed;
+
+    unsigned long long rdtsc_mark1;
+    unsigned long long rdtsc_mark2;
 
     tv_interval.tv_sec = 0;
     tv_interval.tv_usec = 1000;
