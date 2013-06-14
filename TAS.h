@@ -85,5 +85,22 @@ typedef double Real;
 
 //-----------------------------------------------------------------------------
 
+#define DEFAULT_PROCESSOR    0
+
+//-----------------------------------------------------------------------------
+
+#define NSECS_PER_SEC 1E9
+#define USECS_PER_SEC 1E6
+
+//-----------------------------------------------------------------------------
+
+#define DEFAULT_BUDGET_RTTIMER_NSEC	1E8
+#define DEFAULT_BUDGET_RTTIMER_SEC	0
+
+#define DEFAULT_INITDELAY_RTTIMER_NSEC	1
+#define DEFAULT_INITDELAY_RTTIMER_SEC	0
+
+//-----------------------------------------------------------------------------
+
 #endif // _TAS_H_
 

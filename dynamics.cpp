@@ -735,14 +735,8 @@ void init( int argc, char** argv ) {
         printf( "dynamics.cpp:init()- unable to cast pendulum to type RCArticulatedBody\n" );
 
     // open the command buffer
-    //amsgbuffer = ActuatorMessageBuffer( &amsgbuffer_mutex, 8811, getpid( ), 0 );
-
-    //attach_mutex( );
-    //amsgbuffer = ActuatorMessageBuffer( amsgbuffer_mutex );
-    //amsgbuffer.open();   // TODO : sanity/safety checking
-
     amsgbuffer = ActuatorMessageBuffer( ACTUATOR_MESSAGE_BUFFER_NAME, ACTUATOR_MESSAGE_BUFFER_MUTEX_NAME );
-    amsgbuffer.open( );
+    amsgbuffer.open();   // TODO : sanity/safety checking
 
     printf( "(dynamics::initialized)\n" );
 }
@@ -801,9 +795,6 @@ void get_command( void ) {
 */
 void run( Real dt ) {
 
-    // fetch the command in the buffer
-    //get_command();
-
     #ifdef USE_OSG
     if (ONSCREEN_RENDER)
     {
@@ -813,16 +804,9 @@ void run( Real dt ) {
     }
     #endif
 
-    // Note: research how the original driver sets up all the parameters that
-    // drive step size.  sim->step(dt) is not sufficient in and of itself so
-    // there must be another or more parameters that manipulate this state info
-    //sim->step( dt );
     // step the sim forward
     STEP_SIZE = dt;
     step((void*) &sim);
-
-    // publish any state change
-    //publish_state();
 
     //#ifdef USE_OSG
     //usleep(DYNAMICS_FREQ);

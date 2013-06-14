@@ -106,20 +106,7 @@ public:
 
         command.torque = msg.command.torque;
     }
-/*
-    //-------------------------------------------------------------------------
-    /// Publisher Override (to Republish) Copy Constructor
-    ActuatorMessage( const int& publisher, const ActuatorMessage& msg ) {
-        header.publisher = publisher;
-        header.type = msg.header.type;
 
-        state.position = msg.state.position;
-        state.velocity = msg.state.velocity;
-        state.time = msg.state.time;
-
-        command.torque = msg.command.torque;
-    }
-*/
     //-------------------------------------------------------------------------
     // Destructor
     //-------------------------------------------------------------------------
@@ -160,7 +147,16 @@ public:
 
 //-----------------------------------------------------------------------------
 
-enum ActuatorMessageBufferErrors {
+/// Aliasing the system close(2) function.  Necessary because the buffer has
+/// a close method and the compiler doesn't want to use the system function
+/// because they have the same name but different signatures
+int sys_close_fd( const int& fd ) {
+    close( fd );
+}
+
+//-----------------------------------------------------------------------------
+
+enum ActuatorMessageBufferError {
     ERROR_NONE = 0,
     ERROR_MAPPING_MEMORY,
     ERROR_UNMAPPING_MEMORY,
@@ -236,7 +232,7 @@ public:
 private:
     //-------------------------------------------------------------------------
 
-    int init_mutex( const bool& create = false ) {
+    ActuatorMessageBufferError init_mutex( const bool& create = false ) {
 
         void* shm_mutex_addr;
         pthread_mutexattr_t mutexattr;
@@ -246,118 +242,46 @@ private:
         else
             fd_mutex = shm_open( mutex_name.c_str( ), O_RDWR, S_IRUSR | S_IWUSR );
 
-        ftruncate( fd_mutex, sizeof(pthread_mutex_t) );
-
-        if( fd_mutex != -1 ) {
-            shm_mutex_addr = mmap( NULL, sizeof(pthread_mutex_t), PROT_READ | PROT_WRITE, MAP_SHARED, fd_mutex, 0 );
-            if( shm_mutex_addr != MAP_FAILED ) {
-                mutex = static_cast<pthread_mutex_t*> ( shm_mutex_addr );
-                if( create ) {
-                    pthread_mutexattr_init( &mutexattr );
-
-                    pthread_mutexattr_setpshared( &mutexattr, PTHREAD_PROCESS_SHARED );
-
-                    if( pthread_mutex_init( mutex, &mutexattr ) != 0 ) {
-                        return ERROR_INITIALIZING_MUTEX;
-                    }
-                    pthread_mutexattr_destroy( &mutexattr );
-
-                    if( msync( shm_mutex_addr, sizeof(pthread_mutex_t), MS_SYNC | MS_INVALIDATE ) != 0 ) {
-                        perror( "msync()" );
-                        return ERROR_SYNCING_MEMORY;
-                    }
-                }
-            } else {
-                perror( "mmap()" );
-                return ERROR_MAPPING_MEMORY;
-            }
-        } else {
+        if( fd_mutex == -1 ) {
             perror( "shm_open()" );
             return ERROR_OPENING_SHARED_MEMORY;
         }
-        return ERROR_NONE;
 
-        /*
+        ftruncate( fd_mutex, sizeof(pthread_mutex_t) );
+
+        shm_mutex_addr = mmap( NULL, sizeof(pthread_mutex_t), PROT_READ | PROT_WRITE, MAP_SHARED, fd_mutex, 0 );
+
+        if( shm_mutex_addr == MAP_FAILED ) {
+            perror( "mmap()" );
+            sys_close_fd( fd_mutex );
+            return ERROR_MAPPING_MEMORY;
+        }
+
+        mutex = static_cast<pthread_mutex_t*> ( shm_mutex_addr );
         if( create ) {
-            // Creating a mutex in shared memory
+            pthread_mutexattr_init( &mutexattr );
 
-            fd_mutex = shm_open( mutex_name, O_CREAT | O_RDWR, S_IRUSR | S_IWUSR );
-            ftruncate( fd_mutex, sizeof(pthread_mutex_t) );
-            if( fd_mutex != -1 ) {
-                //printf( "opened shared region\n" );
+            pthread_mutexattr_setpshared( &mutexattr, PTHREAD_PROCESS_SHARED );
 
-                shm_mutex_addr = mmap( NULL, sizeof(pthread_mutex_t), PROT_READ | PROT_WRITE, MAP_SHARED, fd_mutex, 0 );
-                if( shm_mutex_addr != MAP_FAILED ) {
-                    //printf( "mmapped shared region\n" );
-
-                    mutex = static_cast<pthread_mutex_t*> ( shm_mutex_addr );
-                    //printf( "mutex assigned: 0x%x\n", mutex );
-
-                    pthread_mutexattr_init( &mutexattr );
-                    //printf( "mutex attributes initialized\n" );
-
-                    pthread_mutexattr_setpshared( &mutexattr, PTHREAD_PROCESS_SHARED );
-                    //printf( "mutex attributes set\n" );
-
-                    if( pthread_mutex_init( mutex, &mutexattr ) != 0 ) {
-                        return ERROR_INITIALIZING_MUTEX;
-                    }
-                    //printf( "mutex initialized\n" );
-
-                    pthread_mutexattr_destroy( &mutexattr );
-                    //printf( "mutex attributes cleaned up\n" );
-
-                    if( msync( shm_mutex_addr, sizeof(pthread_mutex_t), MS_SYNC | MS_INVALIDATE ) != 0 ) {
-                        perror( "msync()" );
-                        return ERROR_SYNCING_MEMORY;
-                    }
-
-                    //printf( "successfully created mutex\n" );
-                } else {
-                    perror( "mmap()" );
-                    return ERROR_MAPPING_MEMORY;
-                }
-            } else {
-                perror( "shm_open()" );
-                return ERROR_OPENING_SHARED_MEMORY;
+            if( pthread_mutex_init( mutex, &mutexattr ) != 0 ) {
+                // what other handling should be done in response.  Close the fd?
+                return ERROR_INITIALIZING_MUTEX;
             }
-        } else {
-            // Attaching to an existing mutex.  Some process must create it before
-            // this region is invoked.  Basically, the parent process should
-            // invoke this code before forking or spawning threads with create
-            // and any subsequent child threads or processes invoke this code without
-            // create
+            pthread_mutexattr_destroy( &mutexattr );
 
-            fd_mutex = shm_open( mutex_name, O_RDWR, S_IRUSR | S_IWUSR );
-            ftruncate( fd_mutex, sizeof(pthread_mutex_t) );
-            if( fd_mutex != -1 ) {
-                //printf( "opened mutex shared region\n" );
-
-                shm_mutex_addr = mmap( NULL, sizeof(pthread_mutex_t), PROT_READ | PROT_WRITE, MAP_SHARED, fd_mutex, 0 );
-                if( shm_mutex_addr != MAP_FAILED ) {
-                    //printf( "mmapped mutex shared region\n" );
-
-                    mutex = static_cast<pthread_mutex_t*> ( shm_mutex_addr );
-                    //printf( "mutex assigned: 0x%x\n", mutex );
-
-                    //printf( "successfully attached to mutex\n" );
-                } else {
-                    perror( "mmap()" );
-                    return ERROR_MAPPING_MEMORY;
-                }
-            } else {
-                perror( "shm_open()" );
-                return ERROR_OPENING_SHARED_MEMORY;
+            if( msync( shm_mutex_addr, sizeof(pthread_mutex_t), MS_SYNC | MS_INVALIDATE ) != 0 ) {
+                // what other handling should be done in response.  Close the fd, release the mutex?
+                perror( "msync()" );
+                return ERROR_SYNCING_MEMORY;
             }
         }
-        return ERROR_NONE;
-        */
 
+        return ERROR_NONE;
     }
 
     //-------------------------------------------------------------------------
 
-    int delete_mutex( void ) {
+    ActuatorMessageBufferError delete_mutex( void ) {
         if( munmap( (void*)mutex, sizeof(pthread_mutex_t) ) ) {
             perror( "munmap()" );
             return ERROR_UNMAPPING_MEMORY;
@@ -372,7 +296,7 @@ private:
 
     //-------------------------------------------------------------------------
 
-    int init_buffer( const bool& create = false ) {
+    ActuatorMessageBufferError init_buffer( const bool& create = false ) {
 
         void* shm_buffer_addr;
 
@@ -381,66 +305,29 @@ private:
         else
             fd_buffer = shm_open( buffer_name.c_str( ), O_RDWR, S_IRUSR | S_IWUSR );
 
-        ftruncate( fd_buffer, sizeof(ActuatorMessage) );
-
-        if( fd_buffer != -1 ) {
-            shm_buffer_addr = mmap( NULL, sizeof(ActuatorMessage), PROT_READ | PROT_WRITE, MAP_SHARED, fd_buffer, 0 );
-            if( shm_buffer_addr != MAP_FAILED ) {
-                buffer = static_cast<ActuatorMessage*> ( shm_buffer_addr );
-            } else {
-                perror( "mmap()" );
-                return ERROR_MAPPING_MEMORY;
-            }
-        } else {
+        if( fd_buffer == -1 ) {
             perror( "shm_open()" );
             return ERROR_OPENING_SHARED_MEMORY;
         }
-        return ERROR_NONE;
 
-        /*
-        if( create ) {
-            fd_buffer = shm_open( buffer_name, O_CREAT | O_RDWR, S_IRUSR | S_IWUSR );
-            ftruncate( fd_buffer, sizeof(ActuatorMessage) );
-            if( fd_buffer != -1 ) {
+        ftruncate( fd_buffer, sizeof(ActuatorMessage) );
 
-                shm_buffer_addr = mmap( NULL, sizeof(ActuatorMessage), PROT_READ | PROT_WRITE, MAP_SHARED, fd_buffer, 0 );
-                if( shm_buffer_addr != MAP_FAILED ) {
-                    buffer = static_cast<ActuatorMessage*> ( shm_buffer_addr );
-                } else {
-                    perror( "mmap()" );
-                    return ERROR_MAPPING_MEMORY;
-                }
-            } else {
-                perror( "shm_open()" );
-                return ERROR_OPENING_SHARED_MEMORY;
-            }
-        } else {
-            assert( initialized == true );
+        shm_buffer_addr = mmap( NULL, sizeof(ActuatorMessage), PROT_READ | PROT_WRITE, MAP_SHARED, fd_buffer, 0 );
 
-            fd_buffer = shm_open( buffer_name, O_RDWR, S_IRUSR | S_IWUSR );
-            ftruncate( fd_buffer, sizeof(ActuatorMessage) );
-            if( fd_buffer != -1 ) {
-                shm_buffer_addr = mmap( NULL, sizeof(ActuatorMessage), PROT_READ | PROT_WRITE, MAP_SHARED, fd_buffer, 0 );
-                if( shm_buffer_addr != MAP_FAILED ) {
-                    buffer = static_cast<ActuatorMessage*> ( shm_buffer_addr );
-                } else {
-                    perror( "mmap()" );
-                    return ERROR_MAPPING_MEMORY;
-                }
-
-                opened = true;
-            } else {
-                perror( "shm_open()" );
-                return ERROR_OPENING_SHARED_MEMORY;
-            }
+        if( shm_buffer_addr == MAP_FAILED ) {
+            perror( "mmap()" );
+            sys_close_fd( fd_mutex );
+            return ERROR_MAPPING_MEMORY;
         }
+
+        buffer = static_cast<ActuatorMessage*> ( shm_buffer_addr );
+
         return ERROR_NONE;
-        */
     }
 
     //-------------------------------------------------------------------------
 
-    int delete_buffer( void ) {
+    ActuatorMessageBufferError delete_buffer( void ) {
         if( munmap( (void*)buffer, sizeof(ActuatorMessage) ) ) {
             perror("munmap()");
             return ERROR_UNMAPPING_MEMORY;
@@ -476,7 +363,7 @@ public:
 
     //-------------------------------------------------------------------------
 
-    int write( const ActuatorMessage& msg ) {
+    ActuatorMessageBufferError write( const ActuatorMessage& msg ) {
         assert( opened == true );
 
         pthread_mutex_lock( mutex );

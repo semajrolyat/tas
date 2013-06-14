@@ -132,90 +132,177 @@ ActuatorMessageBuffer amsgbuffer;
 /// Control function for Standalone Controller
 ActuatorMessage control( const ActuatorMessage& msg ) {
 
-  ActuatorMessage reply = ActuatorMessage( msg );
+    ActuatorMessage reply = ActuatorMessage( msg );
 
-  const Real Kp = 1.0;
-  const Real Kv = 0.1;
+    const Real Kp = 1.0;
+    const Real Kv = 0.1;
 
-  Real time = msg.state.time;
-  Real measured_position = msg.state.position;
-  Real measured_velocity = msg.state.velocity;
+    Real time = msg.state.time;
+    Real measured_position = msg.state.position;
+    Real measured_velocity = msg.state.velocity;
 
-  Real desired_position = position_trajectory( time, 0.5, 0.0, PI );
-  Real desired_velocity = velocity_trajectory( time, 0.5, 0.0, PI );
+    Real desired_position = position_trajectory( time, 0.5, 0.0, PI );
+    Real desired_velocity = velocity_trajectory( time, 0.5, 0.0, PI );
 
-  reply.command.torque = Kp * ( desired_position - measured_position ) + Kv * ( desired_velocity - measured_velocity );
+    reply.command.torque = Kp * ( desired_position - measured_position ) + Kv * ( desired_velocity - measured_velocity );
 
-  //printf( "(controller::control) " );
-  //reply.print();
-
-  return reply;
+    return reply;
 }
 
 //-----------------------------------------------------------------------------
 
+ActuatorMessage get_state( const Real& time ) {
+
+    char buf = 0;
+    ActuatorMessage request;
+    ActuatorMessage state;
+        
+    request.header.type = MSG_TYPE_STATE_REQUEST;
+    request.state.time = time;
+
+    amsgbuffer.write( request );
+
+    // send a notification to the coordinator
+    write( FD_CONTROLLER_TO_COORDINATOR_WRITE_CHANNEL, &buf, 1 );
+
+    // wait for the reply meaning the state request fulfilled and written to the buffer
+    if( read( FD_COORDINATOR_TO_CONTROLLER_READ_CHANNEL, &buf, 1 ) == -1 ) {
+        switch( errno ) {
+        case EINTR:
+            // yet to determine appropriate course of action if this happens
+            break;
+        default:
+            printf( "EXCEPTION: unhandled read error in controller reading from FD_COORDINATOR_TO_CONTROLLER_READ_CHANNEL" );
+            break;
+        }
+    }
+
+    // At this point a message was sent from the coordinator.  Attempt to read from buffer
+    // read the state out of the buffer
+    // Note: will block waiting to acquire mutex
+    state = amsgbuffer.read( );
+
+    return state;
+}
+
+//-----------------------------------------------------------------------------
+
+void publish_command( ActuatorMessage cmd ) {
+
+    char buf = 0;
+
+    // send the command message to the actuator
+    amsgbuffer.write( cmd );
+    // Note: will block waiting to acquire mutex
+	
+    // send a notification to the coordinator
+    write( FD_CONTROLLER_TO_COORDINATOR_WRITE_CHANNEL, &buf, 1 );
+
+}
+
+//-----------------------------------------------------------------------------
+
+void request_initial_state_then_publish_initial_command( void ) {
+
+    ActuatorMessage state = get_state( 0.0 );
+
+    if( VERBOSE ) printf( "(controller) received initial state\n" );
+    if( VERBOSE ) state.print();
+
+    // compute the command message
+    ActuatorMessage command = control( state );
+    command.header.type = MSG_TYPE_COMMAND;
+
+    if( VERBOSE ) printf( "(controller) publishing initial command\n" );
+    publish_command( command );
+}
+
+//-----------------------------------------------------------------------------
+
+struct timeval get_process_time( void ) {
+    struct rusage ru;
+    struct timeval tv;
+
+    int result = getrusage( RUSAGE_SELF, &ru );
+
+    memcpy( &tv, &ru.ru_utime, sizeof(timeval) );
+
+    return tv;
+}
+
 /// Standalone Controller Entry Point
 int main( int argc, char* argv[] ) {
 
+    ActuatorMessage state, command;
+    int cycle = 0;
+    // Real time = 0.0;
+    struct timeval tv_start, tv_current, tv_control;
+    struct timeval tv_interval, tv_interval_start, tv_interval_end, tv_interval_elapsed;
+
+    tv_interval.tv_sec = 0;
+    tv_interval.tv_usec = 1000;
+
+    // connect to the shared message buffer BEFORE attempting any IPC
     amsgbuffer = ActuatorMessageBuffer( ACTUATOR_MESSAGE_BUFFER_NAME, ACTUATOR_MESSAGE_BUFFER_MUTEX_NAME );
     amsgbuffer.open( );
 
-    ActuatorMessage msg_request, msg_state, msg_command;
+    // query and publish initial values
+    request_initial_state_then_publish_initial_command( );
 
-    char buf;
+    // now that initialization is complete record start time (for interval computation)
+    tv_start = get_process_time( );
 
-    int cycle = 0;
-    Real time = 0.0;
+    // record the start time as the start of the initial interval
+    memcpy( &tv_interval_start, &tv_start, sizeof(timeval) );
 
+    // compute the end of the initial interval
+    timeradd( &tv_interval_start, &tv_interval, &tv_interval_end );
+
+    // start the main process loop
     while( 1 ) {
 
-        if( VERBOSE ) printf( "(controller) requesting state\n" );
-        // request the state of the actuator
-        msg_request.header.type = MSG_TYPE_STATE_REQUEST;
-        msg_request.state.time = time;
+        // poll time
+        // Note: double edged: poll may block on system call, but using signal
+        // will definitely block and adds complexity that may invalidate the
+        // coordinator measuring of the controller
+        tv_current = get_process_time( );
 
-        amsgbuffer.write( msg_request );
+        // compare the current time with the end time
+        int result = timercmp( &tv_current, &tv_interval_end, > );
 
-        buf = 0;
-        // send a notification to the coordinator
-        write( FD_CONTROLLER_TO_COORDINATOR_WRITE_CHANNEL, &buf, 1 );
+        // if the comparison is false then poll again
+        if( !result )	continue;
 
-        // wait for the reply meaning the state request fulfilled and written to the buffer
-        if( read( FD_COORDINATOR_TO_CONTROLLER_READ_CHANNEL, &buf, 1 ) == -1 ) {
-            switch( errno ) {
-            case EINTR:
-                // yet to determine appropriate course of action if this happens
-                break;
-            default:
-                printf( "EXCEPTION: unhandled read error in controller reading from FD_COORDINATOR_TO_CONTROLLER_READ_CHANNEL" );
-                break;
-            }
-        }
-        if( VERBOSE ) printf( "(controller) received notification of published state\n" );
-
-        // At this point a message was sent from the coordinator.  Attempt to read from buffer
-        // read the state out of the buffer
-        msg_state = amsgbuffer.read( );
-
-        if( VERBOSE ) printf( "(controller) received state reply\n" );
-        if( VERBOSE ) msg_state.print();
-
-        // compute the command message
-        msg_command = control( msg_state );
-        msg_command.header.type = MSG_TYPE_COMMAND;
-
-        if( VERBOSE ) printf( "(controller) writing command\n" );
-        // send the command message to the actuator
-        amsgbuffer.write( msg_command );
-        // Note: will block waiting to acquire mutex
+        // otherwise, the interval has been exceeded
 	
-        // send a notification to the coordinator
-        write( FD_CONTROLLER_TO_COORDINATOR_WRITE_CHANNEL, &buf, 1 );
+        // compute the actual time to compute the control output
+        // Note: current is absolute from beginning of process
+        // but control needs to be computed in terms of the time
+        // after the controller was initialized
+    	timersub( &tv_current, &tv_start, &tv_control );
 
-        // consume some time.
-        //usleep( 1000 );
+        // Compute the time
+        Real t = (Real) tv_control.tv_sec + (Real) tv_control.tv_usec / (Real) USECS_PER_SEC;
+        if( VERBOSE ) printf( "(controller) Requesting state at time: %f\n", t );
 
-        time = (double)cycle / (double)CONTROLLER_FREQUENCY_HERTZ;
+        state = get_state( t );
+    
+        command = control( state );
+        command.header.type = MSG_TYPE_COMMAND;
+
+        publish_command( command );
+        if( VERBOSE ) printf( "(controller) Publishing command for time: %f\n", t );
+
+        // recompute start of the interval
+        // Note: the interval is computed on the time it was supposed to end
+        // not on the current time.  It is highly unlikely that the current will
+        // be on time (at the end) and the error could accumulate as a result
+        // so using the expected value instead of actual.  Error in micorseconds
+        memcpy( &tv_interval_start, &tv_interval_end, sizeof(timeval) );
+
+        // recompute the end of the interval
+    	timeradd( &tv_interval_start, &tv_interval, &tv_interval_end );
+
         cycle++;
     }
 

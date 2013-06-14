@@ -113,32 +113,48 @@ void coordinator_initialize_pipes( void ) {
     // NOTE: a write channel should be non-blocking (won't ever fill up buffer anyway)
 
     // Open the timer to coordinator channel for timer events
-    if( pipe( fd_timer_to_coordinator ) != 0 )
+    if( pipe( fd_timer_to_coordinator ) != 0 ) {
         throw std::runtime_error( "Failed to open fd_timer_to_coordinator pipe." ) ;
+    }
     flags = fcntl( fd_timer_to_coordinator[0], F_GETFL, 0 );
     fcntl( fd_timer_to_coordinator[0], F_SETFL, flags );
     flags = fcntl( fd_timer_to_coordinator[1], F_GETFL, 0 );
     fcntl( fd_timer_to_coordinator[1], F_SETFL, flags | O_NONBLOCK );
 
     // Open the wakeup to coordinator channel for wakeup (blocking) events
-    if( pipe( fd_wakeup_to_coordinator ) != 0 )
+    if( pipe( fd_wakeup_to_coordinator ) != 0 ) {
+        close( fd_timer_to_coordinator[0] );
+        close( fd_timer_to_coordinator[1] );
         throw std::runtime_error( "Failed to open fd_wakeup_to_coordinator pipe." ) ;
+    }
     flags = fcntl( fd_wakeup_to_coordinator[0], F_GETFL, 0 );
     fcntl( fd_wakeup_to_coordinator[0], F_SETFL, flags );
     flags = fcntl( fd_wakeup_to_coordinator[1], F_GETFL, 0 );
     fcntl( fd_wakeup_to_coordinator[1], F_SETFL, flags | O_NONBLOCK );
 
     // Open the coordinator to controller channel for notifications
-    if( pipe( fd_coordinator_to_controller ) != 0 )
+    if( pipe( fd_coordinator_to_controller ) != 0 ) {
+        close( fd_timer_to_coordinator[0] );
+        close( fd_timer_to_coordinator[1] );
+        close( fd_wakeup_to_coordinator[0] );
+        close( fd_wakeup_to_coordinator[1] );
         throw std::runtime_error( "Failed to open fd_coordinator_to_controller pipe." ) ;
+    }
     flags = fcntl( fd_coordinator_to_controller[0], F_GETFL, 0 );
     fcntl( fd_coordinator_to_controller[0], F_SETFL, flags );
     flags = fcntl( fd_coordinator_to_controller[1], F_GETFL, 0 );
     fcntl( fd_coordinator_to_controller[1], F_SETFL, flags | O_NONBLOCK );
 
     // Open the controller to coordinator channel for notifications
-    if( pipe( fd_controller_to_coordinator ) != 0 )
+    if( pipe( fd_controller_to_coordinator ) != 0 ) {
+        close( fd_timer_to_coordinator[0] );
+        close( fd_timer_to_coordinator[1] );
+        close( fd_wakeup_to_coordinator[0] );
+        close( fd_wakeup_to_coordinator[1] );
+        close( fd_coordinator_to_controller[0] );
+        close( fd_coordinator_to_controller[1] );
         throw std::runtime_error( "Failed to open fd_controller_to_coordinator pipe." ) ;
+    }
     flags = fcntl( fd_controller_to_coordinator[0], F_GETFL, 0 );
     fcntl( fd_controller_to_coordinator[0], F_SETFL, flags );
     flags = fcntl( fd_controller_to_coordinator[1], F_GETFL, 0 );
@@ -257,7 +273,7 @@ void coordinator_resume_controller( void ) {
 //-----------------------------------------------------------------------------
 // TIMER CONTROL
 //-----------------------------------------------------------------------------
-
+/*
 // Time conversions if necessary
 #define NSECS_PER_SEC 1E9
 #define USECS_PER_SEC 1E6
@@ -270,7 +286,7 @@ void coordinator_resume_controller( void ) {
 // NOTE: There must be some delay otherwise timer is disarmed
 #define DEFAULT_INITDELAY_RTTIMER_NSEC          1           // 1 nanoseconds
 #define DEFAULT_INITDELAY_RTTIMER_SEC           0           // 0 second
-
+*/
 //-----------------------------------------------------------------------------
 
 // Error codes for timer control
