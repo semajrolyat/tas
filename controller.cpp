@@ -279,10 +279,10 @@ int main( int argc, char* argv[] ) {
         tv_current = get_process_time( );
 
         // compare the current time with the end time
-        int result = timercmp( &tv_current, &tv_interval_end, < );
+        int result = timercmp( &tv_current, &tv_interval_end, >= );
 
         // if the comparison is true (tv_current is neither greater than nor EQUAL TO) then poll again
-        if( result )	continue;
+        if( !result )	continue;
 
         // otherwise, the interval has been exceeded
 	
@@ -293,7 +293,6 @@ int main( int argc, char* argv[] ) {
     	timersub( &tv_current, &tv_start, &tv_control );
 
         // Compute the time
-        //Real t = (Real) tv_control.tv_sec + (Real) tv_control.tv_usec / (Real) USECS_PER_SEC;
         Real t = timeval_to_real( tv_control );
         if( VERBOSE ) printf( "(controller) Requesting state at time: %f\n", t );
 
@@ -302,8 +301,8 @@ int main( int argc, char* argv[] ) {
         command = control( state );
         command.header.type = MSG_TYPE_COMMAND;
 
-        publish_command( command );
         if( VERBOSE ) printf( "(controller) Publishing command for time: %f\n", t );
+        publish_command( command );
 
         // recompute start of the interval
         // Note: the interval is computed on the time it was supposed to end
@@ -315,6 +314,7 @@ int main( int argc, char* argv[] ) {
         // recompute the end of the interval
     	timeradd( &tv_interval_start, &tv_interval, &tv_interval_end );
 
+        if( VERBOSE ) printf( "(controller) Current: %f\n", timeval_to_real( tv_current ) );
         if( VERBOSE ) printf( "(controller) Interval: %f\n", timeval_to_real( tv_interval ) );
         if( VERBOSE ) printf( "(controller) Next interval start: %f\n", timeval_to_real( tv_interval_start ) );
         if( VERBOSE ) printf( "(controller) Next interval end: %f\n", timeval_to_real( tv_interval_end ) );
