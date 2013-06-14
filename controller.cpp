@@ -230,6 +230,8 @@ struct timeval get_process_time( void ) {
     return tv;
 }
 
+//-----------------------------------------------------------------------------
+
 /// Standalone Controller Entry Point
 int main( int argc, char* argv[] ) {
 
@@ -241,6 +243,9 @@ int main( int argc, char* argv[] ) {
 
     tv_interval.tv_sec = 0;
     tv_interval.tv_usec = 1000;
+
+    //tv_interval.tv_sec = 1;
+    //tv_interval.tv_usec = 0;
 
     // connect to the shared message buffer BEFORE attempting any IPC
     amsgbuffer = ActuatorMessageBuffer( ACTUATOR_MESSAGE_BUFFER_NAME, ACTUATOR_MESSAGE_BUFFER_MUTEX_NAME );
@@ -268,10 +273,10 @@ int main( int argc, char* argv[] ) {
         tv_current = get_process_time( );
 
         // compare the current time with the end time
-        int result = timercmp( &tv_current, &tv_interval_end, > );
+        int result = timercmp( &tv_current, &tv_interval_end, < );
 
-        // if the comparison is false then poll again
-        if( !result )	continue;
+        // if the comparison is true (tv_current is neither greater than nor EQUAL TO) then poll again
+        if( result )	continue;
 
         // otherwise, the interval has been exceeded
 	

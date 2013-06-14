@@ -522,7 +522,7 @@ int main( int argc, char* argv[] ) {
     }
 
     // validate the priority
-    // generally the expected value is 1 with SCHED_RR, but it may not be the a case depending on platform
+    // INCORRECT RT(99) not 1: generally the expected value is 1 with SCHED_RR, but it may not be the a case depending on platform
     sched_getparam( 0, &param );
     coordinator_priority = param.sched_priority;
     printf( "coordinator process priority: %d\n", coordinator_priority );
@@ -553,7 +553,7 @@ int main( int argc, char* argv[] ) {
     //++++++++++++++++++++++++++++++++++++++++++++++++
 
     char input_buffer;
-    int i = 0;
+    //int i = 0;
 
     int max_fd = std::max( fd_timer_to_coordinator[0], fd_wakeup_to_coordinator[0] );
     max_fd = std::max( max_fd, fd_controller_to_coordinator[0] );
