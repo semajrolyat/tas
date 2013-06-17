@@ -49,8 +49,8 @@ TAS.h
 #include <Moby/Simulator.h>
 #include <Moby/RCArticulatedBody.h>
 
-#include "ActuatorMessage.h"
-#include "DynamicsPlugin.h"
+//#include "actuator.h"
+//#include "dynamics_plugin.h"
 
 #include <sys/mman.h>
 #include <sys/stat.h>
@@ -62,7 +62,7 @@ typedef double Real;
 
 #define PI 3.14159265359
 
-#define VERBOSE 1
+#define VERBOSE 1 
 
 //-----------------------------------------------------------------------------
 // IPC Channels
@@ -94,7 +94,7 @@ typedef double Real;
 
 //-----------------------------------------------------------------------------
 
-#define DEFAULT_BUDGET_RTTIMER_NSEC	1E8
+#define DEFAULT_BUDGET_RTTIMER_NSEC	1E6
 #define DEFAULT_BUDGET_RTTIMER_SEC	0
 
 #define DEFAULT_INITDELAY_RTTIMER_NSEC	1
@@ -143,7 +143,7 @@ typedef double Real;
 //-----------------------------------------------------------------------------
 
 // reference 'man proc 5'
-struct proc_stat {
+struct proc_stat_t {
     int pid;                        // %d
     char comm[256];                 // %s
     char state;                     // %c
@@ -187,123 +187,143 @@ struct proc_stat {
     unsigned policy;                // %u (since kernel 2.5.19) (%lu before kernel 2.6.22)
     unsigned long long delayacct_blkio_ticks;	// %llu (since kernel 2.6.18)
     unsigned long guest_time;       // %lu (since kernel 2.6.24)
-    unsigned int cguest_time;       // %ld (since kernel 2.6.24)
+    long cguest_time;       	    // %ld (since kernel 2.6.24)
 };
 
 //-----------------------------------------------------------------------------
 
-static int read_proc_stat( std::string fname, struct proc_stat *s ) {
+enum proc_stat_err_e {
+    PROC_STAT_ERR_NONE,
+    PROC_STAT_ERR_OPEN,
+    PROC_STAT_ERR_READ,
+    PROC_STAT_ERR_CLOSE
+};
+
+
+//-----------------------------------------------------------------------------
+
+static proc_stat_err_e read_proc_stat( const char* filename, struct proc_stat_t *s ) {
 
     const char *format = "%d %s %c %d %d %d %d %d %u %lu %lu %lu %lu %lu %lu %ld %ld %ld %ld %ld %ld %llu %lu %ld %lu %lu %lu %lu %lu %lu %lu %lu %lu %lu %lu %lu %lu %d %d %u %u %llu %lu %ld";
+    proc_stat_err_e err = PROC_STAT_ERR_NONE;
 
-    FILE *proc;
-    proc = fopen( fname.c_str(),"r" );
-    if( proc ) {
-        if( 44 == fscanf( proc, format,
-            &s->pid,
-            s->comm,
-            &s->state,
-            &s->ppid,
-            &s->pgrp,
-            &s->session,
-            &s->tty_nr,
-            &s->tpgid,
-            &s->flags,
-            &s->minflt,
-            &s->cminflt,
-            &s->majflt,
-            &s->cmajflt,
-            &s->utime,
-            &s->stime,
-            &s->cutime,
-            &s->cstime,
-            &s->priority,
-            &s->nice,
-            &s->num_threads,
-            &s->itrealvalue,
-            &s->starttime,
-            &s->vsize,
-            &s->rss,
-            &s->rsslim,
-            &s->startcode,
-            &s->endcode,
-            &s->startstack,
-            &s->kstkesp,
-            &s->kstkeip,
-            &s->signal,
-            &s->blocked,
-            &s->sigignore,
-            &s->sigcatch,
-            &s->wchan,
-            &s->nswap,
-            &s->cnswap,
-            &s->exit_signal,
-            &s->processor,
-            &s->rt_priority,
-            &s->policy,
-            &s->delayacct_blkio_ticks,
-            &s->guest_time,
-            &s->cguest_time
-        )) {
-            fclose( proc );
-            return 1;
-        } else {
-            fclose( proc );
-            return 0;
-        }
-    } else {
-        return 0;
-    }
+    FILE* fproc = fopen( filename, "r" );
+    if( fproc == 0 ) 	return PROC_STAT_ERR_OPEN;
+
+    if( 44 != fscanf( fproc, format,
+        &s->pid,
+        &s->comm,
+        &s->state,
+        &s->ppid,
+        &s->pgrp,
+        &s->session,
+        &s->tty_nr,
+        &s->tpgid,
+        &s->flags,
+        &s->minflt,
+        &s->cminflt,
+        &s->majflt,
+        &s->cmajflt,
+        &s->utime,
+        &s->stime,
+        &s->cutime,
+        &s->cstime,
+        &s->priority,
+        &s->nice,
+        &s->num_threads,
+        &s->itrealvalue,
+        &s->starttime,
+        &s->vsize,
+        &s->rss,
+        &s->rsslim,
+        &s->startcode,
+        &s->endcode,
+        &s->startstack,
+        &s->kstkesp,
+        &s->kstkeip,
+        &s->signal,
+        &s->blocked,
+        &s->sigignore,
+        &s->sigcatch,
+        &s->wchan,
+        &s->nswap,
+        &s->cnswap,
+        &s->exit_signal,
+        &s->processor,
+        &s->rt_priority,
+        &s->policy,
+        &s->delayacct_blkio_ticks,
+        &s->guest_time,
+        &s->cguest_time
+    ))
+	err = PROC_STAT_ERR_READ; 
+
+    fclose( fproc );
+    return err;
+}
+
+//-----------------------------------------------------------------------------
+static proc_stat_err_e get_proc_stat( const int& cpuid, struct proc_stat_t *s ) {
+    std::string str;
+    // TODO : build string
+    return read_proc_stat( str.c_str( ), s );
 }
 
 //-----------------------------------------------------------------------------
 
-static void print_proc_stat( struct proc_stat *stuff ) {
-    printf( "pid = %d\n", stuff->pid );
-    printf( "comm = %s\n", stuff->comm );
-    printf( "state = %c\n", stuff->state );
-    printf( "ppid = %d\n", stuff->ppid );
-    printf( "pgrp = %d\n", stuff->pgrp );
-    printf( "session = %d\n", stuff->session );
-    printf( "tty_nr = %d\n", stuff->tty_nr );
-    printf( "tpgid = %d\n", stuff->tpgid );
-    printf( "flags = %u\n", stuff->flags );
-    printf( "minflt = %lu\n", stuff->minflt );
-    printf( "cminflt = %lu\n", stuff->cminflt );
-    printf( "majflt = %lu\n", stuff->majflt );
-    printf( "cmajflt = %lu\n", stuff->cmajflt );
-    printf( "utime = %lu\n", stuff->utime );
-    printf( "stime = %lu\n", stuff->stime );
-    printf( "cutime = %ld\n", stuff->cutime );
-    printf( "cstime = %ld\n", stuff->cstime );
-    printf( "priority = %ld\n", stuff->priority );
-    printf( "nice = %ld\n", stuff->nice );
-    printf( "num_threads = %ld\n", stuff->num_threads );
-    printf( "itrealvalue = %ld\n", stuff->itrealvalue );
-    printf( "starttime = %llu\n", stuff->starttime );
-    printf( "vsize = %lu\n", stuff->vsize );
-    printf( "rss = %ld\n", stuff->rss );
-    printf( "rsslim = %lu\n", stuff->rsslim );
-    printf( "startcode = %lu\n", stuff->startcode );
-    printf( "endcode = %lu\n", stuff->endcode );
-    printf( "startstack = %lu\n", stuff->startstack );
-    printf( "kstkesp = %lu\n", stuff->kstkesp );
-    printf( "kstkeip = %lu\n", stuff->kstkeip );
-    printf( "signal = %lu\n", stuff->signal );
-    printf( "blocked = %lu\n", stuff->blocked );
-    printf( "sigignore = %lu\n", stuff->sigignore );
-    printf( "sigcatch = %lu\n", stuff->sigcatch );
-    printf( "wchan = %lu\n", stuff->wchan );
-    printf( "nswap = %lu\n", stuff->nswap );
-    printf( "cnswap = %lu\n", stuff->cnswap );
-    printf( "exit_signal = %d\n", stuff->exit_signal );
-    printf( "processor = %d\n", stuff->processor );
-    printf( "rt_priority = %u\n", stuff->rt_priority );
-    printf( "policy = %u\n", stuff->policy );
-    printf( "delayacct_blkio_ticks = %llu\n", stuff->delayacct_blkio_ticks );
-    printf( "guest_time = %lu\n", stuff->guest_time );
-    printf( "cguest_time = %ld\n", stuff->cguest_time );
+static void print_proc_stat( struct proc_stat_t *s ) {
+    printf( "pid = %d\n", s->pid );
+    printf( "comm = %s\n", s->comm );
+    printf( "state = %c\n", s->state );
+    printf( "ppid = %d\n", s->ppid );
+    printf( "pgrp = %d\n", s->pgrp );
+    printf( "session = %d\n", s->session );
+    printf( "tty_nr = %d\n", s->tty_nr );
+    printf( "tpgid = %d\n", s->tpgid );
+    printf( "flags = %u\n", s->flags );
+    printf( "minflt = %lu\n", s->minflt );
+    printf( "cminflt = %lu\n", s->cminflt );
+    printf( "majflt = %lu\n", s->majflt );
+    printf( "cmajflt = %lu\n", s->cmajflt );
+    printf( "utime = %lu\n", s->utime );
+    printf( "stime = %lu\n", s->stime );
+    printf( "cutime = %ld\n", s->cutime );
+    printf( "cstime = %ld\n", s->cstime );
+    printf( "priority = %ld\n", s->priority );
+    printf( "nice = %ld\n", s->nice );
+    printf( "num_threads = %ld\n", s->num_threads );
+    printf( "itrealvalue = %ld\n", s->itrealvalue );
+    printf( "starttime = %llu\n", s->starttime );
+    printf( "vsize = %lu\n", s->vsize );
+    printf( "rss = %ld\n", s->rss );
+    printf( "rsslim = %lu\n", s->rsslim );
+    printf( "startcode = %lu\n", s->startcode );
+    printf( "endcode = %lu\n", s->endcode );
+    printf( "startstack = %lu\n", s->startstack );
+    printf( "kstkesp = %lu\n", s->kstkesp );
+    printf( "kstkeip = %lu\n", s->kstkeip );
+    printf( "signal = %lu\n", s->signal );
+    printf( "blocked = %lu\n", s->blocked );
+    printf( "sigignore = %lu\n", s->sigignore );
+    printf( "sigcatch = %lu\n", s->sigcatch );
+    printf( "wchan = %lu\n", s->wchan );
+    printf( "nswap = %lu\n", s->nswap );
+    printf( "cnswap = %lu\n", s->cnswap );
+    printf( "exit_signal = %d\n", s->exit_signal );
+    printf( "processor = %d\n", s->processor );
+    printf( "rt_priority = %u\n", s->rt_priority );
+    printf( "policy = %u\n", s->policy );
+    printf( "delayacct_blkio_ticks = %llu\n", s->delayacct_blkio_ticks );
+    printf( "guest_time = %lu\n", s->guest_time );
+    printf( "cguest_time = %ld\n", s->cguest_time );
 }
+
+//-----------------------------------------------------------------------------
+
+
+
+//-----------------------------------------------------------------------------
+
 
 //-----------------------------------------------------------------------------
 

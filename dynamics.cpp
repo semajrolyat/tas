@@ -33,8 +33,8 @@ Moby plugin
 #include <Moby/EventDrivenSimulator.h>
 #include <Moby/RCArticulatedBody.h>
 
-#include <TAS.h>
-#include <ActuatorMessage.h>
+#include <tas.h>
+#include <actuator.h>
 
 using namespace Moby;
 using boost::shared_ptr;
@@ -42,10 +42,9 @@ using boost::dynamic_pointer_cast;
 
 //-----------------------------------------------------------------------------
 
-/// The shared memory buffer where control commands arrive from the controller
-/// and where state for the controller is published
-ActuatorMessageBuffer amsgbuffer;
 
+//-----------------------------------------------------------------------------
+// MOBY driver
 //-----------------------------------------------------------------------------
 
 /// Handle for dynamic library loading
@@ -166,6 +165,7 @@ bool check_osg()
 
 //-----------------------------------------------------------------------------
 
+/// TODO : REFACTOR using TAS Standard
 /// Gets the current time (as a floating-point number)
 Real get_current_time()
 {
@@ -276,35 +276,6 @@ void step(void* arg)
     edsim->render_contact_points = true;
 }
 
-//-----------------------------------------------------------------------------
-/**
-  // Note: In this architecture, Moby doesn't have any direct relationship to
-  // controllers, so the ability to load control plugins is removed
-
-// attempts to read control code plugin
-void read_plugin(const char* filename)
-{
-  // attempt to read the file
-  HANDLE = dlopen(filename, RTLD_LAZY);
-  if (!HANDLE)
-  {
-    std::cerr << "driver: failed to read plugin from " << filename << std::endl;
-    std::cerr << "  " << dlerror() << std::endl;
-    exit(-1);
-  }
-
-  // attempt to load the initializer
-  dlerror();
-  INIT.push_back((init_t) dlsym(HANDLE, "init"));
-  const char* dlsym_error = dlerror();
-  if (dlsym_error)
-  {
-    std::cerr << "driver warning: cannot load symbol 'init' from " << filename << std::endl;
-    std::cerr << "        error follows: " << std::endl << dlsym_error << std::endl;
-    INIT.pop_back();
-  }
-}
-*/
 //-----------------------------------------------------------------------------
 
 /// Adds lights to the scene when no scene background file specified
@@ -493,6 +464,9 @@ void process_xml_options(const std::string& xml_fname)
 }
 
 //-----------------------------------------------------------------------------
+// MOBY as a plugin.
+// c_dynamics_plugin
+//-----------------------------------------------------------------------------
 
 // Plugins have to extern "C"
 extern "C" {
@@ -504,7 +478,14 @@ osgViewer::Viewer viewer;
 const Real DYNAMICS_FREQ = 0.001;
 RCArticulatedBodyPtr pendulum;
 
-// dynamics plugin entry point, signature per tas plugin requirement as defined in coordinator
+//-----------------------------------------------------------------------------
+
+/// The shared memory buffer where control commands arrive from the controller
+/// and where state for the controller is published
+actuator_msg_buffer_c amsgbuffer;
+
+//-----------------------------------------------------------------------------
+// Dynamics plugin entry point.  
 void init( int argc, char** argv ) {
 
     const unsigned ONECHAR_ARG = 3, TWOCHAR_ARG = 4;
@@ -656,23 +637,6 @@ void init( int argc, char** argv ) {
     MAIN_GROUP = new osg::Group;
     #endif
 
-    /**
-      // Note: In this architecture, Moby doesn't have any direct relationship to
-      // controllers, so the ability to load control plugins is removed
-
-    // call the initializers, if any
-    if (!INIT.empty())
-    {
-      #ifdef USE_OSG
-      BOOST_FOREACH(init_t i, INIT)
-        (*i)(MAIN_GROUP, READ_MAP, STEP_SIZE);
-      #else
-      BOOST_FOREACH(init_t i, INIT)
-        (*i)(NULL, READ_MAP, STEP_SIZE);
-      #endif
-    }
-    */
-
     // look for a scene description file
     #ifdef USE_OSG
     if (scene_path != "")
@@ -735,25 +699,25 @@ void init( int argc, char** argv ) {
         printf( "dynamics.cpp:init()- unable to cast pendulum to type RCArticulatedBody\n" );
 
     // open the command buffer
-    amsgbuffer = ActuatorMessageBuffer( ACTUATOR_MESSAGE_BUFFER_NAME, ACTUATOR_MESSAGE_BUFFER_MUTEX_NAME );
+    amsgbuffer = actuator_msg_buffer_c( ACTUATOR_MSG_BUFFER_NAME, ACTUATOR_MSG_BUFFER_MUTEX_NAME );
     amsgbuffer.open();   // TODO : sanity/safety checking
 
     printf( "(dynamics::initialized)\n" );
 }
 
-/**
-  publish the state of the actuators to the command buffers.  In this case, one actuator
-  and one controller.
-*/
-void publish_state( void ) {
-    if( VERBOSE ) printf( "(dynamics::publish_state)\n" );
+//-----------------------------------------------------------------------------
+
+
+// write the actuator state to the actuator buffer
+void write_state( void ) {
+    if( VERBOSE ) printf( "(dynamics::write_state)\n" );
 
     // get a reference to the actuator
     JointPtr pivot = pendulum->find_joint( "pivot" );
 
     // write the actuator state out to the command buffer
-    ActuatorMessage msg = ActuatorMessage( );
-    msg.header.type = MSG_TYPE_STATE_REPLY;
+    actuator_msg_c msg = actuator_msg_c( );
+    msg.header.type = ACTUATOR_MSG_REPLY;
     msg.state.position = pivot->q[0];
     msg.state.velocity = pivot->qd[0];
     msg.state.time = sim->current_time;
@@ -766,22 +730,18 @@ void publish_state( void ) {
     // Note: will block on acquiring mutex
     amsgbuffer.write( msg );
 }
+//-----------------------------------------------------------------------------
 
-/**
-  maybe a misnomer.  Externalized, it means to get the command from the command buffer and
-  act in response (apply a torque).  Not necessary to expose this anymore as an external
-  interface
-*/
-void get_command( void ) {
+//  Read the command ( torque ) from the message buffer.
+void read_command( void ) {
 
-    if( VERBOSE ) printf( "(dynamics::get_command)\n" );
+    if( VERBOSE ) printf( "(dynamics::read_command)\n" );
 
     // get the command from the controller
-    ActuatorMessage msg = amsgbuffer.read( );
+    actuator_msg_c msg = amsgbuffer.read( );
     // Note: will block on acquiring mutex
 
-    //printf( "(dynamics::get_command) " );
-    //msg.print();
+    //If( VERBOSE ) msg.print();
 
     // apply any force determined by the controller to the actuator
     JointPtr pivot = pendulum->find_joint( "pivot" );
@@ -790,32 +750,25 @@ void get_command( void ) {
     pivot->add_force( tau );
 }
 
-/**
-  Run the dynamics for a cycle.
-*/
-void run( Real dt ) {
+//-----------------------------------------------------------------------------
+
+// Run the dynamics forward
+void run( const Real &dt ) {
 
     #ifdef USE_OSG
-    if (ONSCREEN_RENDER)
-    {
-      if (viewer.done())
-        return;
-      viewer.frame();
+    if( ONSCREEN_RENDER ) {
+      if( viewer.done( ) ) return;
+      viewer.frame( );
     }
     #endif
 
     // step the sim forward
     STEP_SIZE = dt;
-    step((void*) &sim);
-
-    //#ifdef USE_OSG
-    //usleep(DYNAMICS_FREQ);
-    //#endif
-
+    step( (void*) &sim );
 }
 
 //-----------------------------------------------------------------------------
 
-} // close extern "C"
+} // extern "C"
 
 //-----------------------------------------------------------------------------

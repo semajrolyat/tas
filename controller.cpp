@@ -14,8 +14,8 @@ controller.cpp
 #include <Moby/Simulator.h>
 #include <Moby/RCArticulatedBody.h>
 
-#include <TAS.h>
-#include <ActuatorMessage.h>
+#include <tas.h>
+#include <actuator.h>
 
 //-----------------------------------------------------------------------------
 
@@ -125,14 +125,14 @@ void init( void* separator, const std::map<std::string, BasePtr>& read_map, Real
 // Standalone Controller
 //----------------------------------------------------------------------------
 
-ActuatorMessageBuffer amsgbuffer;
+actuator_msg_buffer_c amsgbuffer;
 
 //-----------------------------------------------------------------------------
 
 /// Control function for Standalone Controller
-ActuatorMessage control( const ActuatorMessage& msg ) {
+actuator_msg_c control( const actuator_msg_c& msg ) {
 
-    ActuatorMessage reply = ActuatorMessage( msg );
+    actuator_msg_c reply = actuator_msg_c( msg );
 
     const Real Kp = 1.0;
     const Real Kv = 0.1;
@@ -154,13 +154,13 @@ ActuatorMessage control( const ActuatorMessage& msg ) {
 
 //-----------------------------------------------------------------------------
 
-ActuatorMessage get_state( const Real& time ) {
+actuator_msg_c get_state( const Real& time ) {
 
     char buf = 0;
-    ActuatorMessage request;
-    ActuatorMessage state;
+    actuator_msg_c request;
+    actuator_msg_c state;
         
-    request.header.type = MSG_TYPE_STATE_REQUEST;
+    request.header.type = ACTUATOR_MSG_REQUEST;
     request.state.time = time;
 
     amsgbuffer.write( request );
@@ -190,7 +190,7 @@ ActuatorMessage get_state( const Real& time ) {
 
 //-----------------------------------------------------------------------------
 
-void publish_command( ActuatorMessage cmd ) {
+void publish_command( actuator_msg_c cmd ) {
 
     char buf = 0;
 
@@ -207,14 +207,14 @@ void publish_command( ActuatorMessage cmd ) {
 
 void request_initial_state_then_publish_initial_command( void ) {
 
-    ActuatorMessage state = get_state( 0.0 );
+    actuator_msg_c state = get_state( 0.0 );
 
     if( VERBOSE ) printf( "(controller) received initial state\n" );
     if( VERBOSE ) state.print();
 
     // compute the command message
-    ActuatorMessage command = control( state );
-    command.header.type = MSG_TYPE_COMMAND;
+    actuator_msg_c command = control( state );
+    command.header.type = ACTUATOR_MSG_COMMAND;
 
     if( VERBOSE ) printf( "(controller) publishing initial command\n" );
     publish_command( command );
@@ -241,115 +241,16 @@ Real timeval_to_real( const struct timeval& tv ) {
 }
 
 //-----------------------------------------------------------------------------
-//-----------------------------------------------------------------------------
-int fd_timer_to_controller[2];
-
-void initialize_pipes( void ) {
-    int flags;
-
-    // NOTE: a read channel needs to be blocking to force  block waiting for event
-    // NOTE: a write channel should be non-blocking (won't ever fill up buffer anyway)
-
-    if( pipe( fd_timer_to_controller ) != 0 ) {
-        throw std::runtime_error( "Failed to open fd_timer_to_controller pipe." ) ;
-    }
-    flags = fcntl( fd_timer_to_controller[0], F_GETFL, 0 );
-    fcntl( fd_timer_to_controller[0], F_SETFL, flags );
-    flags = fcntl( fd_timer_to_controller[1], F_GETFL, 0 );
-    fcntl( fd_timer_to_controller[1], F_SETFL, flags | O_NONBLOCK );
-}
-
-//-----------------------------------------------------------------------------
-
-// The signal identifier for the controller's real-time timer
-#define RTTIMER_SIGNAL                          SIGRTMIN + 11
-
-// timer variables
-clockid_t interval_clock;
-sigset_t rttimer_mask;
-
-// The signal action to reference controller's process signal handler
-struct sigaction rttimer_sigaction;
-
-#define ERR_TIMER_NOERROR                       0
-#define ERR_TIMER_FAILURE_SIGACTION             1
-#define ERR_TIMER_FAILURE_SIGPROCMASK           2
-#define ERR_TIMER_FAILURE_CREATE                3
-#define ERR_TIMER_FAILURE_SETTIME               4
-#define ERR_TIMER_FAILURE_GETCLOCKID            5
-
-void interval_sighandler( int signum, siginfo_t *si, void *data ) {
-    printf( "(controller) timer event\n" );
-    char buf = 0;
-    write( fd_timer_to_controller[1], &buf, 1 );
-}
-
-int block_signal_rttimer( void ) {
-    if( sigprocmask( SIG_SETMASK, &rttimer_mask, NULL ) == -1 )
-       return ERR_TIMER_FAILURE_SIGPROCMASK;
-    return ERR_TIMER_NOERROR;
-}
-
-int unblock_signal_rttimer( void ) {
-    if( sigprocmask( SIG_UNBLOCK, &rttimer_mask, NULL ) == -1 )
-       return ERR_TIMER_FAILURE_SIGPROCMASK;
-    return ERR_TIMER_NOERROR;
-}
-
-int create_rttimer_monitor( void ) {
-    timer_t timerid;
-    struct sigevent sevt;
-    struct itimerspec its;
-
-    // Establish handler for timer signal
-    rttimer_sigaction.sa_flags = SA_SIGINFO;
-    rttimer_sigaction.sa_sigaction = interval_sighandler;
-    sigemptyset( &rttimer_sigaction.sa_mask );
-    if( sigaction( RTTIMER_SIGNAL, &rttimer_sigaction, NULL ) == -1 )
-       return ERR_TIMER_FAILURE_SIGACTION;
-
-    // intialize the signal mask
-    sigemptyset( &rttimer_mask );
-    sigaddset( &rttimer_mask, RTTIMER_SIGNAL );
-
-    // Block timer signal temporarily
-    if( block_signal_rttimer() != ERR_TIMER_NOERROR )
-        return ERR_TIMER_FAILURE_SIGPROCMASK;
-
-    if( clock_getcpuclockid( getpid( ), &interval_clock ) != 0 )
-        return ERR_TIMER_FAILURE_GETCLOCKID;
-
-    // Create the timer
-    sevt.sigev_notify = SIGEV_SIGNAL;
-    sevt.sigev_signo = RTTIMER_SIGNAL;
-    sevt.sigev_value.sival_ptr = &timerid;
-    if( timer_create( interval_clock, &sevt, &timerid ) == -1 )
-       return ERR_TIMER_FAILURE_CREATE;
-
-    its.it_value.tv_sec = 0;
-    its.it_value.tv_nsec = 1;
-    its.it_interval.tv_sec = 0;
-    its.it_interval.tv_nsec = 1000;
-
-    // Set up the timer
-    if( timer_settime( timerid, 0, &its, NULL ) == -1 )
-        return ERR_TIMER_FAILURE_SETTIME;
-
-    // NOTE: The timer is blocked at this point.  It must be unblocked to function.
-
-    return ERR_TIMER_NOERROR;
-}
-//-----------------------------------------------------------------------------
-//-----------------------------------------------------------------------------
 
 /// Standalone Controller Entry Point
 int main( int argc, char* argv[] ) {
 
-    ActuatorMessage state, command;
+    actuator_msg_c state, command;
     int cycle = 0;
     // Real time = 0.0;
     struct timeval tv_start, tv_current, tv_control;
-    struct timeval tv_interval, tv_interval_start, tv_interval_end, tv_interval_elapsed;
+    struct timeval tv_interval, tv_interval_start, tv_interval_end; 
+    struct timeval tv_interval_elapsed, tv_interval_error;
 
 //    unsigned long long rdtsc_mark1;
 //    unsigned long long rdtsc_mark2;
@@ -361,15 +262,8 @@ int main( int argc, char* argv[] ) {
     //tv_interval.tv_usec = 0;
 
     // connect to the shared message buffer BEFORE attempting any IPC
-    amsgbuffer = ActuatorMessageBuffer( ACTUATOR_MESSAGE_BUFFER_NAME, ACTUATOR_MESSAGE_BUFFER_MUTEX_NAME );
+    amsgbuffer = actuator_msg_buffer_c( ACTUATOR_MSG_BUFFER_NAME, ACTUATOR_MSG_BUFFER_MUTEX_NAME );
     amsgbuffer.open( );
-
-    // ----------
-    initialize_pipes( );
-    if( create_rttimer_monitor( ) != ERR_TIMER_NOERROR ) {
-        printf( "(controller) failed to create timer\n" );
-    }
-    // ----------
 
     // query and publish initial values
     request_initial_state_then_publish_initial_command( );
@@ -383,63 +277,8 @@ int main( int argc, char* argv[] ) {
     // compute the end of the initial interval
     timeradd( &tv_interval_start, &tv_interval, &tv_interval_end );
 
-    // ----------
-    char buf = 0;
-    if( unblock_signal_rttimer( ) != ERR_TIMER_NOERROR ) {
-        printf( "(controller) failed to unblock timer\n" );
-    }
-    // ----------
-
-    printf( "(controller) starting iterations\n" );
     // start the main process loop
     while( 1 ) {
-/*
-        if( read( fd_timer_to_controller[0], &buf, 1 ) == -1 ) {
-            perror( "read()" );
-        }
-
-        // poll time
-        // Note: double edged: poll may block on system call, but using signal
-        // will definitely block and adds complexity that may invalidate the
-        // coordinator measuring of the controller
-        tv_current = get_process_time( );
-
-        // compute the actual time to compute the control output
-        // Note: current is absolute from beginning of process
-        // but control needs to be computed in terms of the time
-        // after the controller was initialized
-        timersub( &tv_current, &tv_start, &tv_control );
-
-        // Compute the time
-        Real t = timeval_to_real( tv_control );
-        if( VERBOSE ) printf( "(controller) Requesting state at time: %f\n", t );
-
-        state = get_state( t );
-
-        command = control( state );
-        command.header.type = MSG_TYPE_COMMAND;
-
-        if( VERBOSE ) printf( "(controller) Publishing command for time: %f\n", t );
-        publish_command( command );
-
-        // recompute start of the interval
-        // Note: the interval is computed on the time it was supposed to end
-        // not on the current time.  It is highly unlikely that the current will
-        // be on time (at the end) and the error could accumulate as a result
-        // so using the expected value instead of actual.  Error in micorseconds
-        memcpy( &tv_interval_start, &tv_interval_end, sizeof(timeval) );
-
-        // recompute the end of the interval
-        timeradd( &tv_interval_start, &tv_interval, &tv_interval_end );
-
-        if( VERBOSE ) printf( "(controller) Current: %f\n", timeval_to_real( tv_current ) );
-        if( VERBOSE ) printf( "(controller) Interval: %f\n", timeval_to_real( tv_interval ) );
-        if( VERBOSE ) printf( "(controller) Next interval start: %f\n", timeval_to_real( tv_interval_start ) );
-        if( VERBOSE ) printf( "(controller) Next interval end: %f\n", timeval_to_real( tv_interval_end ) );
-
-        cycle++;
-*/
-///*
         // poll time
         // Note: double edged: poll may block on system call, but using signal
         // will definitely block and adds complexity that may invalidate the
@@ -454,6 +293,13 @@ int main( int argc, char* argv[] ) {
 
         // otherwise, the interval has been exceeded
 	
+	// **Question** For the time at which the control is issued,
+	// should we use the time that actually elapsed or should we 
+	// use the time that the controller was supposed to fire.  This
+	// is polling after all and these times are very likely to be 
+	// different.  I have arbitrarily chosen the actual time as 
+	// opposed to the expected time.
+
         // compute the actual time to compute the control output
         // Note: current is absolute from beginning of process
         // but control needs to be computed in terms of the time
@@ -467,28 +313,35 @@ int main( int argc, char* argv[] ) {
         state = get_state( t );
     
         command = control( state );
-        command.header.type = MSG_TYPE_COMMAND;
+        command.header.type = ACTUATOR_MSG_COMMAND;
 
-        if( VERBOSE ) printf( "(controller) Publishing command for time: %f\n", t );
+        //if( VERBOSE ) printf( "(controller) Publishing command for time: %f\n", t );
         publish_command( command );
+
+	// gather stats on actual duration of the last interval
+	timersub( &tv_current, &tv_interval_start, &tv_interval_elapsed );
+	timersub( &tv_current, &tv_interval_end, &tv_interval_error );
+
+        if( VERBOSE ) printf( "(controller) Actual Interval: %e\n", timeval_to_real( tv_interval_elapsed ) );
+        if( VERBOSE ) printf( "(controller) Interval Error: %e\n", timeval_to_real( tv_interval_error ) );
+	
 
         // recompute start of the interval
         // Note: the interval is computed on the time it was supposed to end
         // not on the current time.  It is highly unlikely that the current will
-        // be on time (at the end) and the error could accumulate as a result
-        // so using the expected value instead of actual.  Error in micorseconds
-        memcpy( &tv_interval_start, &tv_interval_end, sizeof(timeval) );
+        // be on time (at the end) but the error of assuming the actual time 
+	// accumulates.  So using the actual value instead of expected.
+        memcpy( &tv_interval_start, &tv_current, sizeof(timeval) );
 
         // recompute the end of the interval
     	timeradd( &tv_interval_start, &tv_interval, &tv_interval_end );
 
-        if( VERBOSE ) printf( "(controller) Current: %f\n", timeval_to_real( tv_current ) );
-        if( VERBOSE ) printf( "(controller) Interval: %f\n", timeval_to_real( tv_interval ) );
+        if( VERBOSE ) printf( "(controller) Next interval length: %f\n", timeval_to_real( tv_interval ) );
         if( VERBOSE ) printf( "(controller) Next interval start: %f\n", timeval_to_real( tv_interval_start ) );
         if( VERBOSE ) printf( "(controller) Next interval end: %f\n", timeval_to_real( tv_interval_end ) );
+        if( VERBOSE ) printf( "(controller) Current time: %f\n", timeval_to_real( tv_current ) );
 
         cycle++;
-//*/
     }
 
     amsgbuffer.close( );  // TODO : figure out a way to force a clean up
