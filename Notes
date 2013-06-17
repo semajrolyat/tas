@@ -1,0 +1,70 @@
+Controller makes initial perception request to Coordinator -> objective start point of controller, i.e. post initialization
+
+Controller makes a perception request to Coordinator -> determine run time.  equal to the current time less the last posted time
+
+
+
+Coordinator detects that the controller has run for a simulation quantum -> suspend controller?
+
+
+
+The primary indicator of the time difference is probably going to be perception requests.  Each request has a time stamp associated with it which will indicate to what point the dynamics may need to run to catch up.
+
+---------------------------------------------------------------
+
+Perception Request -> via Controller
+	can happen with an initial state request at beginning of process
+	can happen with a periodic update state request 
+
+State Published -> via Dynamics
+
+Controller Budget Exhausted
+
+Dynamics Budget Exhausted
+	
+---------------------------------------------------------------
+
+Controller:
+	Pauses if:
+		It requests sensor state.  Suspended by coordinator
+
+		It publishes actuator state?  Not likely.  Doesn't really limit the ability of the controller to continue,
+			but the coordinator probably pauses the controller due to receiving the message.
+
+		It exhausts its budget.  Suspended by coordinator
+			But what determines its initial budget?  A best guess?
+
+Dynamics 
+	Runs until completion every time.  Budget is determined by the length of time the controller runs for.
+
+	Publishes state upon completion.  This state result is most likely necessary for the controller to operate properly.
+		But the controller probably doesn't make an explicit request for state at the end of its budget.  In fact, the 
+		controller has no way of knowing when it is to be suspended.
+		What prompts the controller to make sensor state requests?  Is it based upon internal state or external state?
+
+
+---------------------------------------------------------------
+
+Start Controller.  Coordinator executes program as its own process.
+
+Suspend Controller.  Coordinator determines that budget is exhausted.
+
+Suspend Controller.  Coordinator receives a published actuator state.
+
+Suspend Controller.  Coordinator receives a request from controller for a sensor state.
+
+Run Dynamics.  Coordinator runs dynamics for an equal duration as what was run for controller (either budget time or request time).
+
+Resume Controller.  Dynamics has completed running.
+
+
+---------------------------------------------------------------
+
+Controller does not know how long it may run for.
+
+
+
+
+
+
+

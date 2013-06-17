@@ -222,25 +222,6 @@ void request_initial_state_then_publish_initial_command( void ) {
 
 //-----------------------------------------------------------------------------
 
-int fd_timer_to_controller[2];
-
-void initialize_pipes( void ) {
-    int flags;
-
-    // NOTE: a read channel needs to be blocking to force  block waiting for event
-    // NOTE: a write channel should be non-blocking (won't ever fill up buffer anyway)
-
-    if( pipe( fd_timer_to_controller ) != 0 ) {
-        throw std::runtime_error( "Failed to open fd_timer_to_controller pipe." ) ;
-    }
-    flags = fcntl( fd_timer_to_controller[0], F_GETFL, 0 );
-    fcntl( fd_timer_to_controller[0], F_SETFL, flags );
-    flags = fcntl( fd_timer_to_controller[1], F_GETFL, 0 );
-    fcntl( fd_timer_to_controller[1], F_SETFL, flags | O_NONBLOCK );
-}
-
-//-----------------------------------------------------------------------------
-
 struct timeval get_process_time( void ) {
     struct rusage ru;
     struct timeval tv;
@@ -260,13 +241,31 @@ Real timeval_to_real( const struct timeval& tv ) {
 }
 
 //-----------------------------------------------------------------------------
+//-----------------------------------------------------------------------------
+int fd_timer_to_controller[2];
 
+void initialize_pipes( void ) {
+    int flags;
+
+    // NOTE: a read channel needs to be blocking to force  block waiting for event
+    // NOTE: a write channel should be non-blocking (won't ever fill up buffer anyway)
+
+    if( pipe( fd_timer_to_controller ) != 0 ) {
+        throw std::runtime_error( "Failed to open fd_timer_to_controller pipe." ) ;
+    }
+    flags = fcntl( fd_timer_to_controller[0], F_GETFL, 0 );
+    fcntl( fd_timer_to_controller[0], F_SETFL, flags );
+    flags = fcntl( fd_timer_to_controller[1], F_GETFL, 0 );
+    fcntl( fd_timer_to_controller[1], F_SETFL, flags | O_NONBLOCK );
+}
+
+//-----------------------------------------------------------------------------
 
 // The signal identifier for the controller's real-time timer
-#define RTTIMER_SIGNAL                          SIGRTMIN + 5
+#define RTTIMER_SIGNAL                          SIGRTMIN + 11
 
 // timer variables
-clockid_t _clock;
+clockid_t interval_clock;
 sigset_t rttimer_mask;
 
 // The signal action to reference controller's process signal handler
@@ -317,20 +316,20 @@ int create_rttimer_monitor( void ) {
     if( block_signal_rttimer() != ERR_TIMER_NOERROR )
         return ERR_TIMER_FAILURE_SIGPROCMASK;
 
-    if( clock_getcpuclockid( getpid( ), &_clock ) != 0 )
+    if( clock_getcpuclockid( getpid( ), &interval_clock ) != 0 )
         return ERR_TIMER_FAILURE_GETCLOCKID;
 
     // Create the timer
     sevt.sigev_notify = SIGEV_SIGNAL;
     sevt.sigev_signo = RTTIMER_SIGNAL;
     sevt.sigev_value.sival_ptr = &timerid;
-    if( timer_create( _clock, &sevt, &timerid ) == -1 )
+    if( timer_create( interval_clock, &sevt, &timerid ) == -1 )
        return ERR_TIMER_FAILURE_CREATE;
 
     its.it_value.tv_sec = 0;
     its.it_value.tv_nsec = 1;
     its.it_interval.tv_sec = 0;
-    its.it_interval.tv_nsec = 1000000;
+    its.it_interval.tv_nsec = 1000;
 
     // Set up the timer
     if( timer_settime( timerid, 0, &its, NULL ) == -1 )
@@ -340,7 +339,7 @@ int create_rttimer_monitor( void ) {
 
     return ERR_TIMER_NOERROR;
 }
-
+//-----------------------------------------------------------------------------
 //-----------------------------------------------------------------------------
 
 /// Standalone Controller Entry Point
@@ -352,8 +351,8 @@ int main( int argc, char* argv[] ) {
     struct timeval tv_start, tv_current, tv_control;
     struct timeval tv_interval, tv_interval_start, tv_interval_end, tv_interval_elapsed;
 
-    unsigned long long rdtsc_mark1;
-    unsigned long long rdtsc_mark2;
+//    unsigned long long rdtsc_mark1;
+//    unsigned long long rdtsc_mark2;
 
     tv_interval.tv_sec = 0;
     tv_interval.tv_usec = 1000;
@@ -367,7 +366,9 @@ int main( int argc, char* argv[] ) {
 
     // ----------
     initialize_pipes( );
-    create_rttimer_monitor( );
+    if( create_rttimer_monitor( ) != ERR_TIMER_NOERROR ) {
+        printf( "(controller) failed to create timer\n" );
+    }
     // ----------
 
     // query and publish initial values
@@ -384,11 +385,15 @@ int main( int argc, char* argv[] ) {
 
     // ----------
     char buf = 0;
-    unblock_signal_rttimer( );
+    if( unblock_signal_rttimer( ) != ERR_TIMER_NOERROR ) {
+        printf( "(controller) failed to unblock timer\n" );
+    }
     // ----------
 
+    printf( "(controller) starting iterations\n" );
     // start the main process loop
     while( 1 ) {
+/*
         if( read( fd_timer_to_controller[0], &buf, 1 ) == -1 ) {
             perror( "read()" );
         }
@@ -433,8 +438,8 @@ int main( int argc, char* argv[] ) {
         if( VERBOSE ) printf( "(controller) Next interval end: %f\n", timeval_to_real( tv_interval_end ) );
 
         cycle++;
-
-/*
+*/
+///*
         // poll time
         // Note: double edged: poll may block on system call, but using signal
         // will definitely block and adds complexity that may invalidate the
@@ -483,7 +488,7 @@ int main( int argc, char* argv[] ) {
         if( VERBOSE ) printf( "(controller) Next interval end: %f\n", timeval_to_real( tv_interval_end ) );
 
         cycle++;
-*/
+//*/
     }
 
     amsgbuffer.close( );  // TODO : figure out a way to force a clean up

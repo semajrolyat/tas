@@ -4,12 +4,49 @@ author: James R. Taylor                                             jrt@gwu.edu
 coordinator.cpp
 -----------------------------------------------------------------------------*/
 
-#include <TAS.h>
+#include <stdlib.h>
+#include <stdio.h>
+#include <unistd.h>
+#include <fcntl.h>
+#include <assert.h>
+#include <signal.h>
+#include <stdexcept>
+#include <sys/time.h>
+#include <sys/resource.h>
+#include <errno.h>
+#include <sched.h>
+#include <dlfcn.h>
+#include <sys/types.h>
+
+#include <sstream>
+#include <fstream>
+#include <iostream>
+#include <list>
+
+#include <stdint.h>
+
+#include <pthread.h>
+
+#include <Moby/Simulator.h>
+#include <Moby/RCArticulatedBody.h>
+
+#include "TAS.h"
+#include "ActuatorMessage.h"
+#include "DynamicsPlugin.h"
+
+#include <sys/mman.h>
+#include <sys/stat.h>
+//#include <sys/wait.h>
+
+
+//-----------------------------------------------------------------------------
+
+// Verbose
+#define VERBOSE 1
 
 //-----------------------------------------------------------------------------
 
 using boost::dynamic_pointer_cast;
-
 
 //-----------------------------------------------------------------------------
 // SHARED RESOURCE MANAGEMENT
@@ -17,6 +54,31 @@ using boost::dynamic_pointer_cast;
 
 // The shared message buffer
 ActuatorMessageBuffer amsgbuffer;
+
+// A mutex on the shared message buffer
+extern "C" {
+    extern pthread_mutex_t *amsgbuffer_mutex;
+}
+char *shared_block;
+
+//-----------------------------------------------------------------------------
+
+void coordinator_create_mutex( void ) {
+    pthread_mutexattr_t mutexattr;
+
+    /* mmap() a shared memory segment and place primitives in it */
+    shared_block = (char *)mmap(NULL,
+                              sizeof(pthread_mutex_t),
+                              PROT_READ | PROT_WRITE,
+                              MAP_ANONYMOUS | MAP_SHARED, -1, 0);
+    amsgbuffer_mutex = (pthread_mutex_t *)(shared_block);
+
+    /* Set up mutex variable attributes */
+    pthread_mutexattr_init( &mutexattr );
+    pthread_mutexattr_setpshared( &mutexattr, PTHREAD_PROCESS_SHARED );
+    pthread_mutex_init( amsgbuffer_mutex, &mutexattr );
+    pthread_mutexattr_destroy( &mutexattr );
+}
 
 //-----------------------------------------------------------------------------
 // PLUGIN MANAGEMENT
@@ -79,12 +141,17 @@ void coordinator_instruct_dynamics_to_get_command( void ) {
 }
 
 //-----------------------------------------------------------------------------
+// PROCESS MANAGEMENT
+//-----------------------------------------------------------------------------
+
+#define DYNAMICS_PLUGIN "/home/james/tas/build/timing/libtiming_dynamics.so"
 
 void coordinator_init_dynamics( const int& argc, char* argv[] ) {
 
     DynamicsPlugin plugin;
     int result = plugin.read( DYNAMICS_PLUGIN );	// TODO: Sanity/Safety checking
     plugin.init( argc, argv );
+    //initialize_dynamics( argc, argv );
 
     // if both functions were located then push the pair into the list of plugins
     if( !result ) plugins.push_back( plugin );
@@ -93,13 +160,114 @@ void coordinator_init_dynamics( const int& argc, char* argv[] ) {
 
 
 //-----------------------------------------------------------------------------
+// Simulation Entry Point
+//-----------------------------------------------------------------------------
+/*
+#define DYNAMICS_MIN_STEP 0.001
+
+int main( int argc, char* argv[] ) {
+
+    sim_pid = getpid( );
+    // hopefully this is highest priority value, i.e. 0.
+    // in testing, this has been true, but it's possible the OS will assign a lower priority
+    // which may not have significant impact on the coordinator but may affect controller
+    sim_priority = getpriority( PRIO_PROCESS, sim_pid );
+
+    // Create a commandbuffer to listen to the commands.  With no timing, in this architecture
+    // need to snoop on the issuing of commands so the coordinator knows when to switch between
+    // processes.
+    amsgbuffer = ActuatorMessageBuffer( 8811, sim_pid, 0 );
+    amsgbuffer.open();   // TODO : sanity/safety checking
+
+    dynamics_init( argc, argv );
+    controller_init( );
+    controller_rttimer_init( );
+
+    while( 1 ) {
+        // should block here until a command issued.  Reading in coordinator is only
+        // necessary to ensure timing in this architecture
+        ActuatorMessage msg = amsgbuffer.read();
+        if(VERBOSE) msg.print();
+
+        switch( msg.header.type ) {
+        case MSG_TYPE_NO_COMMAND:
+        if(VERBOSE) printf( "(coordinator) received MSG_TYPE_NO_COMMAND\n" );
+            suspend_controller( );
+            run_dynamics( DYNAMICS_MIN_STEP );
+            resume_controller( );
+            break;
+        case MSG_TYPE_COMMAND:
+        if(VERBOSE) printf( "(coordinator) received MSG_TYPE_COMMAND\n" );
+            suspend_controller( );
+        clear_buffer( );
+            get_command( );
+        //Real dt = DYNAMICS_MIN_STEP;
+            // Note: may need to store previous msg/time to compute diff for dt
+            //dt = msg.state.time;
+            run_dynamics( DYNAMICS_MIN_STEP );
+            resume_controller( );
+            break;
+        case MSG_TYPE_STATE_REQUEST:
+        if(VERBOSE) printf( "(coordinator) received MSG_TYPE_STATE_REQUEST\n" );
+            suspend_controller( );
+        clear_buffer( );
+            publish_state( );
+            resume_controller( );
+            //usleep(1);
+            break;
+        case MSG_TYPE_STATE_REPLY:
+        if(VERBOSE) printf( "(coordinator) received MSG_TYPE_STATE_REPLY\n" );
+            // should be received directly by controller
+            resume_controller( );
+        default:
+            //run_dynamics( 0.001 );
+            //run_dynamics( 0.1 );
+            // discard
+            break;
+        }
+    }
+    return 0;
+}
+*/
+
+//*****************************************************************************
+
+/*----------------------THE GEORGE WASHINGTON UNIVERSITY-----------------------
+author: James R. Taylor                                             jrt@gwu.edu
+
+coordinator.cpp
+-----------------------------------------------------------------------------*/
+
+#include <stdlib.h>
+#include <stdio.h>
+#include <unistd.h>
+#include <fcntl.h>
+#include <assert.h>
+#include <signal.h>
+#include <stdexcept>
+#include <sys/time.h>
+#include <sys/resource.h>
+#include <errno.h>
+#include <sched.h>
+#include <dlfcn.h>
+#include <sys/types.h>
+
+#include <sstream>
+#include <fstream>
+#include <iostream>
+#include <list>
+
+#include <stdint.h>
+
+#include <pthread.h>
+
+
+
+//-----------------------------------------------------------------------------
 // INTERPROCESS COMMUNICATION (IPC)
 //-----------------------------------------------------------------------------
 
-int fd_timer_to_coordinator[2];		// channel from timer to coordinator. Timer event
-int fd_wakeup_to_coordinator[2];	// channel from wakeup to coordinator. Wakeup event
-int fd_coordinator_to_controller[2];	// channel from coordinator to controller. Notification
-int fd_controller_to_coordinator[2];	// channel from controller to coordinator. Notification
+// Note: IPC Channels are declared in Coordinator.h
 
 //-----------------------------------------------------------------------------
 
@@ -113,48 +281,32 @@ void coordinator_initialize_pipes( void ) {
     // NOTE: a write channel should be non-blocking (won't ever fill up buffer anyway)
 
     // Open the timer to coordinator channel for timer events
-    if( pipe( fd_timer_to_coordinator ) != 0 ) {
+    if( pipe( fd_timer_to_coordinator ) != 0 )
         throw std::runtime_error( "Failed to open fd_timer_to_coordinator pipe." ) ;
-    }
     flags = fcntl( fd_timer_to_coordinator[0], F_GETFL, 0 );
     fcntl( fd_timer_to_coordinator[0], F_SETFL, flags );
     flags = fcntl( fd_timer_to_coordinator[1], F_GETFL, 0 );
     fcntl( fd_timer_to_coordinator[1], F_SETFL, flags | O_NONBLOCK );
 
     // Open the wakeup to coordinator channel for wakeup (blocking) events
-    if( pipe( fd_wakeup_to_coordinator ) != 0 ) {
-        close( fd_timer_to_coordinator[0] );
-        close( fd_timer_to_coordinator[1] );
+    if( pipe( fd_wakeup_to_coordinator ) != 0 )
         throw std::runtime_error( "Failed to open fd_wakeup_to_coordinator pipe." ) ;
-    }
     flags = fcntl( fd_wakeup_to_coordinator[0], F_GETFL, 0 );
     fcntl( fd_wakeup_to_coordinator[0], F_SETFL, flags );
     flags = fcntl( fd_wakeup_to_coordinator[1], F_GETFL, 0 );
     fcntl( fd_wakeup_to_coordinator[1], F_SETFL, flags | O_NONBLOCK );
 
     // Open the coordinator to controller channel for notifications
-    if( pipe( fd_coordinator_to_controller ) != 0 ) {
-        close( fd_timer_to_coordinator[0] );
-        close( fd_timer_to_coordinator[1] );
-        close( fd_wakeup_to_coordinator[0] );
-        close( fd_wakeup_to_coordinator[1] );
+    if( pipe( fd_coordinator_to_controller ) != 0 )
         throw std::runtime_error( "Failed to open fd_coordinator_to_controller pipe." ) ;
-    }
     flags = fcntl( fd_coordinator_to_controller[0], F_GETFL, 0 );
     fcntl( fd_coordinator_to_controller[0], F_SETFL, flags );
     flags = fcntl( fd_coordinator_to_controller[1], F_GETFL, 0 );
     fcntl( fd_coordinator_to_controller[1], F_SETFL, flags | O_NONBLOCK );
 
     // Open the controller to coordinator channel for notifications
-    if( pipe( fd_controller_to_coordinator ) != 0 ) {
-        close( fd_timer_to_coordinator[0] );
-        close( fd_timer_to_coordinator[1] );
-        close( fd_wakeup_to_coordinator[0] );
-        close( fd_wakeup_to_coordinator[1] );
-        close( fd_coordinator_to_controller[0] );
-        close( fd_coordinator_to_controller[1] );
+    if( pipe( fd_controller_to_coordinator ) != 0 )
         throw std::runtime_error( "Failed to open fd_controller_to_coordinator pipe." ) ;
-    }
     flags = fcntl( fd_controller_to_coordinator[0], F_GETFL, 0 );
     fcntl( fd_controller_to_coordinator[0], F_SETFL, flags );
     flags = fcntl( fd_controller_to_coordinator[1], F_GETFL, 0 );
@@ -177,17 +329,20 @@ static int coordinator_priority;
 // Controller process information
 static int controller_pid;
 
-bool controller_fully_initialized = false;
+//-----------------------------------------------------------------------------
+
+#define DEFAULT_CONTROLLER_PROGRAM      "timing_controller"
+
 //-----------------------------------------------------------------------------
 
 /// Creates the controller process with a priority level one step below the coordinator.
 void coordinator_fork_controller( void ) {
 
     controller_pid = fork( );
-    if( controller_pid < 0 ) {
+    if ( controller_pid < 0 ) {
         throw std::runtime_error( "Failed to fork controller." ) ;
     }
-    if( controller_pid == 0 ) {
+    if ( controller_pid == 0 ) {
 
         controller_pid = getpid( );
 
@@ -197,7 +352,7 @@ void coordinator_fork_controller( void ) {
         CPU_ZERO( &cpuset_mask );
         // set the cpu set s.t. controller only runs on 1 processor specified by DEFAULT_PROCESSOR
         CPU_SET( DEFAULT_PROCESSOR, &cpuset_mask );
-        if( sched_setaffinity( controller_pid, sizeof(cpuset_mask), &cpuset_mask ) == -1 ) {
+        if ( sched_setaffinity( controller_pid, sizeof(cpuset_mask), &cpuset_mask ) == -1 ) {
             // there was an error setting the affinity for the controller
             // NOTE: can check errno if this occurs
             printf( "ERROR: Failed to set affinity for controller process.\n" );
@@ -205,7 +360,7 @@ void coordinator_fork_controller( void ) {
         }
 
         int sched_policy = sched_getscheduler( controller_pid );
-        if( sched_policy == -1 ) {
+        if ( sched_policy == -1 ) {
             // there was an error getting the scheduler policy for the controller
             // NOTE: can check errno if this occurs
             printf( "ERROR: Failed to get scheduler policy for controller process.\n" );
@@ -228,29 +383,26 @@ void coordinator_fork_controller( void ) {
         printf( " sched_getaffinity = %d, cpuset_mask = %08lx\n", sizeof(cpuset_mask), cpuset_mask );
         */
 
-        // duplicate the default fd's into known fd's so that the controller explicitly knows
-        // what the channels are.
-        // Note: dup2 explicitly closes the channel you are duping into so there is no need
-        // for a seperate close call preceding the dup2 call unless some kernel programmer
-        // didn't meet the spec.
-        dup2( fd_coordinator_to_controller[0], FD_COORDINATOR_TO_CONTROLLER_READ_CHANNEL );
-        dup2( fd_controller_to_coordinator[1], FD_CONTROLLER_TO_COORDINATOR_WRITE_CHANNEL );
-
-        // close the ends of the pipes that the controller is not allowed to use
-        close( fd_coordinator_to_controller[1] );   // close the write end for the controller
-        close( fd_controller_to_coordinator[0] );   // close the read end for the controller
-
-        // close the other pipes that the controller should have no knowledge of
-        close( fd_timer_to_coordinator[0] );
-        close( fd_timer_to_coordinator[1] );
-        close( fd_wakeup_to_coordinator[0] );
-        close( fd_wakeup_to_coordinator[1] );
-
         // execute the controller program
         execl( DEFAULT_CONTROLLER_PROGRAM, "controller", 0 );
 
-        // exit on fail to exec.  Can only get here if execl fails.
+        // exit on fail to exec
         _exit( 1 );
+
+/*
+        if( VERBOSE ) printf( "controller process initialized\n" );
+
+        long long i = 0;
+        while( 1 ) {
+            i++;
+            //printf( "(controller) working\n" );
+            if( i % 1000000 == 0 ) {
+                printf( "(controller) blocking\n" );
+                // simulate blocking for validating the wakeup thread
+                usleep( 1000 );
+            }
+        }
+*/
     }
 }
 
@@ -273,7 +425,7 @@ void coordinator_resume_controller( void ) {
 //-----------------------------------------------------------------------------
 // TIMER CONTROL
 //-----------------------------------------------------------------------------
-/*
+
 // Time conversions if necessary
 #define NSECS_PER_SEC 1E9
 #define USECS_PER_SEC 1E6
@@ -286,7 +438,7 @@ void coordinator_resume_controller( void ) {
 // NOTE: There must be some delay otherwise timer is disarmed
 #define DEFAULT_INITDELAY_RTTIMER_NSEC          1           // 1 nanoseconds
 #define DEFAULT_INITDELAY_RTTIMER_SEC           0           // 0 second
-*/
+
 //-----------------------------------------------------------------------------
 
 // Error codes for timer control
@@ -401,9 +553,9 @@ void coordinator_init_rttimer_controller_monitor( void ) {
 
     if( VERBOSE ) printf("(coordinator) rttimer initialized\n");
 
-    // unblock the controller process
+    // unblock the timer and unblock the controller process
+    coordinator_unblock_controllers_signal_rttimer( );
     coordinator_resume_controller( );
-    // Note: this doesn't mean the controller is fully initialized
 }
 
 //-----------------------------------------------------------------------------
@@ -421,10 +573,11 @@ pthread_t wakeup_thread;
 /// consuming budget but is not directly suspended by the coordinator.
 static void* wakeup_coordinator_on_a_blocked_controller( void* arg ) {
     while( 1 ) {
-        //printf( "(wakeup) event\n" );
+        printf( "(wakeup) event\n" );
         char buf = 0;
         write( fd_wakeup_to_coordinator[1], &buf, 1 );
-        usleep( 1 );
+
+        usleep( 1000 );
     }
 }
 
@@ -522,45 +675,32 @@ int main( int argc, char* argv[] ) {
     }
 
     // validate the priority
-    // INCORRECT RT(99) not 1: generally the expected value is 1 with SCHED_RR, but it may not be the a case depending on platform
+    // generally the expected value is 1 with SCHED_RR, but it may not be the a case depending on platform
     sched_getparam( 0, &param );
     coordinator_priority = param.sched_priority;
     printf( "coordinator process priority: %d\n", coordinator_priority );
 
-    //++++++++++++++++++++++++++++++++++++++++++++++++
+    if( VERBOSE ) printf( "coordinator process initialized\n" );
 
     // Comm channels must be initialized before any forking or thread creation
     coordinator_initialize_pipes( );
-
-    amsgbuffer = ActuatorMessageBuffer( ACTUATOR_MESSAGE_BUFFER_NAME, ACTUATOR_MESSAGE_BUFFER_MUTEX_NAME, true );
-    amsgbuffer.open( );
-
-    if( VERBOSE ) printf( "coordinator process initialized\n" );
-
-    //++++++++++++++++++++++++++++++++++++++++++++++++
+    // Mutex also need to be created before any forking or thread creation
+    coordinator_create_mutex( );
 
     coordinator_init_dynamics( argc, argv );
-
-    //++++++++++++++++++++++++++++++++++++++++++++++++
 
     coordinator_fork_controller( );
     coordinator_suspend_controller( );
 
     coordinator_init_rttimer_controller_monitor( );
 
-    //coordinator_create_wakeup_thread( );
-
-    //++++++++++++++++++++++++++++++++++++++++++++++++
+    coordinator_create_wakeup_thread( );
 
     char input_buffer;
-    //int i = 0;
+    int i = 0;
 
     int max_fd = std::max( fd_timer_to_coordinator[0], fd_wakeup_to_coordinator[0] );
     max_fd = std::max( max_fd, fd_controller_to_coordinator[0] );
-
-    Real previous_t = 0.0;
-    Real current_t = 0.0;
-    Real dt;
 
     while( 1 ) {
 
@@ -595,7 +735,8 @@ int main( int argc, char* argv[] ) {
                 }
                 coordinator_suspend_controller( );
 
-                if( VERBOSE ) printf( "(coordinator) received a timer event on a controller\n" );
+                printf( "(coordinator) received a timer event on a controller\n" );
+                //printf( "(coordinator) working\n" );
 
                 coordinator_resume_controller( );
 
@@ -612,7 +753,7 @@ int main( int argc, char* argv[] ) {
                     }
                 }
 
-                //printf( "(coordinator) received a wakeup from a blocked controller\n" );
+                printf( "(coordinator) received a wakeup from a blocked controller\n" );
             } else if( FD_ISSET( fd_controller_to_coordinator[0], &fds_channels ) ) {
                 // controller notification event
                 if( read( fd_controller_to_coordinator[0], &input_buffer, 1 ) == -1 ) {
@@ -626,91 +767,71 @@ int main( int argc, char* argv[] ) {
                     }
                 }
 
-                if( VERBOSE ) printf( "(coordinator) received a notification from controller\n" );
+                printf( "(coordinator) received a notification from controller\n" );
                 // now check the message buffer and respond to the type of message
 
                 ActuatorMessage msg = amsgbuffer.read();
                 if(VERBOSE) msg.print();
-
-                char buf = 0;
-
                 switch( msg.header.type ) {
                 case MSG_TYPE_COMMAND:
                     if(VERBOSE) printf( "(coordinator) received MSG_TYPE_COMMAND\n" );
-
                     coordinator_suspend_controller( );
-
                     coordinator_instruct_dynamics_to_get_command( );
-
+                    //Real dt = DYNAMICS_MIN_STEP;
+                    // Note: may need to store previous msg/time to compute diff for dt
+                    //dt = msg.state.time;
+                    coordinator_run_dynamics( DYNAMICS_MIN_STEP );
                     coordinator_resume_controller( );
                     break;
                 case MSG_TYPE_STATE_REQUEST:
                     if(VERBOSE) printf( "(coordinator) received MSG_TYPE_STATE_REQUEST\n" );
-
-                    // Note: the controller is blocking now on read from fd_coordinator_to_controller[0]
-
-                    if( !controller_fully_initialized ) {
-                        // indicates that the controller is fully initialized and timing can begin
-                        // and that this is querying for initial state
-                        controller_fully_initialized = true;
-
-                        // therefore suspend the controller and unblock the timer
-                        //coordinator_suspend_controller( );    // be careful.  If you suspend must resume
-                        //coordinator_unblock_controllers_signal_rttimer( );
-
-                        coordinator_request_dynamics_state( );
-
-                        msg = amsgbuffer.read( );
-                        if(VERBOSE) msg.print();
-
-                        if(VERBOSE) printf( "(coordinator) notifying controller state available\n" );
-
-                        //coordinator_resume_controller( );  // paired with above suspend
-                        write( fd_coordinator_to_controller[1], &buf, 1 );
-                    } else {
-                        // How do we objectively convert system time to sim time?
-                        // and vice versa
-
-                        // if dynamics behind controller [
-                        // Need an objective query.
-
-                        // right now this time is based on the frequency and cycle of the controller
-                        current_t = msg.state.time;
-
-                        dt = current_t - previous_t;
-                        printf( "dt: %f\n", dt );
-
-                        coordinator_run_dynamics( dt );
-
-                        coordinator_request_dynamics_state( );
-
-                        msg = amsgbuffer.read( );
-                        if(VERBOSE) msg.print();
-
-                        if(VERBOSE) printf( "(coordinator) notifying controller state available\n" );
-
-                        write( fd_coordinator_to_controller[1], &buf, 1 );
-
-                        previous_t = current_t;
-                        // ]
-
-                        // ++++++++++++++++
-
-                        // if dynamics ahead of controller ?? [
-                        // use the current state?
-
-                        // ]
-
-                        // ++++++++++++++++
-
-                        // if dynamics in step with controller ?? [
-                        // use the current state?
-
-                        // ]
-                    }
+                    coordinator_suspend_controller( );
+                    coordinator_request_dynamics_state( );
+                    //usleep(1);
                     break;
+                case MSG_TYPE_STATE_REPLY:
+                    if(VERBOSE) printf( "(coordinator) received MSG_TYPE_STATE_REPLY\n" );
+                    // should be received directly by controller
+                    //resume_controller( );
                 }
+
+/*
+        ActuatorMessage msg = amsgbuffer.read();
+        if(VERBOSE) msg.print();
+
+        switch( msg.header.type ) {
+        case MSG_TYPE_NO_COMMAND:
+        if(VERBOSE) printf( "(coordinator) received MSG_TYPE_NO_COMMAND\n" );
+            suspend_controller( );
+            run_dynamics( DYNAMICS_MIN_STEP );
+            resume_controller( );
+            break;
+        case MSG_TYPE_COMMAND:
+        if(VERBOSE) printf( "(coordinator) received MSG_TYPE_COMMAND\n" );
+            suspend_controller( );
+        clear_buffer( );
+            get_command( );
+        //Real dt = DYNAMICS_MIN_STEP;
+            // Note: may need to store previous msg/time to compute diff for dt
+            //dt = msg.state.time;
+            run_dynamics( DYNAMICS_MIN_STEP );
+            resume_controller( );
+            break;
+        case MSG_TYPE_STATE_REQUEST:
+        if(VERBOSE) printf( "(coordinator) received MSG_TYPE_STATE_REQUEST\n" );
+            suspend_controller( );
+        clear_buffer( );
+            publish_state( );
+            resume_controller( );
+            //usleep(1);
+            break;
+        case MSG_TYPE_STATE_REPLY:
+        if(VERBOSE) printf( "(coordinator) received MSG_TYPE_STATE_REPLY\n" );
+            // should be received directly by controller
+            resume_controller( );
+*/
             }
         }
+
     }
 }

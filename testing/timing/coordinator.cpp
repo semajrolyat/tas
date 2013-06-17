@@ -4,12 +4,16 @@ author: James R. Taylor                                             jrt@gwu.edu
 coordinator.cpp
 -----------------------------------------------------------------------------*/
 
-#include <TAS.h>
+#include "TAS.h"
 
 //-----------------------------------------------------------------------------
 
 using boost::dynamic_pointer_cast;
 
+//-----------------------------------------------------------------------------
+
+#define DYNAMICS_PLUGIN "/home/james/tas/build/timing/libtiming_dynamics.so"
+#define DEFAULT_CONTROLLER_PROGRAM      "timing_controller"
 
 //-----------------------------------------------------------------------------
 // SHARED RESOURCE MANAGEMENT
@@ -113,48 +117,32 @@ void coordinator_initialize_pipes( void ) {
     // NOTE: a write channel should be non-blocking (won't ever fill up buffer anyway)
 
     // Open the timer to coordinator channel for timer events
-    if( pipe( fd_timer_to_coordinator ) != 0 ) {
+    if( pipe( fd_timer_to_coordinator ) != 0 )
         throw std::runtime_error( "Failed to open fd_timer_to_coordinator pipe." ) ;
-    }
     flags = fcntl( fd_timer_to_coordinator[0], F_GETFL, 0 );
     fcntl( fd_timer_to_coordinator[0], F_SETFL, flags );
     flags = fcntl( fd_timer_to_coordinator[1], F_GETFL, 0 );
     fcntl( fd_timer_to_coordinator[1], F_SETFL, flags | O_NONBLOCK );
 
     // Open the wakeup to coordinator channel for wakeup (blocking) events
-    if( pipe( fd_wakeup_to_coordinator ) != 0 ) {
-        close( fd_timer_to_coordinator[0] );
-        close( fd_timer_to_coordinator[1] );
+    if( pipe( fd_wakeup_to_coordinator ) != 0 )
         throw std::runtime_error( "Failed to open fd_wakeup_to_coordinator pipe." ) ;
-    }
     flags = fcntl( fd_wakeup_to_coordinator[0], F_GETFL, 0 );
     fcntl( fd_wakeup_to_coordinator[0], F_SETFL, flags );
     flags = fcntl( fd_wakeup_to_coordinator[1], F_GETFL, 0 );
     fcntl( fd_wakeup_to_coordinator[1], F_SETFL, flags | O_NONBLOCK );
 
     // Open the coordinator to controller channel for notifications
-    if( pipe( fd_coordinator_to_controller ) != 0 ) {
-        close( fd_timer_to_coordinator[0] );
-        close( fd_timer_to_coordinator[1] );
-        close( fd_wakeup_to_coordinator[0] );
-        close( fd_wakeup_to_coordinator[1] );
+    if( pipe( fd_coordinator_to_controller ) != 0 )
         throw std::runtime_error( "Failed to open fd_coordinator_to_controller pipe." ) ;
-    }
     flags = fcntl( fd_coordinator_to_controller[0], F_GETFL, 0 );
     fcntl( fd_coordinator_to_controller[0], F_SETFL, flags );
     flags = fcntl( fd_coordinator_to_controller[1], F_GETFL, 0 );
     fcntl( fd_coordinator_to_controller[1], F_SETFL, flags | O_NONBLOCK );
 
     // Open the controller to coordinator channel for notifications
-    if( pipe( fd_controller_to_coordinator ) != 0 ) {
-        close( fd_timer_to_coordinator[0] );
-        close( fd_timer_to_coordinator[1] );
-        close( fd_wakeup_to_coordinator[0] );
-        close( fd_wakeup_to_coordinator[1] );
-        close( fd_coordinator_to_controller[0] );
-        close( fd_coordinator_to_controller[1] );
+    if( pipe( fd_controller_to_coordinator ) != 0 )
         throw std::runtime_error( "Failed to open fd_controller_to_coordinator pipe." ) ;
-    }
     flags = fcntl( fd_controller_to_coordinator[0], F_GETFL, 0 );
     fcntl( fd_controller_to_coordinator[0], F_SETFL, flags );
     flags = fcntl( fd_controller_to_coordinator[1], F_GETFL, 0 );
@@ -230,9 +218,6 @@ void coordinator_fork_controller( void ) {
 
         // duplicate the default fd's into known fd's so that the controller explicitly knows
         // what the channels are.
-        // Note: dup2 explicitly closes the channel you are duping into so there is no need
-        // for a seperate close call preceding the dup2 call unless some kernel programmer
-        // didn't meet the spec.
         dup2( fd_coordinator_to_controller[0], FD_COORDINATOR_TO_CONTROLLER_READ_CHANNEL );
         dup2( fd_controller_to_coordinator[1], FD_CONTROLLER_TO_COORDINATOR_WRITE_CHANNEL );
 
@@ -249,8 +234,23 @@ void coordinator_fork_controller( void ) {
         // execute the controller program
         execl( DEFAULT_CONTROLLER_PROGRAM, "controller", 0 );
 
-        // exit on fail to exec.  Can only get here if execl fails.
+        // exit on fail to exec
         _exit( 1 );
+
+/*
+        if( VERBOSE ) printf( "controller process initialized\n" );
+
+        long long i = 0;
+        while( 1 ) {
+            i++;
+            //printf( "(controller) working\n" );
+            if( i % 1000000 == 0 ) {
+                printf( "(controller) blocking\n" );
+                // simulate blocking for validating the wakeup thread
+                usleep( 1000 );
+            }
+        }
+*/
     }
 }
 
@@ -273,7 +273,7 @@ void coordinator_resume_controller( void ) {
 //-----------------------------------------------------------------------------
 // TIMER CONTROL
 //-----------------------------------------------------------------------------
-/*
+
 // Time conversions if necessary
 #define NSECS_PER_SEC 1E9
 #define USECS_PER_SEC 1E6
@@ -286,7 +286,7 @@ void coordinator_resume_controller( void ) {
 // NOTE: There must be some delay otherwise timer is disarmed
 #define DEFAULT_INITDELAY_RTTIMER_NSEC          1           // 1 nanoseconds
 #define DEFAULT_INITDELAY_RTTIMER_SEC           0           // 0 second
-*/
+
 //-----------------------------------------------------------------------------
 
 // Error codes for timer control
@@ -522,7 +522,7 @@ int main( int argc, char* argv[] ) {
     }
 
     // validate the priority
-    // INCORRECT RT(99) not 1: generally the expected value is 1 with SCHED_RR, but it may not be the a case depending on platform
+    // generally the expected value is 1 with SCHED_RR, but it may not be the a case depending on platform
     sched_getparam( 0, &param );
     coordinator_priority = param.sched_priority;
     printf( "coordinator process priority: %d\n", coordinator_priority );
@@ -548,12 +548,12 @@ int main( int argc, char* argv[] ) {
 
     coordinator_init_rttimer_controller_monitor( );
 
-    //coordinator_create_wakeup_thread( );
+    coordinator_create_wakeup_thread( );
 
     //++++++++++++++++++++++++++++++++++++++++++++++++
 
     char input_buffer;
-    //int i = 0;
+    int i = 0;
 
     int max_fd = std::max( fd_timer_to_coordinator[0], fd_wakeup_to_coordinator[0] );
     max_fd = std::max( max_fd, fd_controller_to_coordinator[0] );
@@ -639,15 +639,15 @@ int main( int argc, char* argv[] ) {
                     if(VERBOSE) printf( "(coordinator) received MSG_TYPE_COMMAND\n" );
 
                     coordinator_suspend_controller( );
-
                     coordinator_instruct_dynamics_to_get_command( );
-
+                        //Real dt = DYNAMICS_MIN_STEP;
+                        // Note: may need to store previous msg/time to compute diff for dt
+                        //dt = msg.state.time;
+                    //coordinator_run_dynamics( DYNAMICS_MIN_STEP );
                     coordinator_resume_controller( );
                     break;
                 case MSG_TYPE_STATE_REQUEST:
                     if(VERBOSE) printf( "(coordinator) received MSG_TYPE_STATE_REQUEST\n" );
-
-                    // Note: the controller is blocking now on read from fd_coordinator_to_controller[0]
 
                     if( !controller_fully_initialized ) {
                         // indicates that the controller is fully initialized and timing can begin
@@ -665,7 +665,7 @@ int main( int argc, char* argv[] ) {
 
                         if(VERBOSE) printf( "(coordinator) notifying controller state available\n" );
 
-                        //coordinator_resume_controller( );  // paired with above suspend
+                        //coordinator_resume_controller( );  // paired with above suspend in if( !controller_fully_initialized )...
                         write( fd_coordinator_to_controller[1], &buf, 1 );
                     } else {
                         // How do we objectively convert system time to sim time?
@@ -674,7 +674,6 @@ int main( int argc, char* argv[] ) {
                         // if dynamics behind controller [
                         // Need an objective query.
 
-                        // right now this time is based on the frequency and cycle of the controller
                         current_t = msg.state.time;
 
                         dt = current_t - previous_t;
