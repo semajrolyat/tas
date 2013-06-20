@@ -18,6 +18,10 @@ using boost::dynamic_pointer_cast;
 // CPU
 //-----------------------------------------------------------------------------
 
+#define DEFAULT_PROCESSOR    0
+
+//-----------------------------------------------------------------------------
+
 cpuinfo_c cpuinfo;
 double cpu_speed_mhz;
 unsigned long long cpu_speed_hz;
@@ -42,7 +46,8 @@ int open_error_log( void ) {
     error_log = log_c( LOG_CHANNEL_FILE );
 
     if( error_log.open( "error.log" ) != LOG_ERROR_NONE ) {
-	sprintf( strbuffer, "ERROR: opening log file: error.log" );
+	//sprintf( strbuffer, "ERROR: opening log file: error.log" );
+	printf( "ERROR: opening log file: error.log" );
 	return 1;
     }
     return 0;
@@ -214,10 +219,6 @@ void initialize_pipes( void ) {
 
 //-----------------------------------------------------------------------------
 // PROCESS MANAGEMENT
-//-----------------------------------------------------------------------------
-
-#define DEFAULT_PROCESSOR    0
-
 //-----------------------------------------------------------------------------
 
 // Coordinator process information
