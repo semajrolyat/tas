@@ -18,8 +18,10 @@ find_package( Moby REQUIRED )
 
 set( TAS_HEADERS
     tas.h
+    cpu.h
     actuator.h
     dynamics_plugin.h
+    log.h
 )
 
 set( TAS_SOURCES )
@@ -46,3 +48,7 @@ target_link_libraries( coordinator ${TAS_LIBRARIES} )
 
 add_library( dynamics "MODULE" ${CMAKE_CURRENT_SOURCE_DIR}/dynamics.cpp ${TAS_HEADERS} ${TAS_SOURCES} )
 target_link_libraries( dynamics ${TAS_LIBRARIES} )
+
+add_executable( cputest ${CMAKE_CURRENT_SOURCE_DIR}/cputest.cpp ${TAS_HEADERS} ${TAS_SOURCES} )
+target_link_libraries( cputest ${TAS_LIBRARIES} )
+

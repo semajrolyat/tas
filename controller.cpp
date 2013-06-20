@@ -256,7 +256,9 @@ int main( int argc, char* argv[] ) {
 //    unsigned long long rdtsc_mark2;
 
     tv_interval.tv_sec = 0;
-    tv_interval.tv_usec = 1000;
+    //tv_interval.tv_usec = 1000;
+    assert( CONTROLLER_FREQUENCY_HERTZ > 1 && CONTROLLER_FREQUENCY_HERTZ < USECS_PER_SEC );
+    tv_interval.tv_usec = USECS_PER_SEC / CONTROLLER_FREQUENCY_HERTZ;
 
     //tv_interval.tv_sec = 1;
     //tv_interval.tv_usec = 0;
@@ -340,6 +342,9 @@ int main( int argc, char* argv[] ) {
         if( VERBOSE ) printf( "(controller) Next interval start: %f\n", timeval_to_real( tv_interval_start ) );
         if( VERBOSE ) printf( "(controller) Next interval end: %f\n", timeval_to_real( tv_interval_end ) );
         if( VERBOSE ) printf( "(controller) Current time: %f\n", timeval_to_real( tv_current ) );
+
+        // TEST: to be commented.  Validate the wakeup event in coordinator.
+	// usleep(100);			// Sanity check
 
         cycle++;
     }

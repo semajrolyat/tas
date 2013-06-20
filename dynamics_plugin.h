@@ -144,6 +144,7 @@ private:
       if( VERBOSE ) std::cerr << "  " << dlerror( ) << std::endl;
       return PLUGIN_ERROR_OPEN;
     }
+    return PLUGIN_ERROR_NONE;
   }
  
   //---------------------------------------------------------------------------

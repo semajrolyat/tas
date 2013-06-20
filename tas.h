@@ -62,7 +62,7 @@ typedef double Real;
 
 #define PI 3.14159265359
 
-#define VERBOSE 1 
+#define VERBOSE 0 
 
 //-----------------------------------------------------------------------------
 // IPC Channels
@@ -76,7 +76,7 @@ typedef double Real;
 
 //-----------------------------------------------------------------------------
 
-#define CONTROLLER_FREQUENCY_HERTZ                  1000
+#define CONTROLLER_FREQUENCY_HERTZ                  100 
 
 //-----------------------------------------------------------------------------
 
@@ -94,7 +94,8 @@ typedef double Real;
 
 //-----------------------------------------------------------------------------
 
-#define DEFAULT_BUDGET_RTTIMER_NSEC	1E6
+//#define DEFAULT_BUDGET_RTTIMER_NSEC	1E6
+#define DEFAULT_BUDGET_RTTIMER_NSEC	1E7
 #define DEFAULT_BUDGET_RTTIMER_SEC	0
 
 #define DEFAULT_INITDELAY_RTTIMER_NSEC	1

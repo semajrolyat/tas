@@ -6,12 +6,60 @@ coordinator.cpp
 
 #include <tas.h>
 #include <dynamics_plugin.h>
+#include <cpu.h>
 #include <actuator.h>
+#include <log.h>
 
 //-----------------------------------------------------------------------------
 
 using boost::dynamic_pointer_cast;
 
+//-----------------------------------------------------------------------------
+// CPU
+//-----------------------------------------------------------------------------
+
+cpuinfo_c cpuinfo;
+double cpu_speed_mhz;
+unsigned long long cpu_speed_hz;
+
+//-----------------------------------------------------------------------------
+
+double cycles_to_seconds( const unsigned long long& cycles ) {
+    return (double)cycles / (double)cpu_speed_hz;
+} 
+
+//-----------------------------------------------------------------------------
+// LOGGING
+//-----------------------------------------------------------------------------
+
+log_c variance_log;
+log_c error_log;
+char strbuffer[ 256 ];
+
+//-----------------------------------------------------------------------------
+
+int open_error_log( void ) {
+    error_log = log_c( LOG_CHANNEL_FILE );
+
+    if( error_log.open( "error.log" ) != LOG_ERROR_NONE ) {
+	sprintf( strbuffer, "ERROR: opening log file: error.log" );
+	return 1;
+    }
+    return 0;
+}
+
+//-----------------------------------------------------------------------------
+
+int open_variance_log( void ) {
+    //variance_log = log_c( LOG_CHANNEL_FILE );
+
+    if( variance_log.open( "variance.dat" ) != LOG_ERROR_NONE ) {
+	sprintf( strbuffer, "ERROR: opening output file: variance.dat" );
+	error_log.write( strbuffer );
+	return 1;
+    }
+    return 0;
+}
 
 //-----------------------------------------------------------------------------
 // SHARED RESOURCE MANAGEMENT
@@ -273,6 +321,14 @@ void resume_controller( void ) {
 }
 
 //-----------------------------------------------------------------------------
+
+void shutdown_controller( void ) {
+
+    //kill( controller_pid, SIGTERM );
+    kill( controller_pid, SIGKILL );
+}
+
+//-----------------------------------------------------------------------------
 // TIMER CONTROL
 //-----------------------------------------------------------------------------
 /*
@@ -319,8 +375,11 @@ struct sigaction rttimer_sigaction;
 /// is listening to for notifications about this event
 void rttimer_sighandler( int signum, siginfo_t *si, void *data ) {
     if( VERBOSE ) printf( "(timer) event\n" );
-    char buf = 0;
-    write( fd_timer_to_coordinator[1], &buf, 1 );
+    //char buf = 0;
+    //write( fd_timer_to_coordinator[1], &buf, 1 );
+    unsigned long long ts;
+    rdtscll( ts );
+    write( fd_timer_to_coordinator[1], &ts, sizeof(unsigned long long) );
 }
 
 //-----------------------------------------------------------------------------
@@ -424,11 +483,12 @@ pthread_t wakeup_thread;
 /// consuming budget but is not directly suspended by the coordinator.
 static void* wakeup( void* arg ) {
     while( 1 ) {
-        //printf( "(wakeup) event\n" );
+        printf( "(wakeup) event\n" );
         char buf = 0;
         write( fd_wakeup_to_coordinator[1], &buf, 1 );
-        usleep( 1 );
+        //usleep( 1 );
     }
+    return NULL;
 }
 
 //-----------------------------------------------------------------------------
@@ -478,6 +538,11 @@ void create_wakeup_thread( void ) {
 //-----------------------------------------------------------------------------
 
 void init( int argc, char* argv[] ) {
+
+    if( open_error_log( ) != 0 ) {
+	exit( 1 );
+    }
+
     coordinator_pid = getpid( );
 
     // restrict the cpu set s.t. controller only runs on a single processor
@@ -521,6 +586,47 @@ void init( int argc, char* argv[] ) {
     printf( "coordinator process priority: %d\n", coordinator_priority );
 
     //++++++++++++++++++++++++++++++++++++++++++++++++
+/*
+    // get processor information
+    std::stringstream filename;
+    //filename << "/proc/" << (int)coordinator_pid;
+    filename << "/proc/cpuinfo";
+    FILE* fp = fopen( filename.str().c_str( ), "r" );
+    if( fp == 0 ) printf( "error opening processor file\n" );
+
+    while( !feof( fp) ) {
+	if( fgets( strbuffer, 256, fp ) == NULL)
+	    break;
+        fputs( strbuffer, stdout );
+    }
+
+
+    fclose( fp );    
+*/
+    if( cpuinfo.load( ) != CPUINFO_ERROR_NONE ) {
+	printf( "ERROR: Failed to load cpuinfo\n" );
+    }
+    printf( "cpuinfo loaded\n" );
+ 
+    for( unsigned int i = 0; i < cpuinfo.cpus.size( ); i++ ) {
+	//printf( "processor: %d\n", cpuinfo.cpus.at( i ).processor );
+	if( cpuinfo.cpus.at( i ).processor == DEFAULT_PROCESSOR ) {
+	    cpu_speed_mhz = cpuinfo.cpus.at( i ).mhz;
+	    // Note: fp conversion will most likely result in inaccuracy
+	    cpu_speed_hz = (unsigned long long) (cpu_speed_mhz * 1E6);
+	    // down and dirty fix to fp inaccuracy.
+	    // TODO : use a much better fix
+	    if( cpu_speed_hz % 2 == 1 ) cpu_speed_hz++;
+	    break;
+	}
+	if( i == cpuinfo.cpus.size( ) - 1 ) {
+	    printf( "ERROR: default processor not found in cpus\n" );
+	}
+    }
+    printf( "cpu speed (MHz): %f\n", cpu_speed_mhz );
+    printf( "cpu speed (Hz): %lld\n", cpu_speed_hz );
+
+    //++++++++++++++++++++++++++++++++++++++++++++++++
 
     // Comm channels must be initialized before any forking or thread creation
     initialize_pipes( );
@@ -531,19 +637,45 @@ void init( int argc, char* argv[] ) {
     if( VERBOSE ) printf( "coordinator process initialized\n" );
 
     //++++++++++++++++++++++++++++++++++++++++++++++++
+    // initialize dynamics
 
     init_dynamics( argc, argv );
 
     //++++++++++++++++++++++++++++++++++++++++++++++++
+    // initialize controller
 
     fork_controller( );
+
+    // ???????????????????????
     suspend_controller( );
 
     init_rttimer( );
 
-    //create_wakeup_thread( );
+    create_wakeup_thread( );
+    // ???????????????????????
 
     //++++++++++++++++++++++++++++++++++++++++++++++++
+
+    if( open_variance_log( ) != 0 ) {
+	exit( 1 );
+    }
+}
+
+//-----------------------------------------------------------------------------
+
+void shutdown( void ) {
+    variance_log.close( );
+
+    pthread_kill( wakeup_thread, SIGKILL );
+
+    shutdown_controller( );
+    resume_controller( );
+
+    sleep( 1 );  // block for a second to allow controller to receive signal
+
+    error_log.close( );
+
+    //exit( 0 );
 }
 
 //-----------------------------------------------------------------------------
@@ -553,9 +685,12 @@ void init( int argc, char* argv[] ) {
 #define DYNAMICS_MIN_STEP 0.001
 
 int main( int argc, char* argv[] ) {
+
     // Due to realtime scheduling, et al, this program must have root access to run.
     if( geteuid() != 0 ) {
         printf( "This program requires root access.  Re-run with sudo.\nExiting.\n" );
+        sprintf( strbuffer, "This program requires root access.  Re-run with sudo.\nExiting.\n" );
+	error_log.write( strbuffer );
         return 0;
     }
 
@@ -572,12 +707,15 @@ int main( int argc, char* argv[] ) {
     Real dt;
 
     unsigned long long ts, ts_start, ts_prev, ts_interval;
+    double dts, dts_start, dts_prev, dts_interval;
     rdtscll( ts_start );
     ts_prev = ts_start;
 
     unblock_rttimer( );
 
     while( 1 ) {
+
+	if( current_t > 1.0 ) break;
 
         fd_set fds_channels;
 
@@ -590,8 +728,10 @@ int main( int argc, char* argv[] ) {
         int result = select( max_fd + 1, &fds_channels, NULL, NULL, NULL );
         if( result ) {
             if( FD_ISSET( fd_timer_to_coordinator[0], &fds_channels ) ) {
+
                 // timer event
-                if( read( fd_timer_to_coordinator[0], &input_buffer, 1 ) == -1 ) {
+                unsigned long long ts_buffer;
+                if( read( fd_timer_to_coordinator[0], &ts_buffer, sizeof(unsigned long long) ) == -1 ) {
                     switch( errno ) {
                     case EINTR:
                         // The read operation was terminated due to the receipt of a signal, and no data was transferred.
@@ -604,21 +744,42 @@ int main( int argc, char* argv[] ) {
                         // However, do not know appriopriate course of action in the architecture
                         break;
                     default:
-                        printf( "EXCEPTION: unhandled read error in main loop reading from fd_timer_to_coordinator" );
+                        sprintf( strbuffer, "EXCEPTION: unhandled read error in main loop reading from fd_timer_to_coordinator" );
+			error_log.write( strbuffer );
+
                         break;
                     }
                 }
+		// if this timer event is during the initialization phase of the controller
+		// then throw it out
+		if( !controller_fully_initialized ) { 
+		    ts_prev = ts_buffer;
+		    continue;
+		}
+
                 suspend_controller( );
 
-		rdtscll( ts );
+		ts = ts_buffer;
+		dts = cycles_to_seconds( ts );
+
 		ts_interval = ts - ts_prev;
+		dts_interval = cycles_to_seconds( ts_interval );
 
                 //if( VERBOSE ) printf( "(coordinator) Timer Event: %ulld\n", ts );
-                printf( "(coordinator) Timer Event: %lld\n", ts );
-                printf( "(coordinator) Timer Interval: %lld\n", ts_interval );
-                printf( "(coordinator) Timer Previous: %lld\n", ts_prev );
+                //printf( "(coordinator) Timer Event (cycles, seconds): %lld, %f\n", ts, dts );
+                printf( "(coordinator) Timer Interval (cycles, seconds): %lld, %f\n", ts_interval, dts_interval );
+                //printf( "(coordinator) Timer Previous (cycles, seconds): %lld, %f\n", ts_prev, dts_prev );
+
+		//std::string output;
+		//output += ts_interval;
+		//variance_log.write( output );
+		//variance_log.write( std::to_string( ts_interval ) );
+
+		sprintf( strbuffer, "%lld\n", ts_interval );
+		variance_log.write( strbuffer );
 
 		ts_prev = ts;
+		dts_prev = cycles_to_seconds( ts_prev );
 
                 resume_controller( );
 
@@ -630,7 +791,9 @@ int main( int argc, char* argv[] ) {
                         // yet to determine appropriate course of action if this happens
                         break;
                     default:
-                        printf( "EXCEPTION: unhandled read error in main loop reading from fd_controller_to_coordinator" );
+                        sprintf( strbuffer, "EXCEPTION: unhandled read error in main loop reading from fd_controller_to_coordinator" );
+			error_log.write( strbuffer );
+
                         break;
                     }
                 }
@@ -674,6 +837,13 @@ int main( int argc, char* argv[] ) {
 
                         if(VERBOSE) printf( "(coordinator) notifying controller state available\n" );
 
+			// ???????????????????????
+			// Should we start timing here rather than in initialization?
+			//init_rttimer( );
+    			//unblock_rttimer( );
+    			//create_wakeup_thread( );
+			// ???????????????????????
+
                         //coordinator_resume_controller( );  // paired with above suspend
                         write( fd_coordinator_to_controller[1], &buf, 1 );
                     } else {
@@ -687,7 +857,7 @@ int main( int argc, char* argv[] ) {
                         current_t = msg.state.time;
 
                         dt = current_t - previous_t;
-                        printf( "dt: %f\n", dt );
+                        printf( "dt: %e\n", dt );
 
                         run_dynamics( dt );
 
@@ -727,7 +897,9 @@ int main( int argc, char* argv[] ) {
                         // yet to determine appropriate course of action if this happens
                         break;
                     default:
-                        printf( "EXCEPTION: unhandled read error in main loop reading from fd_wakeup_to_coordinator" );
+                        sprintf( strbuffer, "EXCEPTION: unhandled read error in main loop reading from fd_wakeup_to_coordinator" );
+			error_log.write( strbuffer );
+
                         break;
                     }
                 }
@@ -736,4 +908,5 @@ int main( int argc, char* argv[] ) {
             }
         }
     }
+    shutdown( );
 }

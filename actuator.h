@@ -1,7 +1,7 @@
 /*----------------------THE GEORGE WASHINGTON UNIVERSITY-----------------------
 author: James R. Taylor                                             jrt@gwu.edu
 
-acituator.h
+actuator.h
 -----------------------------------------------------------------------------*/
 
 #ifndef _ACTUATOR_H_
@@ -149,7 +149,7 @@ public:
 /// Aliasing the system close(2) function.  Necessary because the buffer has
 /// a close method and the compiler doesn't want to use the system function
 /// because they have the same name but different signatures
-int sys_close_fd( const int& fd ) {
+void sys_close_fd( const int& fd ) {
     close( fd );
 }
 
@@ -405,4 +405,4 @@ public:
 
 //-----------------------------------------------------------------------------
 
-#endif // _ACTUATOR_MESSAGE_H_
+#endif // _ACTUATOR_H_
