@@ -35,6 +35,9 @@ Moby plugin
 
 #include <tas.h>
 #include <actuator.h>
+#include <log.h>
+
+//-----------------------------------------------------------------------------
 
 using namespace Moby;
 using boost::shared_ptr;
@@ -42,6 +45,8 @@ using boost::dynamic_pointer_cast;
 
 //-----------------------------------------------------------------------------
 
+log_c error_log;
+char strbuffer[ 256 ];
 
 //-----------------------------------------------------------------------------
 // MOBY driver
@@ -488,6 +493,14 @@ actuator_msg_buffer_c amsgbuffer;
 // Dynamics plugin entry point.  
 void init( int argc, char** argv ) {
 
+    //+++++++++++++++++++++++++++++++++++++++
+    error_log = log_c( FD_ERROR_LOG );
+    if( error_log.open( ) != LOG_ERROR_NONE ) {
+	// Note: this is not really necessary
+	printf( "(dynamics.cpp) ERROR: init(argc,argv) failed calling log_c.open() on FD_ERROR_LOG\n" );
+    }
+    //+++++++++++++++++++++++++++++++++++++++
+
     const unsigned ONECHAR_ARG = 3, TWOCHAR_ARG = 4;
 
     #ifdef USE_OSG
@@ -692,11 +705,17 @@ void init( int argc, char** argv ) {
     // custom implementation follows
 
     // Get reference to the pendulum for usage in the command publish and response
-    if( READ_MAP.find("pendulum") == READ_MAP.end() )
-      printf( "dynamics.cpp:init()- unable to find pendulum!\n" );
+    if( READ_MAP.find("pendulum") == READ_MAP.end() ) {
+      sprintf( strbuffer, "(dynamics.cpp) init(argc,argv) failed- unable to find pendulum in xml!\n" );
+      error_log.write( strbuffer );
+      // TODO : return error condition
+    }
     pendulum = dynamic_pointer_cast<Moby::RCArticulatedBody>( READ_MAP.find("pendulum")->second  );
-    if( !pendulum )
-        printf( "dynamics.cpp:init()- unable to cast pendulum to type RCArticulatedBody\n" );
+    if( !pendulum ) {
+        sprintf( strbuffer, "(dynamics.cpp) init(argc,argv)- unable to cast pendulum to type RCArticulatedBody\n" );
+	error_log.write( strbuffer );
+      // TODO : return error condition
+    }
 
     // open the command buffer
     amsgbuffer = actuator_msg_buffer_c( ACTUATOR_MSG_BUFFER_NAME, ACTUATOR_MSG_BUFFER_MUTEX_NAME );

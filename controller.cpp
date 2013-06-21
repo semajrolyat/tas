@@ -16,6 +16,7 @@ controller.cpp
 
 #include <tas.h>
 #include <actuator.h>
+#include <log.h>
 
 //-----------------------------------------------------------------------------
 
@@ -25,11 +26,17 @@ using boost::dynamic_pointer_cast;
 
 //-----------------------------------------------------------------------------
 
-// really contingient on what Moby is using for a Real.  In the lab, it is a double
+// really dependent on what Moby is using for a Real.  In the lab, it is a double
 // but Moby can be compliled to have a Real as a single.
 typedef double Real;
 
 #define PI 3.14159265359
+
+//-----------------------------------------------------------------------------
+// 
+//-----------------------------------------------------------------------------
+
+log_c error_log;
 
 //-----------------------------------------------------------------------------
 // Trajectory Functions
@@ -245,23 +252,21 @@ Real timeval_to_real( const struct timeval& tv ) {
 /// Standalone Controller Entry Point
 int main( int argc, char* argv[] ) {
 
+    error_log = log_c( FD_ERROR_LOG );
+    if( error_log.open( ) != LOG_ERROR_NONE ) {
+	// Note:  this is not really necessary
+	printf( "(controller.cpp) ERROR: main() failed calling log_c.open() on FD_ERROR_LOG\n" );
+    }
+
     actuator_msg_c state, command;
     int cycle = 0;
-    // Real time = 0.0;
     struct timeval tv_start, tv_current, tv_control;
     struct timeval tv_interval, tv_interval_start, tv_interval_end; 
     struct timeval tv_interval_elapsed, tv_interval_error;
 
-//    unsigned long long rdtsc_mark1;
-//    unsigned long long rdtsc_mark2;
-
     tv_interval.tv_sec = 0;
-    //tv_interval.tv_usec = 1000;
     assert( CONTROLLER_FREQUENCY_HERTZ > 1 && CONTROLLER_FREQUENCY_HERTZ < USECS_PER_SEC );
     tv_interval.tv_usec = USECS_PER_SEC / CONTROLLER_FREQUENCY_HERTZ;
-
-    //tv_interval.tv_sec = 1;
-    //tv_interval.tv_usec = 0;
 
     // connect to the shared message buffer BEFORE attempting any IPC
     amsgbuffer = actuator_msg_buffer_c( ACTUATOR_MSG_BUFFER_NAME, ACTUATOR_MSG_BUFFER_MUTEX_NAME );

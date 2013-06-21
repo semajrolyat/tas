@@ -15,6 +15,13 @@ coordinator.cpp
 using boost::dynamic_pointer_cast;
 
 //-----------------------------------------------------------------------------
+
+enum error_e {
+    ERROR_NONE = 0,
+    ERROR_FAILED
+};
+
+//-----------------------------------------------------------------------------
 // CPU
 //-----------------------------------------------------------------------------
 
@@ -42,30 +49,32 @@ char strbuffer[ 256 ];
 
 //-----------------------------------------------------------------------------
 
-int open_error_log( void ) {
+error_e open_error_log( void ) {
     error_log = log_c( "error.log" );
     //error_log = log_c( LOG_CHANNEL_STDERR );
 
     if( error_log.open( ) != LOG_ERROR_NONE ) {
-	//sprintf( strbuffer, "ERROR: opening log file: error.log" );
-	printf( "ERROR: opening log file: error.log\n" );
-	return 1;
+	printf( "(coordinator.cpp) ERROR: open_error_log() failed calling log_c.open() on file error.log\n" );
+	return ERROR_FAILED;
     }
-    return 0;
+    // also dup the error log fd into a known channel
+    dup2( error_log.get_fd(), FD_ERROR_LOG );
+
+    return ERROR_NONE;
 }
 
 //-----------------------------------------------------------------------------
 
-int open_variance_log( void ) {
+error_e open_variance_log( void ) {
     variance_log = log_c( "variance.dat" );
     //variance_log = log_c( LOG_CHANNEL_STDOUT );
 
     if( variance_log.open( ) != LOG_ERROR_NONE ) {
-	sprintf( strbuffer, "ERROR: opening output file: variance.dat" );
+	sprintf( strbuffer, "(coordinator.cpp) open_variance_log() failed calling log_c.open() on file variance.dat\n" );
 	error_log.write( strbuffer );
-	return 1;
+	return ERROR_FAILED;
     }
-    return 0;
+    return ERROR_NONE;
 }
 
 //-----------------------------------------------------------------------------
@@ -137,7 +146,7 @@ void dynamics_get_command( void ) {
 
 //-----------------------------------------------------------------------------
 
-void init_dynamics( const int& argc, char* argv[] ) {
+error_e init_dynamics( const int& argc, char* argv[] ) {
 
     dynamics_plugin_c plugin;
     int result = plugin.read( DYNAMICS_PLUGIN );	// TODO: Sanity/Safety checking
@@ -146,6 +155,8 @@ void init_dynamics( const int& argc, char* argv[] ) {
     // if both functions were located then push the pair into the list of plugins
     if( !result ) plugins.push_back( plugin );
     if( VERBOSE ) printf("(coordinator) dynamics initialized\n");
+
+    return ERROR_NONE;
 }
 
 
@@ -163,7 +174,7 @@ int fd_controller_to_coordinator[2];	// channel from controller to coordinator. 
 /// Initializes all interprocess communication channels.  This must be done
 /// before any controller processes are forked or threads are spawned so that they
 /// will inherit the file descriptors from the coordinator.
-void initialize_pipes( void ) {
+error_e init_pipes( void ) {
     int flags;
 
     // NOTE: a read channel needs to be blocking to force  block waiting for event
@@ -171,7 +182,9 @@ void initialize_pipes( void ) {
 
     // Open the timer to coordinator channel for timer events
     if( pipe( fd_timer_to_coordinator ) != 0 ) {
-        throw std::runtime_error( "Failed to open fd_timer_to_coordinator pipe." ) ;
+	sprintf( strbuffer, "(coordinator.cpp) init_pipes() failed calling pipe(fd_timer_to_coordinator)\n" );
+	error_log.write( strbuffer );
+	return ERROR_FAILED;
     }
     flags = fcntl( fd_timer_to_coordinator[0], F_GETFL, 0 );
     fcntl( fd_timer_to_coordinator[0], F_SETFL, flags );
@@ -182,7 +195,9 @@ void initialize_pipes( void ) {
     if( pipe( fd_wakeup_to_coordinator ) != 0 ) {
         close( fd_timer_to_coordinator[0] );
         close( fd_timer_to_coordinator[1] );
-        throw std::runtime_error( "Failed to open fd_wakeup_to_coordinator pipe." ) ;
+	sprintf( strbuffer, "(coordinator.cpp) init_pipes() failed calling pipe(fd_wakeup_to_coordinator)\n" );
+	error_log.write( strbuffer );
+	return ERROR_FAILED;
     }
     flags = fcntl( fd_wakeup_to_coordinator[0], F_GETFL, 0 );
     fcntl( fd_wakeup_to_coordinator[0], F_SETFL, flags );
@@ -195,7 +210,9 @@ void initialize_pipes( void ) {
         close( fd_timer_to_coordinator[1] );
         close( fd_wakeup_to_coordinator[0] );
         close( fd_wakeup_to_coordinator[1] );
-        throw std::runtime_error( "Failed to open fd_coordinator_to_controller pipe." ) ;
+	sprintf( strbuffer, "(coordinator.cpp) init_pipes() failed calling pipe(fd_coordinator_to_controller)\n" );
+	error_log.write( strbuffer );
+	return ERROR_FAILED;
     }
     flags = fcntl( fd_coordinator_to_controller[0], F_GETFL, 0 );
     fcntl( fd_coordinator_to_controller[0], F_SETFL, flags );
@@ -210,13 +227,29 @@ void initialize_pipes( void ) {
         close( fd_wakeup_to_coordinator[1] );
         close( fd_coordinator_to_controller[0] );
         close( fd_coordinator_to_controller[1] );
-        throw std::runtime_error( "Failed to open fd_controller_to_coordinator pipe." ) ;
+	sprintf( strbuffer, "(coordinator.cpp) init_pipes() failed calling pipe(fd_controller_to_coordinator)\n" );
+	error_log.write( strbuffer );
+	return ERROR_FAILED;
     }
     flags = fcntl( fd_controller_to_coordinator[0], F_GETFL, 0 );
     fcntl( fd_controller_to_coordinator[0], F_SETFL, flags );
     flags = fcntl( fd_controller_to_coordinator[1], F_GETFL, 0 );
     fcntl( fd_controller_to_coordinator[1], F_SETFL, flags | O_NONBLOCK );
 
+    return ERROR_NONE;
+}
+
+//-----------------------------------------------------------------------------
+/// Clean up the pipes to prevent leakage
+void close_pipes( void ) {
+        close( fd_timer_to_coordinator[0] );
+        close( fd_timer_to_coordinator[1] );
+        close( fd_wakeup_to_coordinator[0] );
+        close( fd_wakeup_to_coordinator[1] );
+        close( fd_coordinator_to_controller[0] );
+        close( fd_coordinator_to_controller[1] );
+        close( fd_controller_to_coordinator[0] );
+        close( fd_controller_to_coordinator[1] );
 }
 
 //-----------------------------------------------------------------------------
@@ -234,11 +267,15 @@ bool controller_fully_initialized = false;
 //-----------------------------------------------------------------------------
 
 /// Creates the controller process with a priority level one step below the coordinator.
-void fork_controller( void ) {
+/// Note: an ERROR_NONE in the coordinator does not really guarantee that the controller
+/// started properly
+error_e fork_controller( void ) {
 
     controller_pid = fork( );
     if( controller_pid < 0 ) {
-        throw std::runtime_error( "Failed to fork controller." ) ;
+	sprintf( strbuffer, "(coordinator.cpp) fork_controller() failed calling fork()\n" );
+	error_log.write( strbuffer );
+	return ERROR_FAILED;
     }
     if( controller_pid == 0 ) {
 
@@ -253,16 +290,18 @@ void fork_controller( void ) {
         if( sched_setaffinity( controller_pid, sizeof(cpuset_mask), &cpuset_mask ) == -1 ) {
             // there was an error setting the affinity for the controller
             // NOTE: can check errno if this occurs
-            printf( "ERROR: Failed to set affinity for controller process.\n" );
-            // could throw or exit or perror
+	    sprintf( strbuffer, "(coordinator.cpp) fork_controller() failed calling sched_setaffinity(controller_pid, ...)\n" );
+            error_log.write( strbuffer );
+	    return ERROR_FAILED;
         }
 
         int sched_policy = sched_getscheduler( controller_pid );
         if( sched_policy == -1 ) {
             // there was an error getting the scheduler policy for the controller
             // NOTE: can check errno if this occurs
-            printf( "ERROR: Failed to get scheduler policy for controller process.\n" );
-            // could throw or exit or perror
+	    sprintf( strbuffer, "(coordinator.cpp) fork_controller() failed calling sched_getschduler(controller_pid)\n" );
+            error_log.write( strbuffer );
+	    return ERROR_FAILED;
         } else {
             struct sched_param param;
             param.sched_priority = coordinator_priority - 1;
@@ -305,6 +344,8 @@ void fork_controller( void ) {
         // exit on fail to exec.  Can only get here if execl fails.
         _exit( 1 );
     }
+
+    return ERROR_NONE;
 }
 
 //-----------------------------------------------------------------------------
@@ -333,21 +374,6 @@ void shutdown_controller( void ) {
 
 //-----------------------------------------------------------------------------
 // TIMER CONTROL
-//-----------------------------------------------------------------------------
-/*
-// Time conversions if necessary
-#define NSECS_PER_SEC 1E9
-#define USECS_PER_SEC 1E6
-
-// Time budget for controller process
-#define DEFAULT_BUDGET_RTTIMER_NSEC             1E8         // 0.1 second
-#define DEFAULT_BUDGET_RTTIMER_SEC              0           // 0 second
-
-// Initial delay for timer
-// NOTE: There must be some delay otherwise timer is disarmed
-#define DEFAULT_INITDELAY_RTTIMER_NSEC          1           // 1 nanoseconds
-#define DEFAULT_INITDELAY_RTTIMER_SEC           0           // 0 second
-*/
 //-----------------------------------------------------------------------------
 // Error codes for timer control
 
@@ -457,11 +483,12 @@ timer_err_e create_rttimer( void ) {
 
 /// Initializes the controller monitoring timer which determines when the controller has
 /// exhausted its budget
-void init_rttimer( void ) {
+error_e init_rttimer( void ) {
 
     if( create_rttimer( ) != TIMER_ERROR_NONE ) {
-        printf( "Failed to create timer\n" );
-        // should probably throw or exit but possible to create a zombie controller as artifact
+	sprintf( strbuffer, "(coordinator.cpp) init_rttimer() failed calling create_rttimer()\n" );
+        error_log.write( strbuffer );
+	return ERROR_FAILED;
     }
 
     if( VERBOSE ) printf("(coordinator) rttimer initialized\n");
@@ -469,6 +496,8 @@ void init_rttimer( void ) {
     // unblock the controller process
     resume_controller( );
     // Note: this doesn't mean the controller is fully initialized
+
+    return ERROR_NONE;
 }
 
 //-----------------------------------------------------------------------------
@@ -499,55 +528,56 @@ static void* wakeup( void* arg ) {
 /// Spawns the wakeup thread with a priority level one below the controller thread
 /// (therefore two below the coordinator).  For more information see
 /// wakeup_coordinator_on_a_blocked_controller( void* ) above
-void create_wakeup_thread( void ) {
+error_e create_wakeup_thread( void ) {
 
-    int result;
     pthread_attr_t attributes;
+    struct sched_param param;
 
     pthread_attr_init( &attributes );
 
-    result = pthread_attr_setinheritsched( &attributes, PTHREAD_EXPLICIT_SCHED );
-    if( result != 0 ) {
-        printf( "Failed to set explicit schedule attribute for wakeup thread.\n" );
+    if( pthread_attr_setinheritsched( &attributes, PTHREAD_EXPLICIT_SCHED )  != 0 ) {
+	sprintf( strbuffer, "(coordinator.cpp) create_wakeup_thread() failed calling pthread_attr_setinheritsched(...)\n" );
+	error_log.write( strbuffer );
+	return ERROR_FAILED;
     }
 
-    struct sched_param param;
-
-    result = pthread_attr_setschedpolicy( &attributes, SCHED_RR );
-    if( result != 0 ) {
-        printf( "Failed to set schedule policy attribute for wakeup thread.\n" );
+    if( pthread_attr_setschedpolicy( &attributes, SCHED_RR ) != 0 ) {
+	sprintf( strbuffer, "(coordinator.cpp) create_wakeup_thread() failed calling pthread_attr_setschedpolicy(...)\n" );
+	error_log.write( strbuffer );
+	return ERROR_FAILED;
     }
 
     param.sched_priority = coordinator_priority - 2;
 
-    result = pthread_attr_setschedparam( &attributes, &param);
-    if( result != 0 ) {
-        printf( "Failed to set schedule priority attribute for wakeup thread.\n" );
+    if( pthread_attr_setschedparam( &attributes, &param ) != 0 ) {
+	sprintf( strbuffer, "(coordinator.cpp) create_wakeup_thread() failed calling pthread_attr_setschedparam(...)\n" );
+	error_log.write( strbuffer );
+	return ERROR_FAILED;
     }
 
     printf( "creating wakeup\n" );
 
-    pthread_create( &wakeup_thread, &attributes, wakeup, NULL );
+    if( pthread_create( &wakeup_thread, &attributes, wakeup, NULL ) != 0 ) {
+	sprintf( strbuffer, "(coordinator.cpp) create_wakeup_thread() failed calling pthread_create(wakeup_thread,...)\n" );
+	error_log.write( strbuffer );
+	return ERROR_FAILED;
+    }
 
     printf( "wakeup created\n" );
 
+    // validation of the priority
     int policy;
     pthread_getschedparam( wakeup_thread, &policy, &param );
     printf( "wakeup priority: %d\n", param.sched_priority );
 
     pthread_attr_destroy( &attributes );
+
+    return ERROR_NONE;
 }
 
 //-----------------------------------------------------------------------------
 
-void init( int argc, char* argv[] ) {
-
-    if( open_error_log( ) != 0 ) {
-	exit( 1 );
-    }
-
-    coordinator_pid = getpid( );
-
+error_e set_schedule( void ) {
     // restrict the cpu set s.t. controller only runs on a single processor
     cpu_set_t cpuset_mask;
     // zero out the cpu set
@@ -558,7 +588,9 @@ void init( int argc, char* argv[] ) {
     if ( sched_setaffinity( 0, sizeof(cpuset_mask), &cpuset_mask ) == -1 ) {
         // there was an error setting the affinity for the coordinator
         // NOTE: can check errno if this occurs
-        perror( "sched_setaffinity" );
+	sprintf( strbuffer, "(coordinator.cpp) set_schedule() failed calling sched_setaffinity(coordinator_pid,...)\n" );
+	error_log.write( strbuffer );
+	return ERROR_FAILED;
     }
 
     /*
@@ -576,10 +608,12 @@ void init( int argc, char* argv[] ) {
     // validate the scheduling policy
     int policy = sched_getscheduler( 0 );
     if( policy != SCHED_RR ) {
-        printf( "There was an error setting the scheduling policy to SCHED_RR for the coordinator.  The actual policy is%s\n",
+	sprintf( strbuffer, "(coordinator.cpp) set_schedule() failed setting SCHED_RR policy.  The actual policy is %s\n",
                 (policy == SCHED_OTHER) ? "SCHED_OTHER" :
                 (policy == SCHED_FIFO) ? "SCHED_FIFO" :
                 "UNDEFINED" );
+	error_log.write( strbuffer );
+	return ERROR_FAILED;
     }
 
     // validate the priority
@@ -588,26 +622,16 @@ void init( int argc, char* argv[] ) {
     coordinator_priority = param.sched_priority;
     printf( "coordinator process priority: %d\n", coordinator_priority );
 
-    //++++++++++++++++++++++++++++++++++++++++++++++++
-/*
-    // get processor information
-    std::stringstream filename;
-    //filename << "/proc/" << (int)coordinator_pid;
-    filename << "/proc/cpuinfo";
-    FILE* fp = fopen( filename.str().c_str( ), "r" );
-    if( fp == 0 ) printf( "error opening processor file\n" );
+    return ERROR_NONE;
+}
 
-    while( !feof( fp) ) {
-	if( fgets( strbuffer, 256, fp ) == NULL)
-	    break;
-        fputs( strbuffer, stdout );
-    }
+//-----------------------------------------------------------------------------
 
-
-    fclose( fp );    
-*/
+error_e read_cpuinfo( void ) {
     if( cpuinfo.load( ) != CPUINFO_ERROR_NONE ) {
-	printf( "ERROR: Failed to load cpuinfo\n" );
+	sprintf( strbuffer, "(coordinator.cpp) read_cpuinfo() failed calling cpuinfo_c.load()\n" );
+	error_log.write( strbuffer );
+	return ERROR_FAILED;
     }
     printf( "cpuinfo loaded\n" );
  
@@ -623,16 +647,49 @@ void init( int argc, char* argv[] ) {
 	    break;
 	}
 	if( i == cpuinfo.cpus.size( ) - 1 ) {
-	    printf( "ERROR: default processor not found in cpus\n" );
+	    sprintf( strbuffer, "(coordinator.cpp) read_cpuinfo() failed to find default processor in cpus.\n" );
+            error_log.write( strbuffer );
+	    return ERROR_FAILED;
 	}
     }
     printf( "cpu speed (MHz): %f\n", cpu_speed_mhz );
     printf( "cpu speed (Hz): %lld\n", cpu_speed_hz );
 
+    return ERROR_NONE;
+}
+
+//-----------------------------------------------------------------------------
+
+void init( int argc, char* argv[] ) {
+
+    if( open_error_log( ) != ERROR_NONE ) {
+	exit( 1 );
+    }
+
+    coordinator_pid = getpid( );
+
+    if( set_schedule( ) != ERROR_NONE ) {
+        error_log.close( );
+	printf( "(coordinator.cpp) init() failed calling set_schedule()\nExiting\n" );
+	exit( 1 );
+    }
+
+    //++++++++++++++++++++++++++++++++++++++++++++++++
+
+    if( read_cpuinfo( ) != ERROR_NONE ) {
+        error_log.close( );
+	printf( "(coordinator.cpp) init() failed calling read_cpuinfo()\nExiting\n" );
+	exit( 1 );
+    }
+
     //++++++++++++++++++++++++++++++++++++++++++++++++
 
     // Comm channels must be initialized before any forking or thread creation
-    initialize_pipes( );
+    if( init_pipes( ) !=  ERROR_NONE ) {
+        error_log.close( );
+	printf( "(coordinator.cpp) init() failed calling init_pipes()\nExiting\n" );
+	exit(1);
+    }
 
     amsgbuffer = actuator_msg_buffer_c( ACTUATOR_MSG_BUFFER_NAME, ACTUATOR_MSG_BUFFER_MUTEX_NAME, true );
     amsgbuffer.open( );
@@ -642,24 +699,50 @@ void init( int argc, char* argv[] ) {
     //++++++++++++++++++++++++++++++++++++++++++++++++
     // initialize dynamics
 
-    init_dynamics( argc, argv );
+    if( init_dynamics( argc, argv ) != ERROR_NONE ) {
+	close_pipes( );
+        error_log.close( );
+	printf( "(coordinator.cpp) init() failed calling init_dynamics(argc,argv)\nExiting\n" );
+	exit(1);
+    }
+
 
     //++++++++++++++++++++++++++++++++++++++++++++++++
     // initialize controller
 
-    fork_controller( );
-
-    // ???????????????????????
+    if( fork_controller( ) != ERROR_NONE ) {
+	close_pipes( );
+        error_log.close( );
+	printf( "(coordinator.cpp) init() failed calling fork_controller()\nExiting\n" );
+	exit(1);
+    }
     suspend_controller( );
 
-    init_rttimer( );
+    //++++++++++++++++++++++++++++++++++++++++++++++++
+    // intialize all other monitor facilities
+  
+    if( init_rttimer( ) != ERROR_NONE ) {
+	close_pipes( );
+        error_log.close( );
+	printf( "(coordinator.cpp) init() failed calling init_rttimer()\nExiting\n" );
+	exit(1);
+    }
 
-    create_wakeup_thread( );
-    // ???????????????????????
+
+    if( create_wakeup_thread( ) != ERROR_NONE ) {
+	close_pipes( );
+        error_log.close( );
+	printf( "(coordinator.cpp) init() failed calling create_wakeup_thread()\nExiting\n" );
+	exit(1);
+    }
 
     //++++++++++++++++++++++++++++++++++++++++++++++++
+    // open any other logs
 
-    if( open_variance_log( ) != 0 ) {
+    if( open_variance_log( ) != ERROR_NONE ) {
+	close_pipes( );
+        error_log.close( );
+	printf( "(coordinator.cpp) init() failed calling open_variance_log()\nExiting\n" );
 	exit( 1 );
     }
 }
@@ -672,10 +755,11 @@ void shutdown( void ) {
     pthread_kill( wakeup_thread, SIGKILL );
 
     shutdown_controller( );
-    resume_controller( );
+    //resume_controller( );
 
     sleep( 1 );  // block for a second to allow controller to receive signal
 
+    close_pipes( );
     error_log.close( );
 
     //exit( 0 );
@@ -691,10 +775,9 @@ int main( int argc, char* argv[] ) {
 
     // Due to realtime scheduling, et al, this program must have root access to run.
     if( geteuid() != 0 ) {
-        printf( "This program requires root access.  Re-run with sudo.\nExiting.\n" );
-        sprintf( strbuffer, "This program requires root access.  Re-run with sudo.\nExiting.\n" );
-	error_log.write( strbuffer );
-        return 0;
+        sprintf( strbuffer, "This program requires root access.  Re-run with sudo.\nExiting\n" );
+        printf( "%s", strbuffer );
+        exit( 1 );
     }
 
     init( argc, argv );

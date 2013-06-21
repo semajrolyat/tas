@@ -99,7 +99,7 @@ public:
     //-------------------------------------------------------------------------
     /// Constructor for connecting to an already opened file descriptor
     log_c( const int& fd ) {
-	assert( fcntl( fd, F_GETFL) != -1 );
+	assert( fcntl( fd, F_GETFL) != -1 && errno != EBADF );
 
 	opened = true;
 	this->channel = LOG_CHANNEL_UNKNOWN;
@@ -115,7 +115,7 @@ public:
     /// Note: it is not necessary to call open if connecting to an already open
     /// file descriptor
     log_err_e open( void ) {
-	assert( channel != LOG_CHANNEL_UNKNOWN );
+	//assert( channel != LOG_CHANNEL_UNKNOWN );
 
 	if( channel == LOG_CHANNEL_STDOUT ) {
 	    // Note: these channels may have been explicitly closed!
@@ -134,7 +134,7 @@ public:
 	    // to call open on an already opened fd but better to allow and
 	    // validate than to have a radically different procedure for 
 	    // connecting to the UNKNOWN channel than to the others
-	    if( fcntl( fd, F_GETFL) != -1 )
+	    if( fcntl( fd, F_GETFL) == -1 && errno == EBADF )
 	    	return LOG_ERROR_OPEN;
 	}
 
