@@ -43,11 +43,12 @@ char strbuffer[ 256 ];
 //-----------------------------------------------------------------------------
 
 int open_error_log( void ) {
-    error_log = log_c( LOG_CHANNEL_FILE );
+    error_log = log_c( "error.log" );
+    //error_log = log_c( LOG_CHANNEL_STDERR );
 
-    if( error_log.open( "error.log" ) != LOG_ERROR_NONE ) {
+    if( error_log.open( ) != LOG_ERROR_NONE ) {
 	//sprintf( strbuffer, "ERROR: opening log file: error.log" );
-	printf( "ERROR: opening log file: error.log" );
+	printf( "ERROR: opening log file: error.log\n" );
 	return 1;
     }
     return 0;
@@ -56,9 +57,10 @@ int open_error_log( void ) {
 //-----------------------------------------------------------------------------
 
 int open_variance_log( void ) {
-    //variance_log = log_c( LOG_CHANNEL_FILE );
+    variance_log = log_c( "variance.dat" );
+    //variance_log = log_c( LOG_CHANNEL_STDOUT );
 
-    if( variance_log.open( "variance.dat" ) != LOG_ERROR_NONE ) {
+    if( variance_log.open( ) != LOG_ERROR_NONE ) {
 	sprintf( strbuffer, "ERROR: opening output file: variance.dat" );
 	error_log.write( strbuffer );
 	return 1;
@@ -768,7 +770,7 @@ int main( int argc, char* argv[] ) {
 
                 //if( VERBOSE ) printf( "(coordinator) Timer Event: %ulld\n", ts );
                 //printf( "(coordinator) Timer Event (cycles, seconds): %lld, %f\n", ts, dts );
-                printf( "(coordinator) Timer Interval (cycles, seconds): %lld, %f\n", ts_interval, dts_interval );
+                printf( "(coordinator) Timer Interval (cycles, seconds): %lld, %11.10f\n", ts_interval, dts_interval );
                 //printf( "(coordinator) Timer Previous (cycles, seconds): %lld, %f\n", ts_prev, dts_prev );
 
 		//std::string output;
@@ -776,8 +778,10 @@ int main( int argc, char* argv[] ) {
 		//variance_log.write( output );
 		//variance_log.write( std::to_string( ts_interval ) );
 
-		sprintf( strbuffer, "%lld\n", ts_interval );
-		variance_log.write( strbuffer );
+		//sprintf( strbuffer, "%lld\n", ts_interval );
+		//variance_log.write( strbuffer );
+		sprintf( strbuffer, "%lld", ts_interval );
+		variance_log.writeln( strbuffer );
 
 		ts_prev = ts;
 		dts_prev = cycles_to_seconds( ts_prev );
