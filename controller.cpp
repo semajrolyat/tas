@@ -33,12 +33,6 @@ typedef double Real;
 #define PI 3.14159265359
 
 //-----------------------------------------------------------------------------
-// 
-//-----------------------------------------------------------------------------
-
-log_c error_log;
-
-//-----------------------------------------------------------------------------
 // Trajectory Functions
 //-----------------------------------------------------------------------------
 
@@ -63,7 +57,6 @@ Real velocity_trajectory( Real t, Real tfinal, Real q0, Real qdes ) {
 //-----------------------------------------------------------------------------
 // Moby Control Functions
 //-----------------------------------------------------------------------------
-
 
 /// Controls the pendulum
 /// Note: Moby Plugin Code
@@ -132,21 +125,26 @@ void init( void* separator, const std::map<std::string, BasePtr>& read_map, Real
 // Standalone Controller
 //----------------------------------------------------------------------------
 
+// shared buffer for actuator messages
 actuator_msg_buffer_c amsgbuffer;
+
+// error logging facilities
+log_c error_log;
+char strbuffer[256];
 
 //-----------------------------------------------------------------------------
 
 /// Control function for Standalone Controller
-actuator_msg_c control( const actuator_msg_c& msg ) {
+error_e control( const actuator_msg_c& input, actuator_msg_c& output ) {
 
-    actuator_msg_c reply = actuator_msg_c( msg );
+    output = actuator_msg_c( input );
 
     const Real Kp = 1.0;
     const Real Kv = 0.1;
 
-    Real time = msg.state.time;
-    Real measured_position = msg.state.position;
-    Real measured_velocity = msg.state.velocity;
+    Real time = input.state.time;
+    Real measured_position = input.state.position;
+    Real measured_velocity = input.state.velocity;
 
     //Real desired_position = position_trajectory( time, 0.5, 0.0, PI );
     //Real desired_velocity = velocity_trajectory( time, 0.5, 0.0, PI );
@@ -154,109 +152,168 @@ actuator_msg_c control( const actuator_msg_c& msg ) {
     Real desired_position = position_trajectory( time, 10.0, 0.0, PI );
     Real desired_velocity = velocity_trajectory( time, 10.0, 0.0, PI );
 
-    reply.command.torque = Kp * ( desired_position - measured_position ) + Kv * ( desired_velocity - measured_velocity );
+    output.command.torque = Kp * ( desired_position - measured_position ) + Kv * ( desired_velocity - measured_velocity );
 
-    return reply;
+    return ERROR_NONE;
 }
 
 //-----------------------------------------------------------------------------
-
-actuator_msg_c get_state( const Real& time ) {
+/// Send a message to the dynamics to publish a state to the actuator message
+/// buffer for given time
+error_e get_state( const Real& time, actuator_msg_c& state ) {
 
     char buf = 0;
     actuator_msg_c request;
-    actuator_msg_c state;
-        
+
+    // build the request message        
     request.header.type = ACTUATOR_MSG_REQUEST;
     request.state.time = time;
 
-    amsgbuffer.write( request );
+    if( amsgbuffer.write( request ) != BUFFER_ERROR_NONE ) {
+	sprintf( strbuffer, "(controller.cpp) get_state(time) failed calling actuator_msg_buffer_c.write(request)\n" );
+	error_log.write( strbuffer );
+	return ERROR_FAILED;
+    }
 
-    // send a notification to the coordinator
-    write( FD_CONTROLLER_TO_COORDINATOR_WRITE_CHANNEL, &buf, 1 );
+    // send a notification to the coordinator that a message has been published
+    if( write( FD_CONTROLLER_TO_COORDINATOR_WRITE_CHANNEL, &buf, 1 ) == -1 ) {
+	std::string err_msg = "(controller.cpp) get_state(time) failed making system call write(...)";
+	error_log.write( error_string_bad_write( err_msg , errno ) );
+	return ERROR_FAILED;
+    }
 
     // wait for the reply meaning the state request fulfilled and written to the buffer
+    // Note: controller blocks here on read
     if( read( FD_COORDINATOR_TO_CONTROLLER_READ_CHANNEL, &buf, 1 ) == -1 ) {
-        switch( errno ) {
-        case EINTR:
-            // yet to determine appropriate course of action if this happens
-            break;
-        default:
-            printf( "EXCEPTION: unhandled read error in controller reading from FD_COORDINATOR_TO_CONTROLLER_READ_CHANNEL" );
-            break;
-        }
+	std::string err_msg = "(controller.cpp) get_state(time) failed making system call read(...)";
+	error_log.write( error_string_bad_read( err_msg , errno ) );
+	return ERROR_FAILED;
     }
 
     // At this point a message was sent from the coordinator.  Attempt to read from buffer
     // read the state out of the buffer
     // Note: will block waiting to acquire mutex
-    state = amsgbuffer.read( );
+    if( amsgbuffer.read( state ) != BUFFER_ERROR_NONE ) {
+	sprintf( strbuffer, "(controller.cpp) get_state(time) failed calling actuator_msg_buffer_c.read(state)\n" );
+	error_log.write( strbuffer );
+	return ERROR_FAILED;
+    }
 
-    return state;
+    return ERROR_NONE;
 }
 
 //-----------------------------------------------------------------------------
-
-void publish_command( actuator_msg_c cmd ) {
+/// Send a command to the actuator message buffer
+error_e publish_command( const actuator_msg_c& cmd ) {
 
     char buf = 0;
 
     // send the command message to the actuator
-    amsgbuffer.write( cmd );
     // Note: will block waiting to acquire mutex
+    if( amsgbuffer.write( cmd ) != BUFFER_ERROR_NONE) {
+	sprintf( strbuffer, "(controller.cpp) publish_command(cmd) failed calling actuator_msg_buffer_c.write(cmd)\n" );
+	error_log.write( strbuffer );
+	return ERROR_FAILED;
+    }
 	
     // send a notification to the coordinator
     write( FD_CONTROLLER_TO_COORDINATOR_WRITE_CHANNEL, &buf, 1 );
 
+    return ERROR_NONE;
 }
 
 //-----------------------------------------------------------------------------
+/// Fulfill controller need to get initial state information and issue
+/// any initial command that might result from initial state
+// TODO : add more error handling
+error_e get_initial_state( void ) {
 
-void request_initial_state_then_publish_initial_command( void ) {
+    actuator_msg_c state, command;
 
-    actuator_msg_c state = get_state( 0.0 );
+    // query the dyanmics for the initial state 
+    if( get_state( 0.0, state ) != ERROR_NONE ) {
+	sprintf( strbuffer, "(controller.cpp) get_initial_state() failed calling get_state(0.0,state)\n" );
+	error_log.write( strbuffer );
+	return ERROR_FAILED;
+    }
 
     if( VERBOSE ) printf( "(controller) received initial state\n" );
     if( VERBOSE ) state.print();
 
-    // compute the command message
-    actuator_msg_c command = control( state );
+    // compute the initial command message
+    if( control( state, command ) != ERROR_NONE ) {
+	sprintf( strbuffer, "(controller.cpp) get_initial_state() failed calling control(state,command)\n" );
+	error_log.write( strbuffer );
+	return ERROR_FAILED;
+    }
     command.header.type = ACTUATOR_MSG_COMMAND;
 
+    // publish the initial command message
     if( VERBOSE ) printf( "(controller) publishing initial command\n" );
-    publish_command( command );
+    if( publish_command( command ) != ERROR_NONE ) {
+	sprintf( strbuffer, "(controller.cpp) get_initial_state() failed calling publish_command(command)\n" );
+	error_log.write( strbuffer );
+	return ERROR_FAILED;
+    }
+
+    return ERROR_NONE;
 }
 
 //-----------------------------------------------------------------------------
-
+/// Query the system for the current time.  Used by polling loop. 
+// TODO : refactor with error codes
 struct timeval get_process_time( void ) {
     struct rusage ru;
     struct timeval tv;
 
+    // Note: getrusage queries appear to result in a fixed interval (4ms)
+    // on Ubuntu 12.04 out of the box.  This 4ms has shown up in rttimers as
+    // well.  Researching possible ways to augment the system limitation
     //int result = getrusage( RUSAGE_SELF, &ru );
     //memcpy( &tv, &ru.ru_utime, sizeof(timeval) );
 
+    // so instead use gettimeofday 
     gettimeofday( &tv, NULL );
 
     return tv;
 }
 
 //-----------------------------------------------------------------------------
-
+/// Conversion function from a timeval to a floating point representing seconds
 Real timeval_to_real( const struct timeval& tv ) {
     return (Real) tv.tv_sec + (Real) tv.tv_usec / (Real) USECS_PER_SEC;
 }
 
 //-----------------------------------------------------------------------------
+/// Initialization sequence for a standalone controller
+void init( void ) {
 
-/// Standalone Controller Entry Point
-int main( int argc, char* argv[] ) {
-
+    // connect to the error log 
+    // Note: error log is created by the coordinator
     error_log = log_c( FD_ERROR_LOG );
     if( error_log.open( ) != LOG_ERROR_NONE ) {
 	// Note:  this is not really necessary
-	printf( "(controller.cpp) ERROR: main() failed calling log_c.open() on FD_ERROR_LOG\n" );
+	printf( "(controller.cpp) ERROR: main() failed calling log_c.open() on FD_ERROR_LOG\nExiting\n" );
+	exit( 1 );
     }
+
+    // connect to the shared message buffer BEFORE attempting any IPC
+    // Note: the message buffer is created by the coordinator before the controller
+    // is launched
+    amsgbuffer = actuator_msg_buffer_c( ACTUATOR_MSG_BUFFER_NAME, ACTUATOR_MSG_BUFFER_MUTEX_NAME );
+    if( amsgbuffer.open( ) != BUFFER_ERROR_NONE ) {
+	sprintf( strbuffer, "(controller.cpp) init(argc,argv) failed calling actuator_msg_buffer_c.open(...,false)\n" );
+	error_log.write( strbuffer );
+	error_log.close( );
+	exit( 1 );
+    }
+}
+
+//-----------------------------------------------------------------------------
+
+/// Standalone Controller Entry Point
+// TODO : refactor to exit as gracefully as possible
+int main( int argc, char* argv[] ) {
 
     actuator_msg_c state, command;
     int cycle = 0;
@@ -264,16 +321,17 @@ int main( int argc, char* argv[] ) {
     struct timeval tv_interval, tv_interval_start, tv_interval_end; 
     struct timeval tv_interval_elapsed, tv_interval_error;
 
+    // Note: if init fails, the controller bombs out.  Will write a message to
+    // console and/or error_log if this happens.
+    init( );
+
+    // compute the controller's interval
     tv_interval.tv_sec = 0;
     assert( CONTROLLER_FREQUENCY_HERTZ > 1 && CONTROLLER_FREQUENCY_HERTZ < USECS_PER_SEC );
     tv_interval.tv_usec = USECS_PER_SEC / CONTROLLER_FREQUENCY_HERTZ;
 
-    // connect to the shared message buffer BEFORE attempting any IPC
-    amsgbuffer = actuator_msg_buffer_c( ACTUATOR_MSG_BUFFER_NAME, ACTUATOR_MSG_BUFFER_MUTEX_NAME );
-    amsgbuffer.open( );
-
     // query and publish initial values
-    request_initial_state_then_publish_initial_command( );
+    get_initial_state( );
 
     // now that initialization is complete record start time (for interval computation)
     tv_start = get_process_time( );
@@ -317,13 +375,28 @@ int main( int argc, char* argv[] ) {
         Real t = timeval_to_real( tv_control );
         if( VERBOSE ) printf( "(controller) Requesting state at time: %f\n", t );
 
-        state = get_state( t );
+	// get the state (via dynamics)
+        if( get_state( t, state ) != ERROR_NONE ) {
+	    sprintf( strbuffer, "(controller.cpp) main() failed calling get_state(%11.10f,state)\n", t );
+	    error_log.write( strbuffer );
+  	    //TODO : determine appropriate response
+        }
     
-        command = control( state );
+        // build a command
+        if( control( state, command ) != ERROR_NONE ) {
+	    sprintf( strbuffer, "(controller.cpp) main() failed calling control(state,command) at time %11.10f\n", t );
+	    error_log.write( strbuffer );
+  	    //TODO : determine appropriate response
+        }
         command.header.type = ACTUATOR_MSG_COMMAND;
 
-        //if( VERBOSE ) printf( "(controller) Publishing command for time: %f\n", t );
+        // publish the command
         publish_command( command );
+        if( publish_command( command ) != ERROR_NONE ) {
+	    sprintf( strbuffer, "(controller.cpp) main() failed calling publish_command(command) at time %11.10f\n", t );
+	    error_log.write( strbuffer );
+  	    //TODO : determine appropriate response
+        }
 
 	// gather stats on actual duration of the last interval
 	timersub( &tv_current, &tv_interval_start, &tv_interval_elapsed );
@@ -332,7 +405,6 @@ int main( int argc, char* argv[] ) {
         if( VERBOSE ) printf( "(controller) Actual Interval: %e\n", timeval_to_real( tv_interval_elapsed ) );
         if( VERBOSE ) printf( "(controller) Interval Error: %e\n", timeval_to_real( tv_interval_error ) );
 	
-
         // recompute start of the interval
         // Note: the interval is computed on the time it was supposed to end
         // not on the current time.  It is highly unlikely that the current will

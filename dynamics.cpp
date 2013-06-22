@@ -719,7 +719,11 @@ void init( int argc, char** argv ) {
 
     // open the command buffer
     amsgbuffer = actuator_msg_buffer_c( ACTUATOR_MSG_BUFFER_NAME, ACTUATOR_MSG_BUFFER_MUTEX_NAME );
-    amsgbuffer.open();   // TODO : sanity/safety checking
+    if( amsgbuffer.open( ) != BUFFER_ERROR_NONE) {
+        sprintf( strbuffer, "(dynamics.cpp) init(argc,argv) failed calling actuator_msg_buffer_c.open(...,false)\n" );
+	error_log.write( strbuffer );
+      // TODO : return error condition
+    }
 
     printf( "(dynamics::initialized)\n" );
 }
@@ -747,18 +751,27 @@ void write_state( void ) {
     pendulum->reset_accumulators();
     
     // Note: will block on acquiring mutex
-    amsgbuffer.write( msg );
+    if( amsgbuffer.write( msg ) != BUFFER_ERROR_NONE ) {
+        sprintf( strbuffer, "(dynamics.cpp) write_state() failed calling actuator_msg_buffer_c.write(msg)\n" );
+	error_log.write( strbuffer );
+      // TODO : return error condition
+    }
 }
 //-----------------------------------------------------------------------------
 
 //  Read the command ( torque ) from the message buffer.
 void read_command( void ) {
+    actuator_msg_c msg;
 
     if( VERBOSE ) printf( "(dynamics::read_command)\n" );
 
     // get the command from the controller
-    actuator_msg_c msg = amsgbuffer.read( );
     // Note: will block on acquiring mutex
+    if( amsgbuffer.read( msg ) != BUFFER_ERROR_NONE ) {
+        sprintf( strbuffer, "(dynamics.cpp) read_command() failed calling actuator_msg_buffer_c.read(msg)\n" );
+	error_log.write( strbuffer );
+      // TODO : return error condition
+    }
 
     //If( VERBOSE ) msg.print();
 

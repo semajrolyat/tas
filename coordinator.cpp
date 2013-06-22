@@ -15,13 +15,6 @@ coordinator.cpp
 using boost::dynamic_pointer_cast;
 
 //-----------------------------------------------------------------------------
-
-enum error_e {
-    ERROR_NONE = 0,
-    ERROR_FAILED
-};
-
-//-----------------------------------------------------------------------------
 // CPU
 //-----------------------------------------------------------------------------
 
@@ -339,7 +332,7 @@ error_e fork_controller( void ) {
         close( fd_wakeup_to_coordinator[1] );
 
         // execute the controller program
-        execl( DEFAULT_CONTROLLER_PROGRAM, "controller", 0 );
+        execl( DEFAULT_CONTROLLER_PROGRAM, "controller", NULL );
 
         // exit on fail to exec.  Can only get here if execl fails.
         _exit( 1 );
@@ -403,12 +396,18 @@ struct sigaction rttimer_sigaction;
 /// budget is exhausted.  Puts a message out onto the comm channel the coordinator
 /// is listening to for notifications about this event
 void rttimer_sighandler( int signum, siginfo_t *si, void *data ) {
-    if( VERBOSE ) printf( "(timer) event\n" );
-    //char buf = 0;
-    //write( fd_timer_to_coordinator[1], &buf, 1 );
+
     unsigned long long ts;
+
+    if( VERBOSE ) printf( "(timer) event\n" );
+
     rdtscll( ts );
-    write( fd_timer_to_coordinator[1], &ts, sizeof(unsigned long long) );
+
+    if( write( fd_timer_to_coordinator[1], &ts, sizeof(unsigned long long) ) == -1) {
+	std::string err_msg = "(coordinator.cpp) rttimer_sighandler(...) failed making system call write(...)";
+	error_log.write( error_string_bad_write( err_msg, errno ) );
+	// TODO : determine if there is a need to recover
+    }
 }
 
 //-----------------------------------------------------------------------------
@@ -517,8 +516,12 @@ static void* wakeup( void* arg ) {
     while( 1 ) {
         printf( "(wakeup) event\n" );
         char buf = 0;
-        write( fd_wakeup_to_coordinator[1], &buf, 1 );
-        //usleep( 1 );
+
+    	if( write( fd_wakeup_to_coordinator[1], &buf, 1 ) == -1) {
+	    std::string err_msg = "(coordinator.cpp) wakeup() failed making system call write(...)";
+ 	    error_log.write( error_string_bad_write( err_msg, errno ) );
+	    // TODO : determine if there is a need to recover
+    	}
     }
     return NULL;
 }
@@ -692,7 +695,13 @@ void init( int argc, char* argv[] ) {
     }
 
     amsgbuffer = actuator_msg_buffer_c( ACTUATOR_MSG_BUFFER_NAME, ACTUATOR_MSG_BUFFER_MUTEX_NAME, true );
-    amsgbuffer.open( );
+    if( amsgbuffer.open( ) != BUFFER_ERROR_NONE ) {
+        sprintf( strbuffer, "(coordinator.cpp) init() failed calling actuator_msg_buffer_c.open(...,true)\n" );
+	error_log.write( strbuffer );
+        error_log.close( );
+	printf( "%s\nExiting\n", strbuffer );
+	exit(1);
+    }
 
     if( VERBOSE ) printf( "coordinator process initialized\n" );
 
@@ -818,23 +827,9 @@ int main( int argc, char* argv[] ) {
                 // timer event
                 unsigned long long ts_buffer;
                 if( read( fd_timer_to_coordinator[0], &ts_buffer, sizeof(unsigned long long) ) == -1 ) {
-                    switch( errno ) {
-                    case EINTR:
-                        // The read operation was terminated due to the receipt of a signal, and no data was transferred.
-                        // in this case, there us a read event due to an undetermined reason causing the system to unblock,
-                        // but the event is not actually triggered by the controller running for the budget interval.  Instead,
-                        // the read event is occurring 'immediately' after the last loop cycle, the duration is effectively zero,
-                        // and the controller is not actually running for any significant amount of time.  Trapping this event
-                        // prevents a false positive.
-
-                        // However, do not know appriopriate course of action in the architecture
-                        break;
-                    default:
-                        sprintf( strbuffer, "EXCEPTION: unhandled read error in main loop reading from fd_timer_to_coordinator" );
-			error_log.write( strbuffer );
-
-                        break;
-                    }
+	    	    std::string err_msg = "(coordinator.cpp) main() failed making system call read(...) on fd_timer_to_coordinator[0]";
+ 	    	    error_log.write( error_string_bad_read( err_msg, errno ) );
+	            // TODO : determine if there is a need to recover
                 }
 		// if this timer event is during the initialization phase of the controller
 		// then throw it out
@@ -856,15 +851,8 @@ int main( int argc, char* argv[] ) {
                 printf( "(coordinator) Timer Interval (cycles, seconds): %lld, %11.10f\n", ts_interval, dts_interval );
                 //printf( "(coordinator) Timer Previous (cycles, seconds): %lld, %f\n", ts_prev, dts_prev );
 
-		//std::string output;
-		//output += ts_interval;
-		//variance_log.write( output );
-		//variance_log.write( std::to_string( ts_interval ) );
-
-		//sprintf( strbuffer, "%lld\n", ts_interval );
-		//variance_log.write( strbuffer );
-		sprintf( strbuffer, "%lld", ts_interval );
-		variance_log.writeln( strbuffer );
+		sprintf( strbuffer, "%lld\n", ts_interval );
+		variance_log.write( strbuffer );
 
 		ts_prev = ts;
 		dts_prev = cycles_to_seconds( ts_prev );
@@ -874,22 +862,20 @@ int main( int argc, char* argv[] ) {
             } else if( FD_ISSET( fd_controller_to_coordinator[0], &fds_channels ) ) {
                 // controller notification event
                 if( read( fd_controller_to_coordinator[0], &input_buffer, 1 ) == -1 ) {
-                    switch( errno ) {
-                    case EINTR:
-                        // yet to determine appropriate course of action if this happens
-                        break;
-                    default:
-                        sprintf( strbuffer, "EXCEPTION: unhandled read error in main loop reading from fd_controller_to_coordinator" );
-			error_log.write( strbuffer );
-
-                        break;
-                    }
+	    	    std::string err_msg = "(coordinator.cpp) main() failed making system call read(...) on fd_controller_to_coordinator[0]";
+ 	    	    error_log.write( error_string_bad_read( err_msg, errno ) );
+	            // TODO : determine if there is a need to recover
                 }
 
                 if( VERBOSE ) printf( "(coordinator) received a notification from controller\n" );
                 // now check the message buffer and respond to the type of message
 
-                actuator_msg_c msg = amsgbuffer.read();
+                actuator_msg_c msg;
+		if( amsgbuffer.read( msg ) != BUFFER_ERROR_NONE ) {
+                    sprintf( strbuffer, "(coordinator.cpp) main() failed calling actuator_msg_buffer_c.read(msg)\n" );
+		    error_log.write( strbuffer );
+		}
+
                 if(VERBOSE) msg.print();
 
                 char buf = 0;
@@ -920,7 +906,11 @@ int main( int argc, char* argv[] ) {
 
                         dynamics_state_requested( );
 
-                        msg = amsgbuffer.read( );
+                        if( amsgbuffer.read( msg ) != BUFFER_ERROR_NONE)  {
+                            sprintf( strbuffer, "(coordinator.cpp) main() failed calling actuator_msg_buffer_c.read(msg) while servicing initial ACTUATOR_MSG_REQUEST\n" );
+			    error_log.write( strbuffer );
+			}
+
                         if(VERBOSE) msg.print();
 
                         if(VERBOSE) printf( "(coordinator) notifying controller state available\n" );
@@ -933,7 +923,11 @@ int main( int argc, char* argv[] ) {
 			// ???????????????????????
 
                         //coordinator_resume_controller( );  // paired with above suspend
-                        write( fd_coordinator_to_controller[1], &buf, 1 );
+                        if( write( fd_coordinator_to_controller[1], &buf, 1 ) == -1 ) {
+	    	    	    std::string err_msg = "(coordinator.cpp) main() failed making system call write(...) on fd_coordinator_to_controller[1]";
+ 	    	    	    error_log.write( error_string_bad_write( err_msg, errno ) );
+		            // TODO : determine if there is a need to recover
+			}
                     } else {
                         // How do we objectively convert system time to sim time?
                         // and vice versa
@@ -951,12 +945,21 @@ int main( int argc, char* argv[] ) {
 
                         dynamics_state_requested( );
 
-                        msg = amsgbuffer.read( );
+                        if( amsgbuffer.read( msg ) != BUFFER_ERROR_NONE)  {
+                            sprintf( strbuffer, "(coordinator.cpp) main() failed calling actuator_msg_buffer_c.read(msg) while servicing ACTUATOR_MSG_REQUEST\n" );
+			    error_log.write( strbuffer );
+			}
+
                         if(VERBOSE) msg.print();
 
                         if(VERBOSE) printf( "(coordinator) notifying controller state available\n" );
 
-                        write( fd_coordinator_to_controller[1], &buf, 1 );
+                        //write( fd_coordinator_to_controller[1], &buf, 1 );
+                        if( write( fd_coordinator_to_controller[1], &buf, 1 ) == -1 ) {
+	    	    	    std::string err_msg = "(coordinator.cpp) main() failed making system call write(...) on fd_coordinator_to_controller[1]";
+ 	    	    	    error_log.write( error_string_bad_write( err_msg, errno ) );
+		            // TODO : determine if there is a need to recover
+			}
 
                         previous_t = current_t;
                         // ]
@@ -976,20 +979,17 @@ int main( int argc, char* argv[] ) {
                         // ]
                     }
                     break;
+		case ACTUATOR_MSG_NO_COMMAND:
+		case ACTUATOR_MSG_REPLY:
+		case ACTUATOR_MSG_UNDEFINED:
+		    break;
 	        }
             } else if( FD_ISSET( fd_wakeup_to_coordinator[0], &fds_channels ) ) {
                 // wakeup event
                 if( read( fd_wakeup_to_coordinator[0], &input_buffer, 1 ) == -1 ) {
-                    switch( errno ) {
-                    case EINTR:
-                        // yet to determine appropriate course of action if this happens
-                        break;
-                    default:
-                        sprintf( strbuffer, "EXCEPTION: unhandled read error in main loop reading from fd_wakeup_to_coordinator" );
-			error_log.write( strbuffer );
-
-                        break;
-                    }
+	    	    std::string err_msg = "(coordinator.cpp) main() failed making system call read(...) on fd_wakeup_to_coordinator[0]";
+ 	    	    error_log.write( error_string_bad_read( err_msg, errno ) );
+	            // TODO : determine if there is a need to recover
                 }
 
                 //printf( "(coordinator) received a wakeup from a blocked controller\n" );

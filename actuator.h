@@ -176,6 +176,7 @@ const char* ACTUATOR_MSG_BUFFER_MUTEX_NAME = "/amsgbuffer_mutex";
 class actuator_msg_buffer_c {
 private:
 
+    bool		create;
     bool                initialized;
     bool                opened;
 
@@ -197,6 +198,7 @@ public:
     actuator_msg_buffer_c( void ) {
         initialized = false;
         opened = false;
+	create = false;
         mutex = NULL;
         buffer = NULL;
     }
@@ -209,17 +211,10 @@ public:
 
         this->buffer_name = buffer_name;
         this->mutex_name = mutex_name;
-
-        if( init_mutex( create ) != BUFFER_ERROR_NONE ) {
-            // major problem.  No option but to bomb out.
-            printf( "failed to initialize mutex\n" );
-        }
-        if( init_buffer( create ) != BUFFER_ERROR_NONE ) {
-            // major problem.  No option but to bomb out.
-            printf( "failed to initialize buffer\n" );
-        }
-
-        initialized = true;
+	this->create = create;
+	
+        opened = false;
+	initialized = true;
     }
 
     //-------------------------------------------------------------------------
@@ -346,7 +341,19 @@ public:
     //-------------------------------------------------------------------------
 
     actuator_msg_buffer_err_e open( void ) {
-        assert( initialized );
+        assert( initialized && !opened );
+
+	actuator_msg_buffer_err_e result;
+	result = init_mutex( create ); 
+        if( result != BUFFER_ERROR_NONE ) {
+            // major problem.  No option but to bomb out.
+	    return result;
+        }
+	result = init_buffer( create ); 
+        if( result != BUFFER_ERROR_NONE ) {
+            // major problem.  No option but to bomb out.
+	    return result;
+        }
 
         opened = true;
 
@@ -358,12 +365,14 @@ public:
     void close( void ) {
 
         opened = false;
+
+	// TODO : better clean up of resources to prevent leak/artfacts
     }
 
     //-------------------------------------------------------------------------
 
     actuator_msg_buffer_err_e write( const actuator_msg_c& msg ) {
-        assert( opened == true );
+        assert( opened );
 
         pthread_mutex_lock( mutex );
 
@@ -383,12 +392,10 @@ public:
 
     //-------------------------------------------------------------------------
 
-    actuator_msg_c read( void ) {
-        assert( opened == true );
+    actuator_msg_buffer_err_e read( actuator_msg_c& msg ) {
+        assert( opened );
 
         pthread_mutex_lock( mutex );
-
-        actuator_msg_c msg;
 
         memcpy( &msg.header, &buffer->header, sizeof(struct actuator_msg_header_t) );
         memcpy( &msg.state, &buffer->state, sizeof(struct actuator_msg_state_t) );
@@ -396,7 +403,7 @@ public:
 
         pthread_mutex_unlock( mutex );
 
-        return msg;
+        return BUFFER_ERROR_NONE;
     }
 
     //-------------------------------------------------------------------------
