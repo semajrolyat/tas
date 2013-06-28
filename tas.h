@@ -92,18 +92,18 @@ enum error_e {
 //-----------------------------------------------------------------------------
 /// Common error message for failing to read from file descriptor
 std::string error_string_bad_read( const std::string& txt, const int& err ) {
-    std::stringstream ss; 
+    std::stringstream ss;
     char buffer[256];
 
     ss << txt << " errno: %s\n";
-    sprintf( buffer, ss.str().c_str(), (err == EAGAIN) ? "EAGAIN" : 
-					(err == EBADF) ? "EBADF" : 
-					(err == EFAULT) ? "EFAULT" : 
-					(err == EINTR) ? "EINTR" : 
-					(err == EINVAL) ? "EINVAL" : 
-					(err == EIO) ? "EIO" : 
-					(err == EISDIR) ? "EISDIR" :
-					"UNDEFINED"
+    sprintf( buffer, ss.str().c_str(), (err == EAGAIN) ? "EAGAIN" :
+                                       (err == EBADF) ? "EBADF" :
+                                       (err == EFAULT) ? "EFAULT" :
+                                       (err == EINTR) ? "EINTR" :
+                                       (err == EINVAL) ? "EINVAL" :
+                                       (err == EIO) ? "EIO" :
+                                       (err == EISDIR) ? "EISDIR" :
+                                       "UNDEFINED"
     );
     return std::string( buffer );
 }
@@ -111,22 +111,22 @@ std::string error_string_bad_read( const std::string& txt, const int& err ) {
 //-----------------------------------------------------------------------------
 /// Common error message for failing to write to file descriptor
 std::string error_string_bad_write( const std::string& txt, const int& err ) {
-    std::stringstream ss; 
+    std::stringstream ss;
     char buffer[256];
 
     ss << txt << " errno: %s\n";
-    sprintf( buffer, ss.str().c_str(), (err == EAGAIN) ? "EAGAIN" : 
-					(err == EBADF) ? "EBADF" : 
-//					(err == EDESTADDRREQ) ? "EDESTADDREQ" : 
-//					(err == EDQUOT) ? "EDQUOT" : 
-					(err == EFAULT) ? "EFAULT" : 
-					(err == EFBIG) ? "EFBIG" : 
-					(err == EINTR) ? "EINTR" : 
-					(err == EINVAL) ? "EINVAL" : 
-					(err == EIO) ? "EIO" : 
-					(err == ENOSPC) ? "ENOSPC" : 
-					(err == EPIPE) ? "EPIPE" :
-					"UNDEFINED"
+    sprintf( buffer, ss.str().c_str(), (err == EAGAIN) ? "EAGAIN" :
+                                        (err == EBADF) ? "EBADF" :
+                     //					(err == EDESTADDRREQ) ? "EDESTADDREQ" :
+                     //					(err == EDQUOT) ? "EDQUOT" :
+                                        (err == EFAULT) ? "EFAULT" :
+                                        (err == EFBIG) ? "EFBIG" :
+                                        (err == EINTR) ? "EINTR" :
+                                        (err == EINVAL) ? "EINVAL" :
+                                        (err == EIO) ? "EIO" :
+                                        (err == ENOSPC) ? "ENOSPC" :
+                                        (err == EPIPE) ? "EPIPE" :
+                                        "UNDEFINED"
     );
     return std::string( buffer );
 }
@@ -136,7 +136,7 @@ std::string error_string_bad_write( const std::string& txt, const int& err ) {
 // 
 //-----------------------------------------------------------------------------
 
-#define CONTROLLER_FREQUENCY_HERTZ                  100 
+#define CONTROLLER_FREQUENCY_HERTZ                  1000
 
 //-----------------------------------------------------------------------------
 
@@ -154,12 +154,40 @@ std::string error_string_bad_write( const std::string& txt, const int& err ) {
 
 //-----------------------------------------------------------------------------
 
-//#define DEFAULT_BUDGET_RTTIMER_NSEC	1E6
-#define DEFAULT_BUDGET_RTTIMER_NSEC	1E7
+#define DEFAULT_BUDGET_RTTIMER_NSEC	1E6
+//#define DEFAULT_BUDGET_RTTIMER_NSEC	1E7
 #define DEFAULT_BUDGET_RTTIMER_SEC	0
 
 #define DEFAULT_INITDELAY_RTTIMER_NSEC	1
 #define DEFAULT_INITDELAY_RTTIMER_SEC	0
+
+//-----------------------------------------------------------------------------
+//
+//-----------------------------------------------------------------------------
+
+enum controller_notification_type_e {
+    CONTROLLER_NOTIFICATION_UNDEFINED = 0,
+    CONTROLLER_NOTIFICATION_SNOOZE,
+    CONTROLLER_NOTIFICATION_ACTUATOR_EVENT
+};
+
+//-----------------------------------------------------------------------------
+
+class controller_notification_c {
+public:
+    controller_notification_c( void ) {
+        type = CONTROLLER_NOTIFICATION_UNDEFINED;
+        ts = 0;
+        duration = 0.0;
+    }
+
+    virtual ~controller_notification_c( void ) { }
+
+    controller_notification_type_e type;
+    unsigned long long ts;          // timestamp in cycles
+    double duration;
+};
+
 
 //-----------------------------------------------------------------------------
 // Timing Functions
@@ -198,11 +226,109 @@ std::string error_string_bad_write( const std::string& txt, const int& err ) {
 
 //-----------------------------------------------------------------------------
 
+// The signal identifier for the controller's real-time timer
+#define RTTIMER_SIGNAL                          SIGRTMIN + 4
+
+//-----------------------------------------------------------------------------
+/// Error codes for timer control
+enum timer_err_e {
+    TIMER_ERROR_NONE = 0,
+    TIMER_ERROR_SIGACTION,
+    TIMER_ERROR_SIGPROCMASK,
+    TIMER_ERROR_CREATE,
+    TIMER_ERROR_SETTIME,
+    TIMER_ERROR_GETCLOCKID
+};
+//-----------------------------------------------------------------------------
+
+/// Conversion function from a timeval to a floating point representing seconds
+Real timeval_to_real( const struct timeval& tv ) {
+    return (Real) tv.tv_sec + (Real) tv.tv_usec / (Real) USECS_PER_SEC;
+}
+
+//-----------------------------------------------------------------------------
+Real timespec_to_real( const struct timespec& ts ) {
+    return (Real) ts.tv_sec + (Real) ts.tv_nsec / (Real) NSECS_PER_SEC;
+}
+
+//-----------------------------------------------------------------------------
+
+double cycles_to_seconds( const unsigned long long& cycles, const unsigned long long& cpu_hz ) {
+    return (double)cycles / (double)cpu_hz;
+} 
+
+//-----------------------------------------------------------------------------
+
 // inline assembly for rdtsc timer
 #define rdtscll(val) __asm__ __volatile__("rdtsc" : "=A" (val))
 
 //-----------------------------------------------------------------------------
+///*
+// Note: Assumes that there is no overflow of seconds
+struct timespec add_timespecs( const struct timespec& a, const struct timespec& b ) {
+    struct timespec result;
+    int s = a.tv_sec + b.tv_sec;
+    int ns = a.tv_nsec + b.tv_nsec;
+    int nsof = ns - 1000000000;
 
+    if( nsof >= 0 ) {
+	result.tv_sec = s + 1;
+	result.tv_nsec = nsof;
+    } else {
+	result.tv_sec = s;
+	result.tv_nsec = ns;
+    }
+    return result;
+}
+
+// Note: results are too high at this point.  Revisit later
+// TODO : determine more reliable calibration code
+//Note: Should probably repeat this several times and average the results
+// Note: querying /proc/cpuinfo is no more accurate than KHz so 1 ms ideally would
+// give the same result, but there is implicit delay due to operations
+unsigned long long calibrate_cycles_per_second( void ) {
+    struct timespec tspec_time, tspec_period, tspec_end;
+    unsigned long long ts_start, ts_end;
+
+    printf( "Calibrating CPU speed\n" );
+///*
+    // ++++ Method 1.  Absolute time ++++
+
+    tspec_period.tv_sec = 1;
+    tspec_period.tv_nsec = 0;
+    //tspec_period.tv_sec = 0;
+    //tspec_period.tv_nsec = 1000000;
+
+    clock_gettime( CLOCK_MONOTONIC, &tspec_time );
+    tspec_end = add_timespecs( tspec_time, tspec_period );
+
+    rdtscll( ts_start );
+
+    clock_nanosleep( CLOCK_MONOTONIC, TIMER_ABSTIME, &tspec_end, NULL );
+
+    rdtscll( ts_end );
+
+    return ( ts_end - ts_start );
+    //return ( ts_end - ts_start ) * 1000;
+//*/
+/*
+    // ++++ Method 2.  Relative time ++++
+    tspec_period.tv_sec = 1;
+    tspec_period.tv_nsec = 0;
+
+    rdtscll( ts_start );
+
+    clock_nanosleep( CLOCK_MONOTONIC, 0, &tspec_period, NULL );
+
+    rdtscll( ts_end );
+
+    return ( ts_end - ts_start );
+*/
+}
+//*/
+
+
+/*
 // reference 'man proc 5'
 struct proc_stat_t {
     int pid;                        // %d
@@ -272,52 +398,52 @@ static proc_stat_err_e read_proc_stat( const char* filename, struct proc_stat_t 
     if( fproc == 0 ) 	return PROC_STAT_ERR_OPEN;
 
     if( 44 != fscanf( fproc, format,
-        &s->pid,
-        &s->comm,
-        &s->state,
-        &s->ppid,
-        &s->pgrp,
-        &s->session,
-        &s->tty_nr,
-        &s->tpgid,
-        &s->flags,
-        &s->minflt,
-        &s->cminflt,
-        &s->majflt,
-        &s->cmajflt,
-        &s->utime,
-        &s->stime,
-        &s->cutime,
-        &s->cstime,
-        &s->priority,
-        &s->nice,
-        &s->num_threads,
-        &s->itrealvalue,
-        &s->starttime,
-        &s->vsize,
-        &s->rss,
-        &s->rsslim,
-        &s->startcode,
-        &s->endcode,
-        &s->startstack,
-        &s->kstkesp,
-        &s->kstkeip,
-        &s->signal,
-        &s->blocked,
-        &s->sigignore,
-        &s->sigcatch,
-        &s->wchan,
-        &s->nswap,
-        &s->cnswap,
-        &s->exit_signal,
-        &s->processor,
-        &s->rt_priority,
-        &s->policy,
-        &s->delayacct_blkio_ticks,
-        &s->guest_time,
-        &s->cguest_time
-    ))
-	err = PROC_STAT_ERR_READ; 
+                      &s->pid,
+                      &s->comm,
+                      &s->state,
+                      &s->ppid,
+                      &s->pgrp,
+                      &s->session,
+                      &s->tty_nr,
+                      &s->tpgid,
+                      &s->flags,
+                      &s->minflt,
+                      &s->cminflt,
+                      &s->majflt,
+                      &s->cmajflt,
+                      &s->utime,
+                      &s->stime,
+                      &s->cutime,
+                      &s->cstime,
+                      &s->priority,
+                      &s->nice,
+                      &s->num_threads,
+                      &s->itrealvalue,
+                      &s->starttime,
+                      &s->vsize,
+                      &s->rss,
+                      &s->rsslim,
+                      &s->startcode,
+                      &s->endcode,
+                      &s->startstack,
+                      &s->kstkesp,
+                      &s->kstkeip,
+                      &s->signal,
+                      &s->blocked,
+                      &s->sigignore,
+                      &s->sigcatch,
+                      &s->wchan,
+                      &s->nswap,
+                      &s->cnswap,
+                      &s->exit_signal,
+                      &s->processor,
+                      &s->rt_priority,
+                      &s->policy,
+                      &s->delayacct_blkio_ticks,
+                      &s->guest_time,
+                      &s->cguest_time
+                      ))
+        err = PROC_STAT_ERR_READ;
 
     fclose( fproc );
     return err;
@@ -378,7 +504,7 @@ static void print_proc_stat( struct proc_stat_t *s ) {
     printf( "guest_time = %lu\n", s->guest_time );
     printf( "cguest_time = %ld\n", s->cguest_time );
 }
-
+*/
 //-----------------------------------------------------------------------------
 
 

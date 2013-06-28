@@ -48,4 +48,3 @@ target_link_libraries( coordinator ${TAS_LIBRARIES} )
 
 add_library( dynamics "MODULE" ${CMAKE_CURRENT_SOURCE_DIR}/dynamics.cpp ${TAS_HEADERS} ${TAS_SOURCES} )
 target_link_libraries( dynamics ${TAS_LIBRARIES} )
-

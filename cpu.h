@@ -78,43 +78,43 @@ public:
     cpuinfo_err_e load( void ) {
         char buffer[1024];
 
-	cpu_t cpu;
+        cpu_t cpu;
 
-	std::stringstream filename;
-	filename << "/proc/cpuinfo";
-	FILE* fp = fopen( filename.str().c_str(), "r" );
+        std::stringstream filename;
+        filename << "/proc/cpuinfo";
+        FILE* fp = fopen( filename.str().c_str(), "r" );
         if( fp == 0 ) return CPUINFO_ERROR_OPEN;
 
         char* field, *value;
-	char delim[] = ":";
+        char delim[] = ":";
 
-	while( fgets( buffer, 1024, fp ) != NULL ) {
-	    //fputs( buffer, stdout );
+        while( fgets( buffer, 1024, fp ) != NULL ) {
+            //fputs( buffer, stdout );
 
-	    field = strtok( buffer, delim );
+            field = strtok( buffer, delim );
             value = strtok( NULL, delim );
 
-	    if( value == NULL ) {
-		// delimiter between cpuinfos is a blank line
-		//printf( "adding cpu\n" );
-		cpus.push_back( cpu );
+            if( value == NULL ) {
+                // delimiter between cpuinfos is a blank line
+                //printf( "adding cpu\n" );
+                cpus.push_back( cpu );
             } else {
-		std::string sfield( field );
-		if( sfield.find( "processor" ) != std::string::npos ) {
-		    //printf( "processor: %s\n", field );
-		    cpu.processor = atoi( value );
- 		}
-		if( sfield.find( "cpu MHz" ) != std::string::npos ) {
-		    //printf( "cpu MHz: %s\n", field );
-		    cpu.mhz = atof( value );
- 		}
-     	    }
+                std::string sfield( field );
+                if( sfield.find( "processor" ) != std::string::npos ) {
+                    //printf( "processor: %s\n", field );
+                    cpu.processor = atoi( value );
+                }
+                if( sfield.find( "cpu MHz" ) != std::string::npos ) {
+                    //printf( "cpu MHz: %s\n", field );
+                    cpu.mhz = atof( value );
+                }
+            }
 
         }
 
-	fclose( fp );
+        fclose( fp );
 
-	return CPUINFO_ERROR_NONE;
+        return CPUINFO_ERROR_NONE;
     }
 
 };

@@ -78,7 +78,7 @@ public:
         header.tid = 0;
         //header.ts.tv_sec = 0;
         //header.ts.tv_nsec = 0;
-	header.ts = 0;
+        header.ts = 0;
         header.type = ACTUATOR_MSG_UNDEFINED;
 
         state.position = 0.0;
@@ -95,7 +95,7 @@ public:
         header.tid = msg.header.tid;
         //header.ts.tv_sec = msg.header.ts.tv_sec;
         //header.ts.tv_nsec = msg.header.ts.tv_nsec;
-	header.ts = msg.header.ts;
+        header.ts = msg.header.ts;
         header.type = msg.header.type;
 
         state.position = msg.state.position;
@@ -122,7 +122,7 @@ public:
         //std::cout << ", ts.tv_nsec=" << header.ts.tv_nsec;
         std::cout << ", ts=" << header.ts;
         std::cout << ", type=" << header.type;
-       
+
         std::cout << ", time=" << state.time;
         std::cout << ", position=" << state.position;
         std::cout << ", velocity=" << state.velocity;
@@ -198,7 +198,7 @@ public:
     actuator_msg_buffer_c( void ) {
         initialized = false;
         opened = false;
-	create = false;
+        create = false;
         mutex = NULL;
         buffer = NULL;
     }
@@ -211,10 +211,10 @@ public:
 
         this->buffer_name = buffer_name;
         this->mutex_name = mutex_name;
-	this->create = create;
-	
+        this->create = create;
+
         opened = false;
-	initialized = true;
+        initialized = true;
     }
 
     //-------------------------------------------------------------------------
@@ -343,16 +343,16 @@ public:
     actuator_msg_buffer_err_e open( void ) {
         assert( initialized && !opened );
 
-	actuator_msg_buffer_err_e result;
-	result = init_mutex( create ); 
+        actuator_msg_buffer_err_e result;
+        result = init_mutex( create );
         if( result != BUFFER_ERROR_NONE ) {
             // major problem.  No option but to bomb out.
-	    return result;
+            return result;
         }
-	result = init_buffer( create ); 
+        result = init_buffer( create );
         if( result != BUFFER_ERROR_NONE ) {
             // major problem.  No option but to bomb out.
-	    return result;
+            return result;
         }
 
         opened = true;
@@ -366,7 +366,7 @@ public:
 
         opened = false;
 
-	// TODO : better clean up of resources to prevent leak/artfacts
+        // TODO : better clean up of resources to prevent leak/artfacts
     }
 
     //-------------------------------------------------------------------------
