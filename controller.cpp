@@ -420,6 +420,9 @@ int main( int argc, char* argv[] ) {
     notification.type = CONTROLLER_NOTIFICATION_SNOOZE;
     notification.duration = INTERVAL;
 
+    // lock into memory to prevent pagefaults
+    mlockall( MCL_CURRENT );
+
     // start the main process loop
     while( 1 ) {
 
@@ -463,6 +466,8 @@ int main( int argc, char* argv[] ) {
 
         cycle++;
     }
+
+    munlockall();
 
     amsgbuffer.close( );  // TODO : figure out a way to force a clean up
 

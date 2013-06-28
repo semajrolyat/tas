@@ -504,14 +504,19 @@ timer_err_e arm_timer( unsigned long long& ts ) {
     its.it_interval.tv_sec = 0;
     its.it_interval.tv_nsec = 0;
     its.it_value.tv_sec = 0;
-    //its.it_value.tv_nsec = 1000000;
-    its.it_value.tv_nsec = 800000;
+    its.it_value.tv_nsec = 1000000;
+    //its.it_value.tv_nsec = 800000;
 
+    // timestamp here?
     rdtscll( ts );
 
     //if( timer_settime( rttimer_id, TIMER_ABSTIME, &its, NULL ) == -1 )
     if( timer_settime( rttimer_id, 0, &its, NULL ) == -1 )
         return TIMER_ERROR_SETTIME;
+
+    // or timestamp here?
+    //rdtscll( ts );
+
 
     return TIMER_ERROR_NONE;
 }
@@ -1057,6 +1062,8 @@ int main( int argc, char* argv[] ) {
 
     controller_notification_c ctl_msg;
 
+    // lock into memory to prevent pagefaults
+    mlockall( MCL_CURRENT );
 
     printf( "starting main loop\n" );
 
@@ -1089,7 +1096,7 @@ int main( int argc, char* argv[] ) {
 
                 printf( "(coordinator) Timer Interval (cycles, seconds): %lld, %11.10f\n", dts_timer, dt_timer );
 
-                if( dt_timer > 0.001 ) break;
+                if( dt_timer > 0.001 * 1.20 ) break;
 
                 // controller needs to run!
                 resume_controller( );
@@ -1153,5 +1160,6 @@ int main( int argc, char* argv[] ) {
             }
         }
     }
+    munlockall();
     shutdown( );
 }
