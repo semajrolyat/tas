@@ -14,10 +14,12 @@ controller.cpp
 #include <Moby/Simulator.h>
 #include <Moby/RCArticulatedBody.h>
 
-#include <tas.h>
-#include <actuator.h>
-#include <log.h>
-#include <cpu.h>
+#include <tas/tas.h>
+#include <tas/time.h>
+#include <tas/actuator.h>
+#include <tas/log.h>
+#include <tas/cpu.h>
+#include <tas/experiment.h>
 
 //-----------------------------------------------------------------------------
 
@@ -132,23 +134,6 @@ void init( void* separator, const std::map<std::string, BasePtr>& read_map, Real
 // error logging facilities
 log_c error_log;
 char strbuffer[256];
-
-//----------------------------------------------------------------------------
-
-log_c time_log;
-
-//-----------------------------------------------------------------------------
-
-error_e open_time_log( void ) {
-    time_log = log_c( "controller_internal_time.dat" );
-
-    if( time_log.open( ) != LOG_ERROR_NONE ) {
-        sprintf( strbuffer, "(controller.cpp) open_time_log() failed calling log_c.open() on file controller_internal_time.dat\n" );
-        error_log.write( strbuffer );
-        return ERROR_FAILED;
-    }
-    return ERROR_NONE;
-}
 
 //-----------------------------------------------------------------------------
 
@@ -267,19 +252,16 @@ error_e publish_command( const actuator_msg_c& cmd ) {
 /// Fulfill controller need to get initial state information and issue
 /// any initial command that might result from initial state
 // TODO : add more error handling
-error_e get_initial_state( void ) {
+error_e query_control_publish( const Real& t ) {
 
     actuator_msg_c state, command;
 
     // query the dyanmics for the initial state
-    if( get_state( 0.0, state ) != ERROR_NONE ) {
+    if( get_state( t, state ) != ERROR_NONE ) {
         sprintf( strbuffer, "(controller.cpp) get_initial_state() failed calling get_state(0.0,state)\n" );
         error_log.write( strbuffer );
         return ERROR_FAILED;
     }
-
-    if( VERBOSE ) printf( "(controller) received initial state\n" );
-    if( VERBOSE ) state.print();
 
     // compute the initial command message
     if( control( state, command ) != ERROR_NONE ) {
@@ -290,7 +272,6 @@ error_e get_initial_state( void ) {
     command.header.type = ACTUATOR_MSG_COMMAND;
 
     // publish the initial command message
-    if( VERBOSE ) printf( "(controller) publishing initial command\n" );
     if( publish_command( command ) != ERROR_NONE ) {
         sprintf( strbuffer, "(controller.cpp) get_initial_state() failed calling publish_command(command)\n" );
         error_log.write( strbuffer );
@@ -301,63 +282,6 @@ error_e get_initial_state( void ) {
 }
 
 //-----------------------------------------------------------------------------
-
-error_e read_cpuinfo( void ) {
-    if( cpuinfo.load( ) != CPUINFO_ERROR_NONE ) {
-        sprintf( strbuffer, "(controller.cpp) read_cpuinfo() failed calling cpuinfo_c.load()\n" );
-        error_log.write( strbuffer );
-        return ERROR_FAILED;
-    }
-    printf( "cpuinfo loaded\n" );
-
-    double cpu_speed_mhz;
-
-    for( unsigned int i = 0; i < cpuinfo.cpus.size( ); i++ ) {
-        //printf( "processor: %d\n", cpuinfo.cpus.at( i ).processor );
-        if( cpuinfo.cpus.at( i ).processor == DEFAULT_PROCESSOR ) {
-            cpu_speed_mhz = cpuinfo.cpus.at( i ).mhz;
-            // Note: fp conversion will most likely result in inaccuracy
-            cpu_speed_hz = (unsigned long long) (cpu_speed_mhz * 1E6);
-            // down and dirty fix to fp inaccuracy.
-            // TODO : use a much better fix
-            if( cpu_speed_hz % 2 == 1 ) cpu_speed_hz++;
-            break;
-        }
-        if( i == cpuinfo.cpus.size( ) - 1 ) {
-            sprintf( strbuffer, "(controller.cpp) read_cpuinfo() failed to find default processor in cpus.\n" );
-            error_log.write( strbuffer );
-            return ERROR_FAILED;
-        }
-    }
-    printf( "cpu speed (MHz): %f\n", cpu_speed_mhz );
-    printf( "cpu speed (Hz): %lld\n", cpu_speed_hz );
-
-    unsigned long long cal_hz = calibrate_cycles_per_second( );
-    printf( "calibrated cpu speed (Hz): %lld\n", cal_hz );
-
-    return ERROR_NONE;
-}
-
-//-----------------------------------------------------------------------------
-/// Query the system for the current time.  Used by polling loop. 
-// TODO : refactor with error codes
-struct timeval get_process_time( void ) {
-    struct rusage ru;
-    struct timeval tv;
-
-    // Note: getrusage queries appear to result in a fixed interval (4ms)
-    // on Ubuntu 12.04 out of the box.  This 4ms has shown up in rttimers as
-    // well.  Researching possible ways to augment the system limitation
-    //int result = getrusage( RUSAGE_SELF, &ru );
-    //memcpy( &tv, &ru.ru_utime, sizeof(timeval) );
-
-    // so instead use gettimeofday
-    gettimeofday( &tv, NULL );
-
-    return tv;
-}
-
-//-----------------------------------------------------------------------------
 /// Initialization sequence for a standalone controller
 void init( void ) {
 
@@ -365,36 +289,32 @@ void init( void ) {
     // Note: error log is created by the coordinator
     error_log = log_c( FD_ERROR_LOG );
     if( error_log.open( ) != LOG_ERROR_NONE ) {
-        // Note:  this is not really necessary
-        printf( "(controller.cpp) ERROR: main() failed calling log_c.open() on FD_ERROR_LOG\nExiting\n" );
-        exit( 1 );
-    }
-
-    if( open_time_log( ) != ERROR_NONE ) {
-        error_log.close( );
-        printf( "(controller.cpp) init() failed calling open_time_log()\nExiting\n" );
-        exit( 1 );
-    }
-
-
-    // Get the cpu speed
-    if( read_cpuinfo( ) != ERROR_NONE ) {
-        error_log.close( );
-        printf( "(controller.cpp) init() failed calling read_cpuinfo()\nExiting\n" );
+        // Note:  this is not really necessary.  If coordinator launched properly, this should never happen
+        printf( "(controller.cpp) ERROR: main() failed calling log_c.open() on FD_ERROR_LOG\nController Exiting\n" );
         exit( 1 );
     }
 
     // connect to the shared message buffer BEFORE attempting any IPC
     // Note: the message buffer is created by the coordinator before the controller
     // is launched
-    amsgbuffer = actuator_msg_buffer_c( ACTUATOR_MSG_BUFFER_NAME, ACTUATOR_MSG_BUFFER_MUTEX_NAME );
+    amsgbuffer = actuator_msg_buffer_c( ACTUATOR_MSG_BUFFER_NAME, ACTUATOR_MSG_BUFFER_MUTEX_NAME, false );
     if( amsgbuffer.open( ) != BUFFER_ERROR_NONE ) {
-        sprintf( strbuffer, "(controller.cpp) init(argc,argv) failed calling actuator_msg_buffer_c.open(...,false)\n" );
+        sprintf( strbuffer, "(controller.cpp) init(argc,argv) failed calling actuator_msg_buffer_c.open(...,false)\nController Exiting\n" );
+        printf( "%s", strbuffer );
+
         error_log.write( strbuffer );
         error_log.close( );
         exit( 1 );
     }
 
+}
+
+//-----------------------------------------------------------------------------
+
+void shutdown( void ) {
+    printf( "Controller shutting down\n" );
+
+    amsgbuffer.close( );  // TODO : figure out a way to force a clean up
 }
 
 //-----------------------------------------------------------------------------
@@ -403,11 +323,10 @@ void init( void ) {
 // TODO : refactor to exit as gracefully as possible
 int main( int argc, char* argv[] ) {
 
-    actuator_msg_c state, command;
     int cycle = 0;
     controller_notification_c notification;
     unsigned long long ts;
-    const Real INTERVAL = 1.0 / (double) CONTROLLER_FREQUENCY_HERTZ;
+    const Real INTERVAL = 1.0 / (double) CONTROLLER_HZ;
     Real t = 0.0;
 
     // Note: if init fails, the controller bombs out.  Will write a message to
@@ -415,7 +334,7 @@ int main( int argc, char* argv[] ) {
     init( );
 
     // query and publish initial values
-    get_initial_state( );
+    query_control_publish( 0.0 );
 
     notification.type = CONTROLLER_NOTIFICATION_SNOOZE;
     notification.duration = INTERVAL;
@@ -430,276 +349,27 @@ int main( int argc, char* argv[] ) {
         rdtscll( ts );
         notification.ts = ts;
 
-        printf( "(controller) writing notification\n" );
         // send a snooze notification
         write( FD_CONTROLLER_TO_COORDINATOR_WRITE_CHANNEL, &notification, sizeof( controller_notification_c ) );
 
+        //READ? to get the controller to block and to ensure it doesn't overrun?  Ideally, the write event
+        // causes the coordinator to wake and interrupt this process so there shouldn't be overrun.
+
         // unsnoozed here, so get a new timestamp
         rdtscll( ts );
-        // Note: may have some long term drift due to dp math
+        // Note: may have some long term drift due to fp math
         t += INTERVAL;
 
-        printf( "(controller) getting state\n" );
-
-        // get the state (via dynamics)
-        if( get_state( t, state ) != ERROR_NONE ) {
-            sprintf( strbuffer, "(controller.cpp) main() failed calling get_state(%10.9f,state)\n", t );
-            error_log.write( strbuffer );
-            //TODO : determine appropriate response
-        }
-
-        // build a command
-        if( control( state, command ) != ERROR_NONE ) {
-            sprintf( strbuffer, "(controller.cpp) main() failed calling control(state,command) at time %10.9f\n", t );
-            error_log.write( strbuffer );
-            //TODO : determine appropriate response
-        }
-        command.header.type = ACTUATOR_MSG_COMMAND;
-
-        // publish the command
-        publish_command( command );
-        if( publish_command( command ) != ERROR_NONE ) {
-            sprintf( strbuffer, "(controller.cpp) main() failed calling publish_command(command) at time %10.9f\n", t );
-            error_log.write( strbuffer );
-            //TODO : determine appropriate response
-        }
+        query_control_publish( t );
 
         cycle++;
     }
 
-    munlockall();
+    munlockall( );
 
-    amsgbuffer.close( );  // TODO : figure out a way to force a clean up
-
-    return 0;
-}
-/*
-int main( int argc, char* argv[] ) {
-
-    actuator_msg_c state, command;
-    int cycle = 0;
-
-    unsigned long long cy_interval, cy_start, cy_control, cy_interval_end, cy_interval_start, cy_current;
-
-    // Note: if init fails, the controller bombs out.  Will write a message to
-    // console and/or error_log if this happens.
-    init( );
-
-    // compute the controller's interval
-    assert( CONTROLLER_FREQUENCY_HERTZ > 1 && CONTROLLER_FREQUENCY_HERTZ < USECS_PER_SEC );
-    cy_interval = cpu_speed_hz / CONTROLLER_FREQUENCY_HERTZ;
-
-    // query and publish initial values
-    get_initial_state( );
-
-    // now that initialization is complete record start time (for interval computation)
-    rdtscll( cy_start );
-
-    // record the start time as the start of the initial interval
-    cy_interval_start = cy_start;
-
-    // compute the end of the initial interval
-    cy_interval_end = cy_interval_start + cy_interval;
-
-    // start the main process loop
-    while( 1 ) {
-        // poll time
-        // Note: double edged: poll may block on system call, but using signal
-        // will definitely block and adds complexity that may invalidate the
-        // coordinator measuring of the controller
-        rdtscll( cy_current );
-
-        // compare the current time with the end time
-    if( cy_current < cy_interval_end ) continue;
-
-        // otherwise, the interval has been exceeded
-
-        // compute the actual time to compute the control output
-        // Note: current is absolute from beginning of process
-        // but control needs to be computed in terms of the time
-        // after the controller was initialized
-        cy_control = cy_current - cy_start;
-
-        // Compute the time
-        Real t = cycles_to_seconds( cy_control, cpu_speed_hz );
-        //if( VERBOSE ) printf( "(controller) Requesting state at time: %10.9f\n", t );
-        //printf( "(controller) Requesting state at time: %10.9f\n", t );
-
-        // get the state (via dynamics)
-        if( get_state( t, state ) != ERROR_NONE ) {
-            sprintf( strbuffer, "(controller.cpp) main() failed calling get_state(%10.9f,state)\n", t );
-            error_log.write( strbuffer );
-            //TODO : determine appropriate response
-        }
-
-        // build a command
-        if( control( state, command ) != ERROR_NONE ) {
-            sprintf( strbuffer, "(controller.cpp) main() failed calling control(state,command) at time %10.9f\n", t );
-            error_log.write( strbuffer );
-            //TODO : determine appropriate response
-        }
-        command.header.type = ACTUATOR_MSG_COMMAND;
-
-        // publish the command
-        publish_command( command );
-        if( publish_command( command ) != ERROR_NONE ) {
-            sprintf( strbuffer, "(controller.cpp) main() failed calling publish_command(command) at time %10.9f\n", t );
-            error_log.write( strbuffer );
-            //TODO : determine appropriate response
-        }
-
-        // gather stats on actual duration of the last interval
-//        timersub( &tv_current, &tv_interval_start, &tv_interval_elapsed );
-//        timersub( &tv_current, &tv_interval_end, &tv_interval_error );
-
-//        if( VERBOSE ) printf( "(controller) Actual Interval: %e\n", timeval_to_real( tv_interval_elapsed ) );
-//        if( VERBOSE ) printf( "(controller) Interval Error: %e\n", timeval_to_real( tv_interval_error ) );
-
-        // recompute start of the interval
-        // Note: the interval is computed on the time it was supposed to end
-        // not on the current time.  It is highly unlikely that the current will
-        // be on time (at the end) but the error of assuming the actual time
-        // accumulates.  So using the actual value instead of expected.
-    cy_interval_start = cy_current;
-
-        // recompute the end of the interval
-    cy_interval_end = cy_interval_start + cy_interval;
-
-//        if( VERBOSE ) printf( "(controller) Next interval length: %f\n", timeval_to_real( tv_interval ) );
-//        if( VERBOSE ) printf( "(controller) Next interval start: %f\n", timeval_to_real( tv_interval_start ) );
-//        if( VERBOSE ) printf( "(controller) Next interval end: %f\n", timeval_to_real( tv_interval_end ) );
-//        if( VERBOSE ) printf( "(controller) Current time: %f\n", timeval_to_real( tv_current ) );
-
-        // TEST: to be commented.  Validate the wakeup event in coordinator.
-        // usleep(100);			// Sanity check
-
-        cycle++;
-    }
-
-    amsgbuffer.close( );  // TODO : figure out a way to force a clean up
+    shutdown( );
 
     return 0;
 }
-*/
 
-/*
-int main( int argc, char* argv[] ) {
-
-    actuator_msg_c state, command;
-    int cycle = 0;
-    struct timeval tv_start, tv_current, tv_control;
-    struct timeval tv_interval, tv_interval_start, tv_interval_end;
-    struct timeval tv_interval_elapsed, tv_interval_error;
-
-    // Note: if init fails, the controller bombs out.  Will write a message to
-    // console and/or error_log if this happens.
-    init( );
-
-    // compute the controller's interval
-    tv_interval.tv_sec = 0;
-    assert( CONTROLLER_FREQUENCY_HERTZ > 1 && CONTROLLER_FREQUENCY_HERTZ < USECS_PER_SEC );
-    tv_interval.tv_usec = USECS_PER_SEC / CONTROLLER_FREQUENCY_HERTZ;
-
-    // query and publish initial values
-    get_initial_state( );
-
-    // now that initialization is complete record start time (for interval computation)
-    tv_start = get_process_time( );
-
-    // record the start time as the start of the initial interval
-    memcpy( &tv_interval_start, &tv_start, sizeof(timeval) );
-
-    // compute the end of the initial interval
-    timeradd( &tv_interval_start, &tv_interval, &tv_interval_end );
-
-    // start the main process loop
-    while( 1 ) {
-        // poll time
-        // Note: double edged: poll may block on system call, but using signal
-        // will definitely block and adds complexity that may invalidate the
-        // coordinator measuring of the controller
-        tv_current = get_process_time( );
-
-        // compare the current time with the end time
-        int result = timercmp( &tv_current, &tv_interval_end, >= );
-
-        // if the comparison is true (tv_current is neither greater than nor EQUAL TO) then poll again
-        if( !result )	continue;
-
-        // otherwise, the interval has been exceeded
-
-        // **Question** For the time at which the control is issued,
-        // should we use the time that actually elapsed or should we
-        // use the time that the controller was supposed to fire.  This
-        // is polling after all and these times are very likely to be
-        // different.  I have arbitrarily chosen the actual time as
-        // opposed to the expected time.
-
-        // compute the actual time to compute the control output
-        // Note: current is absolute from beginning of process
-        // but control needs to be computed in terms of the time
-        // after the controller was initialized
-        timersub( &tv_current, &tv_start, &tv_control );
-
-        // Compute the time
-        Real t = timeval_to_real( tv_control );
-        //if( VERBOSE ) printf( "(controller) Requesting state at time: %10.9f\n", t );
-        //printf( "(controller) Requesting state at time: %10.9f\n", t );
-
-        // get the state (via dynamics)
-        if( get_state( t, state ) != ERROR_NONE ) {
-            sprintf( strbuffer, "(controller.cpp) main() failed calling get_state(%10.9f,state)\n", t );
-            error_log.write( strbuffer );
-            //TODO : determine appropriate response
-        }
-
-        // build a command
-        if( control( state, command ) != ERROR_NONE ) {
-            sprintf( strbuffer, "(controller.cpp) main() failed calling control(state,command) at time %10.9f\n", t );
-            error_log.write( strbuffer );
-            //TODO : determine appropriate response
-        }
-        command.header.type = ACTUATOR_MSG_COMMAND;
-
-        // publish the command
-        publish_command( command );
-        if( publish_command( command ) != ERROR_NONE ) {
-            sprintf( strbuffer, "(controller.cpp) main() failed calling publish_command(command) at time %10.9f\n", t );
-            error_log.write( strbuffer );
-            //TODO : determine appropriate response
-        }
-
-        // gather stats on actual duration of the last interval
-        timersub( &tv_current, &tv_interval_start, &tv_interval_elapsed );
-        timersub( &tv_current, &tv_interval_end, &tv_interval_error );
-
-        if( VERBOSE ) printf( "(controller) Actual Interval: %e\n", timeval_to_real( tv_interval_elapsed ) );
-        if( VERBOSE ) printf( "(controller) Interval Error: %e\n", timeval_to_real( tv_interval_error ) );
-
-        // recompute start of the interval
-        // Note: the interval is computed on the time it was supposed to end
-        // not on the current time.  It is highly unlikely that the current will
-        // be on time (at the end) but the error of assuming the actual time
-        // accumulates.  So using the actual value instead of expected.
-        memcpy( &tv_interval_start, &tv_current, sizeof(timeval) );
-
-        // recompute the end of the interval
-        timeradd( &tv_interval_start, &tv_interval, &tv_interval_end );
-
-        if( VERBOSE ) printf( "(controller) Next interval length: %f\n", timeval_to_real( tv_interval ) );
-        if( VERBOSE ) printf( "(controller) Next interval start: %f\n", timeval_to_real( tv_interval_start ) );
-        if( VERBOSE ) printf( "(controller) Next interval end: %f\n", timeval_to_real( tv_interval_end ) );
-        if( VERBOSE ) printf( "(controller) Current time: %f\n", timeval_to_real( tv_current ) );
-
-        // TEST: to be commented.  Validate the wakeup event in coordinator.
-        // usleep(100);			// Sanity check
-
-        cycle++;
-    }
-
-    amsgbuffer.close( );  // TODO : figure out a way to force a clean up
-
-    return 0;
-}
-*/
 //-----------------------------------------------------------------------------

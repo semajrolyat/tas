@@ -176,7 +176,7 @@ const char* ACTUATOR_MSG_BUFFER_MUTEX_NAME = "/amsgbuffer_mutex";
 class actuator_msg_buffer_c {
 private:
 
-    bool		create;
+    bool                create;
     bool                initialized;
     bool                opened;
 
@@ -184,7 +184,7 @@ private:
     std::string         mutex_name;
 
     int                 fd_mutex;
-    pthread_mutex_t     *mutex;
+    pthread_mutex_t*    mutex;
 
     int                 fd_buffer;
     actuator_msg_c*    	buffer;
@@ -198,14 +198,14 @@ public:
     actuator_msg_buffer_c( void ) {
         initialized = false;
         opened = false;
-        create = false;
+        create = true;
         mutex = NULL;
         buffer = NULL;
     }
 
     //-------------------------------------------------------------------------
 
-    actuator_msg_buffer_c( const char* buffer_name, const char* mutex_name, const bool& create = false ) {
+    actuator_msg_buffer_c( const char* buffer_name, const char* mutex_name, const bool& create ) {
 
         assert( buffer_name != NULL && mutex_name != NULL );
 
@@ -221,12 +221,14 @@ public:
     // Destructor
     //-------------------------------------------------------------------------
 
-    virtual ~actuator_msg_buffer_c( void ) { }
+    virtual ~actuator_msg_buffer_c( void ) {
+        if( opened ) close( );
+    }
 
 private:
     //-------------------------------------------------------------------------
 
-    actuator_msg_buffer_err_e init_mutex( const bool& create = false ) {
+    actuator_msg_buffer_err_e init_mutex( void ) {
 
         void* shm_mutex_addr;
         pthread_mutexattr_t mutexattr;
@@ -276,13 +278,18 @@ private:
     //-------------------------------------------------------------------------
 
     actuator_msg_buffer_err_e delete_mutex( void ) {
-        if( munmap( (void*)mutex, sizeof(pthread_mutex_t) ) ) {
-            perror( "munmap()" );
-            return BUFFER_ERROR_UNMAPPING;
-        }
 
-        if( shm_unlink( mutex_name.c_str( ) ) != 0 ) {
-            return BUFFER_ERROR_UNLINKING;
+        sys_close_fd( fd_mutex );
+
+        if( create ) {
+            if( munmap( (void*)mutex, sizeof(pthread_mutex_t) ) ) {
+                perror( "munmap()" );
+                return BUFFER_ERROR_UNMAPPING;
+            }
+
+            if( shm_unlink( mutex_name.c_str( ) ) != 0 ) {
+                return BUFFER_ERROR_UNLINKING;
+            }
         }
 
         return BUFFER_ERROR_NONE;
@@ -290,7 +297,7 @@ private:
 
     //-------------------------------------------------------------------------
 
-    actuator_msg_buffer_err_e init_buffer( const bool& create = false ) {
+    actuator_msg_buffer_err_e init_buffer( void ) {
 
         void* shm_buffer_addr;
 
@@ -322,13 +329,17 @@ private:
     //-------------------------------------------------------------------------
 
     actuator_msg_buffer_err_e delete_buffer( void ) {
-        if( munmap( (void*)buffer, sizeof(actuator_msg_c) ) ) {
-            perror("munmap()");
-            return BUFFER_ERROR_UNMAPPING;
-        }
+        sys_close_fd( fd_buffer );
 
-        if( shm_unlink( buffer_name.c_str( ) ) != 0 ) {
-            return BUFFER_ERROR_UNLINKING;
+        if( create ) {
+            if( munmap( (void*)buffer, sizeof(actuator_msg_c) ) ) {
+                perror("munmap()");
+                return BUFFER_ERROR_UNMAPPING;
+            }
+
+            if( shm_unlink( buffer_name.c_str( ) ) != 0 ) {
+                return BUFFER_ERROR_UNLINKING;
+            }
         }
 
         return BUFFER_ERROR_NONE;
@@ -344,12 +355,12 @@ public:
         assert( initialized && !opened );
 
         actuator_msg_buffer_err_e result;
-        result = init_mutex( create );
+        result = init_mutex( );
         if( result != BUFFER_ERROR_NONE ) {
             // major problem.  No option but to bomb out.
             return result;
         }
-        result = init_buffer( create );
+        result = init_buffer( );
         if( result != BUFFER_ERROR_NONE ) {
             // major problem.  No option but to bomb out.
             return result;
@@ -363,6 +374,9 @@ public:
     //-------------------------------------------------------------------------
 
     void close( void ) {
+
+        delete_buffer( );
+        delete_mutex( );
 
         opened = false;
 

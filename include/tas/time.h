@@ -1,151 +1,17 @@
 /*----------------------THE GEORGE WASHINGTON UNIVERSITY-----------------------
 author: James R. Taylor                                             jrt@gwu.edu
 
-TAS.h
+time.h
 -----------------------------------------------------------------------------*/
 
-#ifndef _TAS_H_
-#define _TAS_H_
+#ifndef _TIME_H_
+#define _TIME_H_
 
-//-----------------------------------------------------------------------------
-/*
-// C/C++ includes
-#include <assert.h>
-#include <stdexcept>
-#include <stdio.h>
-#include <stdlib.h>
-
-
-
-// POSIX includes
-#include <pthread.h>
-
-#include <errno.h>
-*/
-
-#include <stdlib.h>
-#include <stdio.h>
-#include <unistd.h>
-#include <fcntl.h>
-#include <assert.h>
-#include <signal.h>
-#include <stdexcept>
-#include <sys/time.h>
-#include <sys/resource.h>
-#include <errno.h>
-#include <sched.h>
-#include <dlfcn.h>
-#include <sys/types.h>
-
-#include <sstream>
-#include <fstream>
-#include <iostream>
-#include <list>
-
-#include <stdint.h>
-
-#include <pthread.h>
-
-#include <Moby/Simulator.h>
-#include <Moby/RCArticulatedBody.h>
-
-//#include "actuator.h"
-//#include "dynamics_plugin.h"
-
-#include <sys/mman.h>
-#include <sys/stat.h>
-//#include <sys/wait.h>
-
-//-----------------------------------------------------------------------------
+#include <tas/tas.h>
+#include <tas/error.h>
+#include <tas/log.h>
 
 typedef double Real;
-
-#define PI 3.14159265359
-
-#define VERBOSE 0 
-
-//-----------------------------------------------------------------------------
-// IPC Channels
-//-----------------------------------------------------------------------------
-
-#define FD_COORDINATOR_TO_CONTROLLER_READ_CHANNEL   1000
-#define FD_COORDINATOR_TO_CONTROLLER_WRITE_CHANNEL  1001
-
-#define FD_CONTROLLER_TO_COORDINATOR_READ_CHANNEL   1002
-#define FD_CONTROLLER_TO_COORDINATOR_WRITE_CHANNEL  1003
-
-//-----------------------------------------------------------------------------
-// Common Error Handling
-//-----------------------------------------------------------------------------
-
-#define FD_ERROR_LOG				    100
-
-/// Very modest error enumeration.  Classes may have more detailed error
-/// facilities, but this general enum provides fundamental flags for generalized
-/// use.
-enum error_e {
-    ERROR_NONE = 0,
-    ERROR_FAILED
-};
-
-
-//-----------------------------------------------------------------------------
-/// Common error message for failing to read from file descriptor
-std::string error_string_bad_read( const std::string& txt, const int& err ) {
-    std::stringstream ss;
-    char buffer[256];
-
-    ss << txt << " errno: %s\n";
-    sprintf( buffer, ss.str().c_str(), (err == EAGAIN) ? "EAGAIN" :
-                                       (err == EBADF) ? "EBADF" :
-                                       (err == EFAULT) ? "EFAULT" :
-                                       (err == EINTR) ? "EINTR" :
-                                       (err == EINVAL) ? "EINVAL" :
-                                       (err == EIO) ? "EIO" :
-                                       (err == EISDIR) ? "EISDIR" :
-                                       "UNDEFINED"
-    );
-    return std::string( buffer );
-}
-
-//-----------------------------------------------------------------------------
-/// Common error message for failing to write to file descriptor
-std::string error_string_bad_write( const std::string& txt, const int& err ) {
-    std::stringstream ss;
-    char buffer[256];
-
-    ss << txt << " errno: %s\n";
-    sprintf( buffer, ss.str().c_str(), (err == EAGAIN) ? "EAGAIN" :
-                                        (err == EBADF) ? "EBADF" :
-                     //					(err == EDESTADDRREQ) ? "EDESTADDREQ" :
-                     //					(err == EDQUOT) ? "EDQUOT" :
-                                        (err == EFAULT) ? "EFAULT" :
-                                        (err == EFBIG) ? "EFBIG" :
-                                        (err == EINTR) ? "EINTR" :
-                                        (err == EINVAL) ? "EINVAL" :
-                                        (err == EIO) ? "EIO" :
-                                        (err == ENOSPC) ? "ENOSPC" :
-                                        (err == EPIPE) ? "EPIPE" :
-                                        "UNDEFINED"
-    );
-    return std::string( buffer );
-}
-
-
-//-----------------------------------------------------------------------------
-// 
-//-----------------------------------------------------------------------------
-
-#define CONTROLLER_FREQUENCY_HERTZ                  1000
-
-//-----------------------------------------------------------------------------
-
-#define DYNAMICS_PLUGIN "/home/james/tas/build/libdynamics.so"
-#define DEFAULT_CONTROLLER_PROGRAM      "controller"
-
-//-----------------------------------------------------------------------------
-
-#define DEFAULT_PROCESSOR    0
 
 //-----------------------------------------------------------------------------
 
@@ -154,38 +20,133 @@ std::string error_string_bad_write( const std::string& txt, const int& err ) {
 
 //-----------------------------------------------------------------------------
 
-#define DEFAULT_BUDGET_RTTIMER_NSEC	1E6
-//#define DEFAULT_BUDGET_RTTIMER_NSEC	1E7
-#define DEFAULT_BUDGET_RTTIMER_SEC	0
+/// Conversion function from a timeval to a floating point representing seconds
+Real timeval_to_real( const struct timeval& tv ) {
+    return (Real) tv.tv_sec + (Real) tv.tv_usec / (Real) USECS_PER_SEC;
+}
 
-#define DEFAULT_INITDELAY_RTTIMER_NSEC	1
-#define DEFAULT_INITDELAY_RTTIMER_SEC	0
+//-----------------------------------------------------------------------------
+Real timespec_to_real( const struct timespec& ts ) {
+    return (Real) ts.tv_sec + (Real) ts.tv_nsec / (Real) NSECS_PER_SEC;
+}
+
+//-----------------------------------------------------------------------------
+
+double cycles_to_seconds( const unsigned long long& cycles, const unsigned long long& cpu_hz ) {
+    return (double)cycles / (double)cpu_hz;
+}
+
+//-----------------------------------------------------------------------------
+
+// inline assembly for rdtsc timer
+#define rdtscll(val) __asm__ __volatile__("rdtsc" : "=A" (val))
+
 
 //-----------------------------------------------------------------------------
 //
 //-----------------------------------------------------------------------------
 
-enum controller_notification_type_e {
-    CONTROLLER_NOTIFICATION_UNDEFINED = 0,
-    CONTROLLER_NOTIFICATION_SNOOZE,
-    CONTROLLER_NOTIFICATION_ACTUATOR_EVENT
+struct timestamp_t {
+    unsigned long long cycles;
+    double seconds;
 };
 
 //-----------------------------------------------------------------------------
 
-class controller_notification_c {
+// arbitrary size : buffer > 100s * 1000Hz
+//#define TIMESTAMP_BUFFER_SIZE 1000000
+
+#define TIMESTAMP_BUFFER_SIZE 100000
+
+class timestamp_buffer_c {
+private:
+    timestamp_t buffer[TIMESTAMP_BUFFER_SIZE];
+    unsigned int cursor;
+    unsigned long long cpu_hz;
+    std::string filename;
 public:
-    controller_notification_c( void ) {
-        type = CONTROLLER_NOTIFICATION_UNDEFINED;
-        ts = 0;
-        duration = 0.0;
+    timestamp_buffer_c( void ) {
+        cursor = 0;
+        cpu_hz = 0;
+    }
+    timestamp_buffer_c( const unsigned long long& cpu_hz, std::string filename ) {
+        cursor = 0;
+        this->cpu_hz = cpu_hz;
+        this->filename = filename;
     }
 
-    virtual ~controller_notification_c( void ) { }
+    virtual ~timestamp_buffer_c( void ) { }
 
-    controller_notification_type_e type;
-    unsigned long long ts;          // timestamp in cycles
-    double duration;
+    /// initialize
+    error_t open( void ) {
+        return ERROR_NONE;
+    }
+
+    /// write to disk
+    error_t close( void ) {
+        char strbuffer[256];
+
+        //printf( "closing timestamp log\n" );
+
+        if( cursor == 0 ) return ERROR_NONE;
+
+        log_c log = log_c( filename );
+
+        if( log.open( ) != LOG_ERROR_NONE )
+            return ERROR_FAILED;
+
+        //printf( "writing timestamp log to disk\n" );
+        //printf( "records: %d\n", cursor );
+
+        sprintf( strbuffer, "cpu_hz: %lld\n", cpu_hz );
+        log.write( strbuffer );
+
+        sprintf( strbuffer, "cycles\tseconds\n" );
+        log.write( strbuffer );
+
+        for( unsigned int i = 0; i < cursor; i++ ) {
+
+            buffer[i].seconds = cycles_to_seconds( buffer[i].cycles, cpu_hz );
+            sprintf( strbuffer, "%lld\t%10.9f\n", buffer[i].cycles, buffer[i].seconds );
+            log.write( strbuffer );
+        }
+
+        log.close( );
+
+        return ERROR_NONE;
+    }
+
+    /*
+    error_t write( const timestamp_t& ts ) {
+        assert( cursor < TIMESTAMP_BUFFER_SIZE - 1 );
+
+        buffer[cursor].cycles = ts.cycles;
+        buffer[cursor].seconds = ts.seconds;
+        cursor++;
+
+        return ERROR_NONE;
+    }
+
+    error_t write( const unsigned long long& cycles, const double& seconds ) {
+        assert( cursor < TIMESTAMP_BUFFER_SIZE - 1 );
+
+        buffer[cursor].cycles = cycles;
+        buffer[cursor].seconds = seconds;
+        cursor++;
+
+        return ERROR_NONE;
+    }
+    */
+
+    error_t write( const unsigned long long& cycles ) {
+        assert( cursor < TIMESTAMP_BUFFER_SIZE - 1 );
+
+        buffer[cursor].cycles = cycles;
+        cursor++;
+
+        return ERROR_NONE;
+    }
+
 };
 
 
@@ -241,28 +202,6 @@ enum timer_err_e {
 };
 //-----------------------------------------------------------------------------
 
-/// Conversion function from a timeval to a floating point representing seconds
-Real timeval_to_real( const struct timeval& tv ) {
-    return (Real) tv.tv_sec + (Real) tv.tv_usec / (Real) USECS_PER_SEC;
-}
-
-//-----------------------------------------------------------------------------
-Real timespec_to_real( const struct timespec& ts ) {
-    return (Real) ts.tv_sec + (Real) ts.tv_nsec / (Real) NSECS_PER_SEC;
-}
-
-//-----------------------------------------------------------------------------
-
-double cycles_to_seconds( const unsigned long long& cycles, const unsigned long long& cpu_hz ) {
-    return (double)cycles / (double)cpu_hz;
-} 
-
-//-----------------------------------------------------------------------------
-
-// inline assembly for rdtsc timer
-#define rdtscll(val) __asm__ __volatile__("rdtsc" : "=A" (val))
-
-//-----------------------------------------------------------------------------
 ///*
 // Note: Assumes that there is no overflow of seconds
 struct timespec add_timespecs( const struct timespec& a, const struct timespec& b ) {
@@ -272,11 +211,11 @@ struct timespec add_timespecs( const struct timespec& a, const struct timespec& 
     int nsof = ns - 1000000000;
 
     if( nsof >= 0 ) {
-	result.tv_sec = s + 1;
-	result.tv_nsec = nsof;
+    result.tv_sec = s + 1;
+    result.tv_nsec = nsof;
     } else {
-	result.tv_sec = s;
-	result.tv_nsec = ns;
+    result.tv_sec = s;
+    result.tv_nsec = ns;
     }
     return result;
 }
@@ -512,7 +451,4 @@ static void print_proc_stat( struct proc_stat_t *s ) {
 //-----------------------------------------------------------------------------
 
 
-//-----------------------------------------------------------------------------
-
-#endif // _TAS_H_
-
+#endif // _TIME_H_

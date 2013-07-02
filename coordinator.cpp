@@ -4,11 +4,13 @@ author: James R. Taylor                                             jrt@gwu.edu
 coordinator.cpp
 -----------------------------------------------------------------------------*/
 
-#include <tas.h>
-#include <dynamics_plugin.h>
-#include <cpu.h>
-#include <actuator.h>
-#include <log.h>
+#include <tas/tas.h>
+#include <tas/time.h>
+#include <tas/dynamics_plugin.h>
+#include <tas/cpu.h>
+#include <tas/actuator.h>
+#include <tas/log.h>
+#include <tas/experiment.h>
 
 //-----------------------------------------------------------------------------
 
@@ -16,7 +18,31 @@ using boost::dynamic_pointer_cast;
 
 //-----------------------------------------------------------------------------
 
-#define SIM_DURATION 10.0
+timestamp_buffer_c timestamp_timer_buffer;
+timestamp_buffer_c timestamp_select_buffer;
+
+//-----------------------------------------------------------------------------
+
+// timer variables
+sigset_t rttimer_mask;
+
+// The signal action to reference controller's process signal handler
+struct sigaction rttimer_sigaction;
+timer_t rttimer_id;
+
+//-----------------------------------------------------------------------------
+
+// Coordinator process information
+static pid_t coordinator_pid;
+static int coordinator_priority;
+
+// Controller process information
+static int controller_pid;
+
+bool controller_is_blocked;
+bool controller_is_suspended;
+
+bool controller_fully_initialized = false;
 
 //-----------------------------------------------------------------------------
 // CPU
@@ -104,10 +130,18 @@ void coordinator_init_dynamics( int argc, char** argv ) {
   invokes the run function (run_fun_t) of all the registered dynamics plugins
 */
 void run_dynamics( Real dt ) {
-    if(VERBOSE) printf( "(coordinator) Running Dynamics\n" );
 
     for( std::list< dynamics_plugin_c >::iterator it = plugins.begin(); it != plugins.end(); it++ ) {
         (*it->run)( dt );
+    }
+}
+
+//-----------------------------------------------------------------------------
+
+void shutdown_dynamics( void ) {
+
+    for( std::list< dynamics_plugin_c >::iterator it = plugins.begin(); it != plugins.end(); it++ ) {
+        (*it->shutdown)( );
     }
 }
 
@@ -120,7 +154,6 @@ void run_dynamics( Real dt ) {
   really wrapped into the run_dynamics mechanism
 */
 void dynamics_state_requested( void ) {
-    if(VERBOSE) printf( "(coordinator) Requesting Dynamics State\n" );
 
     for( std::list< dynamics_plugin_c >::iterator it = plugins.begin(); it != plugins.end(); it++ ) {
         (*it->write_state)( );
@@ -130,7 +163,6 @@ void dynamics_state_requested( void ) {
 //-----------------------------------------------------------------------------
 
 void dynamics_get_command( void ) {
-    if(VERBOSE) printf( "(coordinator) Getting Command\n" );
 
     for( std::list< dynamics_plugin_c >::iterator it = plugins.begin(); it != plugins.end(); it++ ) {
         (*it->read_command)( );
@@ -147,7 +179,6 @@ error_e init_dynamics( const int& argc, char* argv[] ) {
 
     // if both functions were located then push the pair into the list of plugins
     if( !result ) plugins.push_back( plugin );
-    if( VERBOSE ) printf("(coordinator) dynamics initialized\n");
 
     return ERROR_NONE;
 }
@@ -250,18 +281,6 @@ void close_pipes( void ) {
 // PROCESS MANAGEMENT
 //-----------------------------------------------------------------------------
 
-// Coordinator process information
-static pid_t coordinator_pid;
-static int coordinator_priority;
-
-// Controller process information
-static int controller_pid;
-
-bool controller_is_blocked;
-bool controller_is_suspended;
-
-bool controller_fully_initialized = false;
-//-----------------------------------------------------------------------------
 
 /// Creates the controller process with a priority level one step below the coordinator.
 /// Note: an ERROR_NONE in the coordinator does not really guarantee that the controller
@@ -352,7 +371,7 @@ error_e fork_controller( void ) {
 
         // execute the controller program
         // TODO : error handling
-        execl( DEFAULT_CONTROLLER_PROGRAM, "controller", NULL );
+        execl( CONTROLLER_PROGRAM, "controller", NULL );
 
         // exit on fail to exec.  Can only get here if execl fails.
         _exit( 1 );
@@ -393,15 +412,6 @@ void shutdown_controller( void ) {
 // TIMER CONTROL
 //-----------------------------------------------------------------------------
 
-// timer variables
-//clockid_t rttimer_clock;
-sigset_t rttimer_mask;
-
-// The signal action to reference controller's process signal handler
-struct sigaction rttimer_sigaction;
-
-//-----------------------------------------------------------------------------
-
 /// The signal handler for the controller's timer.  Is called only when the controller's
 /// budget is exhausted.  Puts a message out onto the comm channel the coordinator
 /// is listening to for notifications about this event
@@ -440,83 +450,24 @@ timer_err_e unblock_rttimer( void ) {
 
 //-----------------------------------------------------------------------------
 
-/// Creates a real-time timer to monitor the controller process
-timer_err_e create_rttimer( void ) {
-    timer_t rttimer_id;
-    struct sigevent sevt;
-    struct itimerspec its;
-    clockid_t rttimer_clock;
-
-    // Establish handler for timer signal
-    rttimer_sigaction.sa_flags = SA_SIGINFO;
-    rttimer_sigaction.sa_sigaction = rttimer_sighandler;
-    sigemptyset( &rttimer_sigaction.sa_mask );
-    if( sigaction( RTTIMER_SIGNAL, &rttimer_sigaction, NULL ) == -1 )
-        return TIMER_ERROR_SIGACTION;
-
-    // Intialize the signal mask
-    sigemptyset( &rttimer_mask );
-    sigaddset( &rttimer_mask, RTTIMER_SIGNAL );
-
-    // Block timer signal temporarily
-    if( block_rttimer() != TIMER_ERROR_NONE )
-        return TIMER_ERROR_SIGPROCMASK;
-
-    // Query the clock id for the controller process
-    if( clock_getcpuclockid( controller_pid, &rttimer_clock ) != 0 )
-        return TIMER_ERROR_GETCLOCKID;
-
-    // Create the timer
-    sevt.sigev_notify = SIGEV_SIGNAL;
-    sevt.sigev_signo = RTTIMER_SIGNAL;
-    sevt.sigev_value.sival_ptr = &rttimer_id;
-    if( timer_create( rttimer_clock, &sevt, &rttimer_id ) == -1 )
-        //if( timer_create( CLOCK_MONOTONIC, &sevt, &rttimer_id ) == -1 )
-        return TIMER_ERROR_CREATE;
-
-    // intial delay for the timer
-    its.it_value.tv_sec = DEFAULT_INITDELAY_RTTIMER_SEC;
-    its.it_value.tv_nsec = DEFAULT_INITDELAY_RTTIMER_NSEC;
-    // budget for the controller
-    its.it_interval.tv_sec = DEFAULT_BUDGET_RTTIMER_SEC;
-    its.it_interval.tv_nsec = DEFAULT_BUDGET_RTTIMER_NSEC;
-
-    // Set up the timer
-    if( timer_settime( rttimer_id, 0, &its, NULL ) == -1 )
-        return TIMER_ERROR_SETTIME;
-
-    // NOTE: The timer is blocked at this point.  It must be unblocked in
-    // the coordinator process for the timer to function
-
-    return TIMER_ERROR_NONE;
-}
-
-//-----------------------------------------------------------------------------
-
-timer_t rttimer_id;
-
-//-----------------------------------------------------------------------------
-
 timer_err_e arm_timer( unsigned long long& ts ) {
 
     struct itimerspec its;
 
+    // sanity check.  Not supporting controllers that run at 1 Hz or slower or faster than 1ns.
+    assert( CONTROLLER_HZ > 1 && CONTROLLER_HZ <= NSECS_PER_SEC );
+
     its.it_interval.tv_sec = 0;
     its.it_interval.tv_nsec = 0;
     its.it_value.tv_sec = 0;
-    its.it_value.tv_nsec = 1000000;
-    //its.it_value.tv_nsec = 800000;
-
-    // timestamp here?
-    rdtscll( ts );
+    its.it_value.tv_nsec = NSECS_PER_SEC / CONTROLLER_HZ;
 
     //if( timer_settime( rttimer_id, TIMER_ABSTIME, &its, NULL ) == -1 )
     if( timer_settime( rttimer_id, 0, &its, NULL ) == -1 )
         return TIMER_ERROR_SETTIME;
 
-    // or timestamp here?
-    //rdtscll( ts );
-
+    // timestamp
+    rdtscll( ts );
 
     return TIMER_ERROR_NONE;
 }
@@ -548,29 +499,6 @@ timer_err_e create_hrrttimer( void ) {
 
     return TIMER_ERROR_NONE;
 }
-
-//-----------------------------------------------------------------------------
-/*
-/// Initializes the controller monitoring timer which determines when the controller has
-/// exhausted its budget
-error_e init_rttimer( void ) {
-
-    if( create_hrrttimer( ) != TIMER_ERROR_NONE ) {
-        sprintf( strbuffer, "(coordinator.cpp) init_rttimer() failed calling create_hrrttimer()\n" );
-        error_log.write( strbuffer );
-        return ERROR_FAILED;
-    }
-
-    if( VERBOSE ) printf("(coordinator) rttimer initialized\n");
-
-    // unblock the controller process
-    resume_controller( );
-    // Note: this doesn't mean the controller is fully initialized
-
-    return ERROR_NONE;
-}
-*/
-//-----------------------------------------------------------------------------
 
 //-----------------------------------------------------------------------------
 // WAKEUP THREAD
@@ -866,16 +794,6 @@ void init( int argc, char* argv[] ) {
         exit( 1 );
     }
 
-    /*
-    // initialize the timer
-    if( init_rttimer( ) != ERROR_NONE ) {
-        amsgbuffer.close( );
-        close_pipes( );
-        error_log.close( );
-        printf( "(coordinator.cpp) init() failed calling init_rttimer()\nExiting\n" );
-        exit( 1 );
-    }
-    */
 /*
     // initialize the wakeup thread
     if( create_wakeup_thread( ) != ERROR_NONE ) {
@@ -889,6 +807,7 @@ void init( int argc, char* argv[] ) {
     //++++++++++++++++++++++++++++++++++++++++++++++++
     // open any other logs
 
+    /*
     // open the variance log
     if( open_variance_log( ) != ERROR_NONE ) {
         sprintf( strbuffer, "(coordinator.cpp) init() failed calling open_variance_log()\nExiting\n" );
@@ -900,58 +819,83 @@ void init( int argc, char* argv[] ) {
         error_log.close( );
         exit( 1 );
     }
+    */
+
+    timestamp_timer_buffer = timestamp_buffer_c( cpu_speed_hz, "timestamps_timer.dat" );
+    if( timestamp_timer_buffer.open( ) != ERROR_NONE ) {
+        sprintf( strbuffer, "(coordinator.cpp) init() failed calling timestamp_buffer_c.open()\nExiting\n" );
+        error_log.write( strbuffer );
+        printf( "%s", strbuffer );
+
+        amsgbuffer.close( );
+        close_pipes( );
+        error_log.close( );
+        exit( 1 );
+    }
+
+    /*
+    timestamp_select_buffer = timestamp_buffer_c( cpu_speed_hz, "timestamps_select.dat" );
+    if( timestamp_select_buffer.open( ) != ERROR_NONE ) {
+
+    }
+    */
 }
 
 //-----------------------------------------------------------------------------
 
 void shutdown( void ) {
-    variance_log.close( );
+    printf( "shutting down\n" );
+
+    //variance_log.close( );
 
     //pthread_join( wakeup_thread, NULL );
-    pthread_kill( wakeup_thread, SIGKILL );
+    //pthread_kill( wakeup_thread, SIGKILL );
 
     shutdown_controller( );
     //resume_controller( );
 
     sleep( 1 );  // block for a second to allow controller to receive signal
 
+    shutdown_dynamics( );
+
     amsgbuffer.close( );
     close_pipes( );
 
+    timestamp_timer_buffer.close();
+    timestamp_select_buffer.close();
+
     // Note: can get a double free exception if the log is closed in this process
     // before it is closed in the controller
+
     error_log.close( );
 
     //exit( 0 );
 }
 
+//-----------------------------------------------------------------------------
+
 Real previous_t = 0.0;
 Real current_t = 0.0;
 Real dt;
 
+//-----------------------------------------------------------------------------
+
 void service_controller_actuator_msg( void ) {
     actuator_msg_c msg;
+    char buf = 0;
+
     if( amsgbuffer.read( msg ) != BUFFER_ERROR_NONE ) {
         sprintf( strbuffer, "(coordinator.cpp) main() failed calling actuator_msg_buffer_c.read(msg)\n" );
         error_log.write( strbuffer );
     }
 
-    if(VERBOSE) msg.print();
-
-    char buf = 0;
-
     switch( msg.header.type ) {
     case ACTUATOR_MSG_COMMAND:
-        if(VERBOSE) printf( "(coordinator) received ACTUATOR_MSG_COMMAND\n" );
-
-        //suspend_controller( );
 
         dynamics_get_command( );
 
-        //resume_controller( );
         break;
     case ACTUATOR_MSG_REQUEST:
-        if(VERBOSE) printf( "(coordinator) received ACTUATOR_MSG_REQUEST\n" );
 
         // Note: the controller is blocking now on read from fd_coordinator_to_controller[0]
 
@@ -960,10 +904,6 @@ void service_controller_actuator_msg( void ) {
             // and that this is querying for initial state
             controller_fully_initialized = true;
 
-            // therefore suspend the controller and unblock the timer
-            //coordinator_suspend_controller( );    // be careful.  If you suspend must resume
-            //coordinator_unblock_controllers_signal_rttimer( );
-
             dynamics_state_requested( );
 
             if( amsgbuffer.read( msg ) != BUFFER_ERROR_NONE)  {
@@ -971,11 +911,6 @@ void service_controller_actuator_msg( void ) {
                 error_log.write( strbuffer );
             }
 
-            if(VERBOSE) msg.print();
-
-            if(VERBOSE) printf( "(coordinator) notifying controller state available\n" );
-
-            //coordinator_resume_controller( );  // paired with above suspend
             if( write( fd_coordinator_to_controller[1], &buf, 1 ) == -1 ) {
                 std::string err_msg = "(coordinator.cpp) main() failed making system call write(...) on fd_coordinator_to_controller[1]";
                 error_log.write( error_string_bad_write( err_msg, errno ) );
@@ -987,8 +922,6 @@ void service_controller_actuator_msg( void ) {
             current_t = msg.state.time;
 
             dt = current_t - previous_t;
-            //printf( "dt: %e\n", dt );
-            printf( "dt: %10.9f\n", dt );
 
             run_dynamics( dt );
 
@@ -998,10 +931,6 @@ void service_controller_actuator_msg( void ) {
                 sprintf( strbuffer, "(coordinator.cpp) main() failed calling actuator_msg_buffer_c.read(msg) while servicing ACTUATOR_MSG_REQUEST\n" );
                 error_log.write( strbuffer );
             }
-
-            if(VERBOSE) msg.print();
-
-            if(VERBOSE) printf( "(coordinator) notifying controller state available\n" );
 
             //write( fd_coordinator_to_controller[1], &buf, 1 );
             if( write( fd_coordinator_to_controller[1], &buf, 1 ) == -1 ) {
@@ -1035,6 +964,7 @@ void service_controller_actuator_msg( void ) {
     }
 }
 
+
 //-----------------------------------------------------------------------------
 // ENTRY POINT
 //-----------------------------------------------------------------------------
@@ -1051,11 +981,11 @@ int main( int argc, char* argv[] ) {
     init( argc, argv );
 
     char input_buffer;
-    unsigned long long ts;
-    Real t;
+
+    unsigned int timer_events = 0;
+    unsigned int select_events = 0;
 
     unsigned long long ts_timer_armed, ts_timer_fired, dts_timer;
-    Real dt_timer;
 
     int max_fd = std::max( fd_timer_to_coordinator[0], fd_wakeup_to_coordinator[0] );
     max_fd = std::max( max_fd, fd_controller_to_coordinator[0] );
@@ -1067,9 +997,9 @@ int main( int argc, char* argv[] ) {
 
     printf( "starting main loop\n" );
 
-    while( 1 ) {
+    unsigned long long ts_pre_select, ts_post_select;
 
-        //if( current_t > SIM_DURATION ) break;
+    while( 1 ) {
 
         fd_set fds_channels;
 
@@ -1078,13 +1008,18 @@ int main( int argc, char* argv[] ) {
         FD_SET( fd_wakeup_to_coordinator[0], &fds_channels );
         FD_SET( fd_controller_to_coordinator[0], &fds_channels );
 
-        // TODO: review the following code
+        rdtscll( ts_pre_select );
         int result = select( max_fd + 1, &fds_channels, NULL, NULL, NULL );
+        rdtscll( ts_post_select );
+        /*
+        if( ++select_events <= 1000 )
+            timestamp_select_buffer.write( ts_post_select - ts_pre_select );
+        */
+
         if( result ) {
             if( FD_ISSET( fd_timer_to_coordinator[0], &fds_channels ) ) {
 
-                //printf( "timer event\n" );
-
+                // timer event
                 if( read( fd_timer_to_coordinator[0], &ts_timer_fired, sizeof(unsigned long long) ) == -1 ) {
                     std::string err_msg = "(coordinator.cpp) main() failed making system call read(...) on fd_timer_to_coordinator[0]";
                     error_log.write( error_string_bad_read( err_msg, errno ) );
@@ -1092,22 +1027,15 @@ int main( int argc, char* argv[] ) {
                 }
 
                 dts_timer = ts_timer_fired - ts_timer_armed;
-                dt_timer = cycles_to_seconds( dts_timer, cpu_speed_hz );
 
-                printf( "(coordinator) Timer Interval (cycles, seconds): %lld, %11.10f\n", dts_timer, dt_timer );
+                timestamp_timer_buffer.write( dts_timer );
 
-                if( dt_timer > 0.001 * 1.20 ) break;
+                if( ++timer_events == SIM_DURATION_CYCLES ) break;
 
                 // controller needs to run!
                 resume_controller( );
 
-                if( arm_timer( ts_timer_armed ) != TIMER_ERROR_NONE ) {
-                    sprintf( strbuffer, "(coordinator.cpp) main() failed calling arm_timer()\n" );
-                    error_log.write( strbuffer );
-                    return ERROR_FAILED;
-                }
             } else if( FD_ISSET( fd_controller_to_coordinator[0], &fds_channels ) ) {
-                //printf( "(coordinator) received a notification from controller\n" );
 
                 // controller notification event
                 if( read( fd_controller_to_coordinator[0], &ctl_msg, sizeof( controller_notification_c ) ) == -1 ) {
@@ -1116,10 +1044,6 @@ int main( int argc, char* argv[] ) {
                     // TODO : determine if there is a need to recover
                 }
 
-
-                //if( VERBOSE ) printf( "(coordinator) received a notification from controller\n" );
-                // now check the message buffer and respond to the type of message
-
                 // check to see what kind of notification was sent.
                 // if it's an actuator message then service it
                 // else if it's a schedule request then schedule the controller timer
@@ -1127,13 +1051,8 @@ int main( int argc, char* argv[] ) {
                     service_controller_actuator_msg( );
                 } else if( ctl_msg.type == CONTROLLER_NOTIFICATION_SNOOZE ) {
 
-
-                    printf( "(coordinator) received a snooze notification from controller\n" );
-
                     // set a timer, suspend the controller until the timer fires
                     suspend_controller( );
-
-                    printf( "(coordinator) setting timer\n" );
 
                     if( arm_timer( ts_timer_armed ) != TIMER_ERROR_NONE ) {
                         sprintf( strbuffer, "(coordinator.cpp) main() failed calling arm_timer()\n" );
@@ -1143,23 +1062,21 @@ int main( int argc, char* argv[] ) {
                 }
 
             } else if( FD_ISSET( fd_wakeup_to_coordinator[0], &fds_channels ) ) {
-                printf( "wakeup event\n" );
-
-                // What if the controller is suspended?
-                // Wakeup doesn't appear to happen because suspension is in main thread and resumption occurs before main thread is blocked
-
 
                 // wakeup event
+
+                // Q: What if the controller is suspended?
+                // Note: Wakeup doesn't appear to happen because suspension is in main thread and resumption occurs before main thread is blocked
+
                 if( read( fd_wakeup_to_coordinator[0], &input_buffer, 1 ) == -1 ) {
                     std::string err_msg = "(coordinator.cpp) main() failed making system call read(...) on fd_wakeup_to_coordinator[0]";
                     error_log.write( error_string_bad_read( err_msg, errno ) );
                     // TODO : determine if there is a need to recover
                 }
-
-                printf( "(coordinator) received a wakeup from a blocked controller\n" );
             }
         }
     }
+
     munlockall();
     shutdown( );
 }

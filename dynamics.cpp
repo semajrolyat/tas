@@ -33,9 +33,9 @@ Moby plugin
 #include <Moby/EventDrivenSimulator.h>
 #include <Moby/RCArticulatedBody.h>
 
-#include <tas.h>
-#include <actuator.h>
-#include <log.h>
+#include <tas/tas.h>
+#include <tas/actuator.h>
+#include <tas/log.h>
 
 //-----------------------------------------------------------------------------
 
@@ -45,7 +45,7 @@ using boost::dynamic_pointer_cast;
 
 //-----------------------------------------------------------------------------
 
-log_c error_log;
+log_c dyn_error_log;
 char strbuffer[ 256 ];
 
 //-----------------------------------------------------------------------------
@@ -487,15 +487,15 @@ RCArticulatedBodyPtr pendulum;
 
 /// The shared memory buffer where control commands arrive from the controller
 /// and where state for the controller is published
-actuator_msg_buffer_c amsgbuffer;
+actuator_msg_buffer_c dyn_amsgbuffer;
 
 //-----------------------------------------------------------------------------
 // Dynamics plugin entry point.  
 void init( int argc, char** argv ) {
 
     //+++++++++++++++++++++++++++++++++++++++
-    error_log = log_c( FD_ERROR_LOG );
-    if( error_log.open( ) != LOG_ERROR_NONE ) {
+    dyn_error_log = log_c( FD_ERROR_LOG );
+    if( dyn_error_log.open( ) != LOG_ERROR_NONE ) {
         // Note: this is not really necessary
         printf( "(dynamics.cpp) ERROR: init(argc,argv) failed calling log_c.open() on FD_ERROR_LOG\n" );
     }
@@ -707,21 +707,21 @@ void init( int argc, char** argv ) {
     // Get reference to the pendulum for usage in the command publish and response
     if( READ_MAP.find("pendulum") == READ_MAP.end() ) {
         sprintf( strbuffer, "(dynamics.cpp) init(argc,argv) failed- unable to find pendulum in xml!\n" );
-        error_log.write( strbuffer );
+        dyn_error_log.write( strbuffer );
         // TODO : return error condition
     }
     pendulum = dynamic_pointer_cast<Moby::RCArticulatedBody>( READ_MAP.find("pendulum")->second  );
     if( !pendulum ) {
         sprintf( strbuffer, "(dynamics.cpp) init(argc,argv)- unable to cast pendulum to type RCArticulatedBody\n" );
-        error_log.write( strbuffer );
+        dyn_error_log.write( strbuffer );
         // TODO : return error condition
     }
 
     // open the command buffer
-    amsgbuffer = actuator_msg_buffer_c( ACTUATOR_MSG_BUFFER_NAME, ACTUATOR_MSG_BUFFER_MUTEX_NAME );
-    if( amsgbuffer.open( ) != BUFFER_ERROR_NONE) {
+    dyn_amsgbuffer = actuator_msg_buffer_c( ACTUATOR_MSG_BUFFER_NAME, ACTUATOR_MSG_BUFFER_MUTEX_NAME, false );
+    if( dyn_amsgbuffer.open( ) != BUFFER_ERROR_NONE) {
         sprintf( strbuffer, "(dynamics.cpp) init(argc,argv) failed calling actuator_msg_buffer_c.open(...,false)\n" );
-        error_log.write( strbuffer );
+        dyn_error_log.write( strbuffer );
         // TODO : return error condition
     }
 
@@ -730,10 +730,15 @@ void init( int argc, char** argv ) {
 
 //-----------------------------------------------------------------------------
 
+void shutdown( void ) {
+    dyn_amsgbuffer.close( );
+}
+
+//-----------------------------------------------------------------------------
 
 // write the actuator state to the actuator buffer
 void write_state( void ) {
-    if( VERBOSE ) printf( "(dynamics::write_state)\n" );
+    //if( VERBOSE ) printf( "(dynamics::write_state)\n" );
 
     // get a reference to the actuator
     JointPtr pivot = pendulum->find_joint( "pivot" );
@@ -751,9 +756,9 @@ void write_state( void ) {
     pendulum->reset_accumulators();
     
     // Note: will block on acquiring mutex
-    if( amsgbuffer.write( msg ) != BUFFER_ERROR_NONE ) {
+    if( dyn_amsgbuffer.write( msg ) != BUFFER_ERROR_NONE ) {
         sprintf( strbuffer, "(dynamics.cpp) write_state() failed calling actuator_msg_buffer_c.write(msg)\n" );
-        error_log.write( strbuffer );
+        dyn_error_log.write( strbuffer );
         // TODO : return error condition
     }
 }
@@ -763,13 +768,13 @@ void write_state( void ) {
 void read_command( void ) {
     actuator_msg_c msg;
 
-    if( VERBOSE ) printf( "(dynamics::read_command)\n" );
+    //if( VERBOSE ) printf( "(dynamics::read_command)\n" );
 
     // get the command from the controller
     // Note: will block on acquiring mutex
-    if( amsgbuffer.read( msg ) != BUFFER_ERROR_NONE ) {
+    if( dyn_amsgbuffer.read( msg ) != BUFFER_ERROR_NONE ) {
         sprintf( strbuffer, "(dynamics.cpp) read_command() failed calling actuator_msg_buffer_c.read(msg)\n" );
-        error_log.write( strbuffer );
+        dyn_error_log.write( strbuffer );
         // TODO : return error condition
     }
 

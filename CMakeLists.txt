@@ -17,18 +17,21 @@ find_package( Moby REQUIRED )
 #message( ${MOBY_INCLUDE_DIR} )
 
 set( TAS_HEADERS
-    tas.h
-    cpu.h
-    actuator.h
-    dynamics_plugin.h
-    log.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/tas/tas.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/tas/error.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/tas/cpu.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/tas/time.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/tas/actuator.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/tas/dynamics_plugin.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/tas/log.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/tas/experiment.h
 )
 
 set( TAS_SOURCES )
 
 set( TAS_INCLUDE_DIRS
     ${MOBY_INCLUDE_DIR}
-    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 
 set( TAS_LIBRARIES
@@ -48,3 +51,8 @@ target_link_libraries( coordinator ${TAS_LIBRARIES} )
 
 add_library( dynamics "MODULE" ${CMAKE_CURRENT_SOURCE_DIR}/dynamics.cpp ${TAS_HEADERS} ${TAS_SOURCES} )
 target_link_libraries( dynamics ${TAS_LIBRARIES} )
+
+add_executable( interarrivalsignaltest ${CMAKE_CURRENT_SOURCE_DIR}/interarrivalsignaltest.cpp ${TAS_HEADERS} ${TAS_SOURCES} )
+target_link_libraries( interarrivalsignaltest ${TAS_LIBRARIES} )
+
+add_subdirectory( ode )

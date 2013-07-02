@@ -18,6 +18,7 @@ enum plugin_err_e {
 
 enum dynamics_function_e {
     DYNAMICS_FUNCTION_INIT,
+    DYNAMICS_FUNCTION_SHUTDOWN,
     DYNAMICS_FUNCTION_RUN,
     DYNAMICS_FUNCTION_READ,
     DYNAMICS_FUNCTION_WRITE
@@ -26,6 +27,9 @@ enum dynamics_function_e {
 
 // dynamics initialization function signature
 typedef void ( *init_f )( int argv, char** argc );
+
+// dynamics initialization function signature
+typedef void ( *shutdown_f )( void );
 
 // dynamics run function signature
 typedef void ( *run_f )( const Real& dt );
@@ -51,6 +55,7 @@ public:
     virtual ~dynamics_plugin_c( void ) { }
 
     init_f          init;
+    shutdown_f      shutdown;
     run_f           run;
     write_state_f   write_state;
     read_command_f  read_command;
@@ -98,30 +103,38 @@ public:
             return PLUGIN_ERROR_LINK;
         }
 
-        // locate the run function
-        run = (run_f) dlsym(HANDLE, "run");
+        shutdown = (shutdown_f) dlsym(HANDLE, "shutdown");
         const char* dlsym_error2 = dlerror( );
         if ( dlsym_error2 ) {
-            std::cerr << " warning: cannot load symbol 'run' from " << filename << std::endl;
+            std::cerr << " warning: cannot load symbol 'init' from " << filename << std::endl;
             std::cerr << "        error follows: " << std::endl << dlsym_error2 << std::endl;
+            return PLUGIN_ERROR_LINK;
+        }
+
+        // locate the run function
+        run = (run_f) dlsym(HANDLE, "run");
+        const char* dlsym_error3 = dlerror( );
+        if ( dlsym_error3 ) {
+            std::cerr << " warning: cannot load symbol 'run' from " << filename << std::endl;
+            std::cerr << "        error follows: " << std::endl << dlsym_error3 << std::endl;
             return PLUGIN_ERROR_LINK;
         }
 
         // locate the write state function
         write_state = (write_state_f) dlsym(HANDLE, "write_state");
-        const char* dlsym_error3 = dlerror( );
-        if ( dlsym_error3 ) {
+        const char* dlsym_error4 = dlerror( );
+        if ( dlsym_error4 ) {
             std::cerr << " warning: cannot load symbol 'write_state' from " << filename << std::endl;
-            std::cerr << "        error follows: " << std::endl << dlsym_error3 << std::endl;
+            std::cerr << "        error follows: " << std::endl << dlsym_error4 << std::endl;
             return PLUGIN_ERROR_LINK;
         }
 
         // locate the read_command function
         read_command = (read_command_f) dlsym(HANDLE, "read_command");
-        const char* dlsym_error4 = dlerror( );
-        if ( dlsym_error4 ) {
+        const char* dlsym_error5 = dlerror( );
+        if ( dlsym_error5 ) {
             std::cerr << " warning: cannot load symbol 'read_command' from " << filename << std::endl;
-            std::cerr << "        error follows: " << std::endl << dlsym_error4 << std::endl;
+            std::cerr << "        error follows: " << std::endl << dlsym_error5 << std::endl;
             return PLUGIN_ERROR_LINK;
         }
         return PLUGIN_ERROR_NONE;
@@ -140,8 +153,8 @@ private:
 
         HANDLE = dlopen( filename, RTLD_LAZY );
         if ( !HANDLE ) {
-            if( VERBOSE ) std::cerr << " failed to open plugin: " << filename << std::endl;
-            if( VERBOSE ) std::cerr << "  " << dlerror( ) << std::endl;
+            //if( VERBOSE ) std::cerr << " failed to open plugin: " << filename << std::endl;
+            //if( VERBOSE ) std::cerr << "  " << dlerror( ) << std::endl;
             return PLUGIN_ERROR_OPEN;
         }
         return PLUGIN_ERROR_NONE;
@@ -156,6 +169,9 @@ private:
         if( function == DYNAMICS_FUNCTION_INIT ) {
             fname = "init";
             init = (init_f) dlsym( HANDLE, fname.c_str( ) );
+        } else if( function == DYNAMICS_FUNCTION_SHUTDOWN ) {
+            fname = "shutdown";
+            shutdown = (shutdown_f) dlsym( HANDLE, fname.c_str( ) );
         } else if( function == DYNAMICS_FUNCTION_RUN ) {
             fname = "run";
             run = (run_f) dlsym( HANDLE, fname.c_str( ) );
@@ -171,7 +187,7 @@ private:
 
         const char* dlsym_error = dlerror( );
         if ( dlsym_error ) {
-            if( VERBOSE ) std::cerr << " cannot load symbol '" << fname << std::endl;
+            //if( VERBOSE ) std::cerr << " cannot load symbol '" << fname << std::endl;
             std::cerr << "        error follows: " << std::endl << dlsym_error << std::endl;
             return PLUGIN_ERROR_LINK;
         }
