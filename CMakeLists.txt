@@ -21,6 +21,7 @@ set( TAS_HEADERS
     ${CMAKE_CURRENT_SOURCE_DIR}/include/tas/error.h
     ${CMAKE_CURRENT_SOURCE_DIR}/include/tas/cpu.h
     ${CMAKE_CURRENT_SOURCE_DIR}/include/tas/time.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/tas/schedule.h
     ${CMAKE_CURRENT_SOURCE_DIR}/include/tas/actuator.h
     ${CMAKE_CURRENT_SOURCE_DIR}/include/tas/dynamics_plugin.h
     ${CMAKE_CURRENT_SOURCE_DIR}/include/tas/log.h
@@ -52,7 +53,7 @@ target_link_libraries( coordinator ${TAS_LIBRARIES} )
 add_library( dynamics "MODULE" ${CMAKE_CURRENT_SOURCE_DIR}/dynamics.cpp ${TAS_HEADERS} ${TAS_SOURCES} )
 target_link_libraries( dynamics ${TAS_LIBRARIES} )
 
-add_executable( interarrivalsignaltest ${CMAKE_CURRENT_SOURCE_DIR}/interarrivalsignaltest.cpp ${TAS_HEADERS} ${TAS_SOURCES} )
-target_link_libraries( interarrivalsignaltest ${TAS_LIBRARIES} )
+#add_executable( interarrivalsignaltest ${CMAKE_CURRENT_SOURCE_DIR}/interarrivalsignaltest.cpp ${TAS_HEADERS} ${TAS_SOURCES} )
+#target_link_libraries( interarrivalsignaltest ${TAS_LIBRARIES} )
 
 add_subdirectory( ode )

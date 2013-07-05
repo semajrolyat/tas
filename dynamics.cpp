@@ -789,8 +789,8 @@ void read_command( void ) {
 
 //-----------------------------------------------------------------------------
 
-// Run the dynamics forward
-void run( const Real &dt ) {
+// Step the dynamics forward
+void step( const Real &dt ) {
 
 #ifdef USE_OSG
     if( ONSCREEN_RENDER ) {

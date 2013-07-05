@@ -32,7 +32,7 @@ typedef void ( *init_f )( int argv, char** argc );
 typedef void ( *shutdown_f )( void );
 
 // dynamics run function signature
-typedef void ( *run_f )( const Real& dt );
+typedef void ( *step_f )( const Real& dt );
 
 // dynamics write state function signature
 typedef void ( *write_state_f )( void );
@@ -56,7 +56,7 @@ public:
 
     init_f          init;
     shutdown_f      shutdown;
-    run_f           run;
+    step_f          step;
     write_state_f   write_state;
     read_command_f  read_command;
 
@@ -112,10 +112,10 @@ public:
         }
 
         // locate the run function
-        run = (run_f) dlsym(HANDLE, "run");
+        step = (step_f) dlsym(HANDLE, "step");
         const char* dlsym_error3 = dlerror( );
         if ( dlsym_error3 ) {
-            std::cerr << " warning: cannot load symbol 'run' from " << filename << std::endl;
+            std::cerr << " warning: cannot load symbol 'step' from " << filename << std::endl;
             std::cerr << "        error follows: " << std::endl << dlsym_error3 << std::endl;
             return PLUGIN_ERROR_LINK;
         }
@@ -161,7 +161,7 @@ private:
     }
 
     //---------------------------------------------------------------------------
-
+/*
     plugin_err_e link( dynamics_function_e function ) {
         if( !HANDLE ) return PLUGIN_ERROR_OPEN;
 
@@ -173,8 +173,8 @@ private:
             fname = "shutdown";
             shutdown = (shutdown_f) dlsym( HANDLE, fname.c_str( ) );
         } else if( function == DYNAMICS_FUNCTION_RUN ) {
-            fname = "run";
-            run = (run_f) dlsym( HANDLE, fname.c_str( ) );
+            fname = "step";
+            step = (step_f) dlsym( HANDLE, fname.c_str( ) );
         } else if( function == DYNAMICS_FUNCTION_WRITE ) {
             fname = "write_state";
             write_state = (write_state_f) dlsym( HANDLE, fname.c_str( ) );
@@ -193,7 +193,7 @@ private:
         }
         return PLUGIN_ERROR_NONE;
     }
-
+*/
     //---------------------------------------------------------------------------
 
 };

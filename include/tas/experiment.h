@@ -17,7 +17,8 @@
 // CONTROLLER
 //-----------------------------------------------------------------------------
 
-#define CONTROLLER_HZ                  1000
+//#define CONTROLLER_HZ                  1000
+#define CONTROLLER_HZ                  100
 #define CONTROLLER_PROGRAM      "controller"
 
 //-----------------------------------------------------------------------------

@@ -38,6 +38,17 @@ double cycles_to_seconds( const unsigned long long& cycles, const unsigned long 
 
 //-----------------------------------------------------------------------------
 
+unsigned long long cycles_to_ns( const unsigned long long& cycles, const unsigned long long& cpu_hz ) {
+
+    // Warning: FP loss of precision
+    double ns_per_cycle = (double) NSECS_PER_SEC / (double) cpu_hz;
+    unsigned long long ns = (unsigned long long)((double)cycles * ns_per_cycle);
+    //printf( "- %f, %lld\n", ns_per_cycle, ns );
+    return ns;
+}
+
+//-----------------------------------------------------------------------------
+
 // inline assembly for rdtsc timer
 #define rdtscll(val) __asm__ __volatile__("rdtsc" : "=A" (val))
 
