@@ -21,33 +21,62 @@ typedef double Real;
 //-----------------------------------------------------------------------------
 
 /// Conversion function from a timeval to a floating point representing seconds
-Real timeval_to_real( const struct timeval& tv ) {
+inline Real timeval_to_real( const struct timeval& tv ) {
     return (Real) tv.tv_sec + (Real) tv.tv_usec / (Real) USECS_PER_SEC;
 }
 
 //-----------------------------------------------------------------------------
-Real timespec_to_real( const struct timespec& ts ) {
+inline Real timespec_to_real( const struct timespec& ts ) {
     return (Real) ts.tv_sec + (Real) ts.tv_nsec / (Real) NSECS_PER_SEC;
 }
 
 //-----------------------------------------------------------------------------
 
-double cycles_to_seconds( const unsigned long long& cycles, const unsigned long long& cpu_hz ) {
+inline double cycles_to_seconds( const unsigned long long& cycles, const unsigned long long& cpu_hz ) {
     return (double)cycles / (double)cpu_hz;
 }
 
 //-----------------------------------------------------------------------------
 
-unsigned long long cycles_to_ns( const unsigned long long& cycles, const unsigned long long& cpu_hz ) {
-
-    // Warning: FP loss of precision
-    double ns_per_cycle = (double) NSECS_PER_SEC / (double) cpu_hz;
-    unsigned long long ns = (unsigned long long)((double)cycles * ns_per_cycle);
-    //printf( "- %f, %lld\n", ns_per_cycle, ns );
-    return ns;
+inline unsigned long long seconds_to_cycles( const double& seconds, const unsigned long long& cpu_hz ) {
+    return (unsigned long long)(seconds * (double)cpu_hz);
 }
 
 //-----------------------------------------------------------------------------
+
+inline unsigned long long nanoseconds_to_cycles( const long& ns, const unsigned long long& cpu_hz ) {
+    return ((unsigned long long)ns * (unsigned long long)cpu_hz)/(unsigned long long)NSECS_PER_SEC;
+}
+
+//-----------------------------------------------------------------------------
+
+inline unsigned long long cycles_to_nanoseconds( const unsigned long long& cycles, const unsigned long long& cpu_hz ) {
+    return (cycles * (unsigned long long) NSECS_PER_SEC) / cpu_hz;
+}
+
+//-----------------------------------------------------------------------------
+
+struct timespec subtract_ts( const struct timespec& ts1, const struct timespec& ts2 ) {
+    struct timespec result;
+
+    if( ts1.tv_sec < ts2.tv_sec || ( ts1.tv_sec == ts2.tv_sec && ts1.tv_nsec <= ts2.tv_nsec) ) {
+        result.tv_sec = 0 ;
+        result.tv_nsec = 0 ;
+    } else if( ts1.tv_sec == ts2.tv_sec ) {
+        // ts1.tv_sec == ts2.tv_sec && ts1.tv_nsec > ts2.tv_nsec
+        result.tv_sec = 0;
+        result.tv_nsec = ts1.tv_nsec - ts2.tv_nsec;
+    } else if( ts1.tv_nsec >= ts2.tv_nsec ) {
+        // ts1.tv_sec > ts2.tv_sec && ts1.tv_nsec >= ts2.tv_nsec
+        result.tv_sec = ts1.tv_sec - ts2.tv_sec;
+        result.tv_nsec = ts1.tv_nsec - ts2.tv_nsec;
+    } else {
+        // ts1.tv_sec > ts2.tv_sec && ts1.tv_nsec < ts2.tv_nsec
+        result.tv_sec = ts1.tv_sec - ts2.tv_sec - 1;
+        result.tv_nsec = ts1.tv_nsec + NSECS_PER_SEC - ts2.tv_nsec;
+    }
+    return result;
+}
 
 // inline assembly for rdtsc timer
 #define rdtscll(val) __asm__ __volatile__("rdtsc" : "=A" (val))
@@ -67,7 +96,7 @@ struct timestamp_t {
 // arbitrary size : buffer > 100s * 1000Hz
 //#define TIMESTAMP_BUFFER_SIZE 1000000
 
-#define TIMESTAMP_BUFFER_SIZE 100000
+#define TIMESTAMP_BUFFER_SIZE 500000
 
 class timestamp_buffer_c {
 private:

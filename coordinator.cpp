@@ -441,7 +441,7 @@ timer_err_e arm_timer( const unsigned long long& ts_req, unsigned long long& ts_
     rdtscll( ts_now );
 
     unsigned long long dts = ts_now - ts_req;
-    unsigned long long dns = cycles_to_ns( dts, cpu_speed_hz );
+    unsigned long long dns = cycles_to_nanoseconds( dts, cpu_speed_hz );
     its.it_interval.tv_sec = 0;
     its.it_interval.tv_nsec = 0;
     its.it_value.tv_sec = 0;
@@ -914,8 +914,11 @@ int main( int argc, char* argv[] ) {
 
     unsigned long long ts_timer_armed, ts_timer_fired, dts_timer;
 
-    int max_fd = std::max( fd_timer_to_coordinator[0], fd_wakeup_to_coordinator[0] );
-    max_fd = std::max( max_fd, fd_controller_to_coordinator[0] );
+    //int max_fd = std::max( fd_timer_to_coordinator[0], fd_wakeup_to_coordinator[0] );
+    //max_fd = std::max( max_fd, fd_controller_to_coordinator[0] );
+
+    int max_fd = std::max( fd_timer_to_coordinator[0], fd_controller_to_coordinator[0] );
+    //max_fd = std::max( max_fd, fd_controller_to_coordinator[0] );
 
     controller_notification_c ctl_msg;
 
@@ -926,13 +929,20 @@ int main( int argc, char* argv[] ) {
 
     unsigned long long ts_pre_select, ts_post_select;
 
+    timespec tspec_nsleep, tspec_nsleep_rem;
+    tspec_nsleep.tv_sec = 0;
+    //tspec_nsleep.tv_nsec = 10000;
+    tspec_nsleep.tv_nsec = 5000;
+
+    bool nsleep_interrupted = false;
+
     while( 1 ) {
 
         fd_set fds_channels;
 
         FD_ZERO( &fds_channels );
         FD_SET( fd_timer_to_coordinator[0], &fds_channels );
-        FD_SET( fd_wakeup_to_coordinator[0], &fds_channels );
+        //FD_SET( fd_wakeup_to_coordinator[0], &fds_channels );
         FD_SET( fd_controller_to_coordinator[0], &fds_channels );
 
         rdtscll( ts_pre_select );
@@ -952,6 +962,13 @@ int main( int argc, char* argv[] ) {
                     error_log.write( error_string_bad_read( err_msg, errno ) );
                     // TODO : determine if there is a need to recover
                 }
+
+                ///*
+                if( nsleep_interrupted ) {
+                    //printf( "tspec_nsleep_rem: %ld\n", tspec_nsleep_rem.tv_nsec );
+                    nsleep_interrupted = false;
+                }
+                //*/
 
                 dts_timer = ts_timer_fired - ts_timer_armed;
 
@@ -977,6 +994,7 @@ int main( int argc, char* argv[] ) {
                 if( ctl_msg.type == CONTROLLER_NOTIFICATION_ACTUATOR_EVENT ) {
                     service_controller_actuator_msg( );
                 } else if( ctl_msg.type == CONTROLLER_NOTIFICATION_SNOOZE ) {
+                    // controller is preempted so it cannot run
 
                     // set a timer, suspend the controller until the timer fires
                     suspend_controller( );
@@ -1001,6 +1019,12 @@ int main( int argc, char* argv[] ) {
                     // TODO : determine if there is a need to recover
                 }
             }
+        }
+
+        if( nanosleep( &tspec_nsleep, &tspec_nsleep_rem ) == -1 ) {
+            if( errno == EINTR )
+                // nanosleep was interrupted by a signal handler
+                nsleep_interrupted = true;
         }
     }
 

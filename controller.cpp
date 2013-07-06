@@ -342,11 +342,12 @@ int main( int argc, char* argv[] ) {
     // lock into memory to prevent pagefaults
     mlockall( MCL_CURRENT );
 
+    // get the current timestamp
+    rdtscll( ts );
+
     // start the main process loop
     while( 1 ) {
 
-        // get the current timestamp
-        rdtscll( ts );
         notification.ts = ts;
 
         // send a snooze notification
