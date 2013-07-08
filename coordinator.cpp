@@ -20,7 +20,6 @@ using boost::dynamic_pointer_cast;
 //-----------------------------------------------------------------------------
 
 timestamp_buffer_c timestamp_timer_buffer;
-timestamp_buffer_c timestamp_select_buffer;
 
 //-----------------------------------------------------------------------------
 
@@ -44,6 +43,8 @@ bool controller_is_blocked;
 bool controller_is_suspended;
 
 bool controller_fully_initialized = false;
+
+unsigned long long CONTROLLER_PERIOD_NSEC;
 
 //-----------------------------------------------------------------------------
 // CPU
@@ -446,11 +447,13 @@ timer_err_e arm_timer( const unsigned long long& ts_req, unsigned long long& ts_
     its.it_interval.tv_nsec = 0;
     its.it_value.tv_sec = 0;
     //its.it_value.tv_nsec = NSECS_PER_SEC / CONTROLLER_HZ;
-    its.it_value.tv_nsec = (long)(NSECS_PER_SEC / CONTROLLER_HZ) - (long)dns;
+    its.it_value.tv_nsec = (unsigned long long)(CONTROLLER_PERIOD_NSEC - dns);
 
     //if( timer_settime( rttimer_id, TIMER_ABSTIME, &its, NULL ) == -1 )
-    if( timer_settime( rttimer_id, 0, &its, NULL ) == -1 )
+    if( timer_settime( rttimer_id, 0, &its, NULL ) == -1 ) {
+	printf( "dts: %lld, dns: %lld, nsec: %d\n", dts, dns, its.it_value.tv_nsec );
         return TIMER_ERROR_SETTIME;
+    }
 
     //printf( "%lld, %lld\n", dts, dns );
 
@@ -704,6 +707,7 @@ void init( int argc, char* argv[] ) {
         error_log.close( );
         exit( 1 );
     }
+    CONTROLLER_PERIOD_NSEC = (unsigned long long)NSECS_PER_SEC / (unsigned long long)CONTROLLER_HZ;
 
     //++++++++++++++++++++++++++++++++++++++++++++++++
     // intialize all other monitor facilities
@@ -759,13 +763,6 @@ void init( int argc, char* argv[] ) {
         error_log.close( );
         exit( 1 );
     }
-
-    /*
-    timestamp_select_buffer = timestamp_buffer_c( cpu_speed_hz, "timestamps_select.dat" );
-    if( timestamp_select_buffer.open( ) != ERROR_NONE ) {
-
-    }
-    */
 }
 
 //-----------------------------------------------------------------------------
@@ -789,7 +786,6 @@ void shutdown( void ) {
     close_pipes( );
 
     timestamp_timer_buffer.close();
-    timestamp_select_buffer.close();
 
     // Note: can get a double free exception if the log is closed in this process
     // before it is closed in the controller
@@ -807,81 +803,50 @@ Real dt;
 
 //-----------------------------------------------------------------------------
 
-void service_controller_actuator_msg( void ) {
+error_e service_controller_actuator_msg( void ) {
     actuator_msg_c msg;
     char buf = 0;
 
     if( amsgbuffer.read( msg ) != BUFFER_ERROR_NONE ) {
         sprintf( errstr, "(coordinator.cpp) main() failed calling actuator_msg_buffer_c.read(msg)\n" );
         error_log.write( errstr );
+        return ERROR_FAILED;
     }
 
     switch( msg.header.type ) {
     case ACTUATOR_MSG_COMMAND:
-
         dynamics_get_command( );
-
         break;
     case ACTUATOR_MSG_REQUEST:
-
         // Note: the controller is blocking now on read from fd_coordinator_to_controller[0]
 
         if( !controller_fully_initialized ) {
-            // indicates that the controller is fully initialized and timing can begin
-            // and that this is querying for initial state
+            // this is a query for initial state
             controller_fully_initialized = true;
-
-            dynamics_state_requested( );
-
-            if( amsgbuffer.read( msg ) != BUFFER_ERROR_NONE)  {
-                sprintf( errstr, "(coordinator.cpp) main() failed calling actuator_msg_buffer_c.read(msg) while servicing initial ACTUATOR_MSG_REQUEST\n" );
-                error_log.write( errstr );
-            }
-
-            if( write( fd_coordinator_to_controller[1], &buf, 1 ) == -1 ) {
-                std::string err_msg = "(coordinator.cpp) main() failed making system call write(...) on fd_coordinator_to_controller[1]";
-                error_log.write( error_string_bad_write( err_msg, errno ) );
-                // TODO : determine if there is a need to recover
-            }
         } else {
+            // otherwise progressive state
 
-            // right now this time is based on the frequency and cycle of the controller
+            // Note: right now this time is based on the frequency and cycle of the controller
             current_t = msg.state.time;
-
             dt = current_t - previous_t;
+            previous_t = current_t;
 
             step_dynamics( dt );
+        }
 
-            dynamics_state_requested( );
+        dynamics_state_requested( );
 
-            if( amsgbuffer.read( msg ) != BUFFER_ERROR_NONE)  {
-                sprintf( errstr, "(coordinator.cpp) main() failed calling actuator_msg_buffer_c.read(msg) while servicing ACTUATOR_MSG_REQUEST\n" );
-                error_log.write( errstr );
-            }
+        if( amsgbuffer.read( msg ) != BUFFER_ERROR_NONE)  {
+            sprintf( errstr, "(coordinator.cpp) main() failed calling actuator_msg_buffer_c.read(msg) while servicing ACTUATOR_MSG_REQUEST\n" );
+            error_log.write( errstr );
+            return ERROR_FAILED;
+        }
 
-            //write( fd_coordinator_to_controller[1], &buf, 1 );
-            if( write( fd_coordinator_to_controller[1], &buf, 1 ) == -1 ) {
-                std::string err_msg = "(coordinator.cpp) main() failed making system call write(...) on fd_coordinator_to_controller[1]";
-                error_log.write( error_string_bad_write( err_msg, errno ) );
-                // TODO : determine if there is a need to recover
-            }
-
-            previous_t = current_t;
-            // ]
-
-            // ++++++++++++++++
-
-            // if dynamics ahead of controller ?? [
-            // use the current state?
-
-            // ]
-
-            // ++++++++++++++++
-
-            // if dynamics in step with controller ?? [
-            // use the current state?
-
-            // ]
+        if( write( fd_coordinator_to_controller[1], &buf, 1 ) == -1 ) {
+            std::string err_msg = "(coordinator.cpp) main() failed making system call write(...) on fd_coordinator_to_controller[1]";
+            error_log.write( error_string_bad_write( err_msg, errno ) );
+            // TODO : determine if there is a need to recover
+            return ERROR_FAILED;
         }
         break;
     case ACTUATOR_MSG_NO_COMMAND:
@@ -889,6 +854,7 @@ void service_controller_actuator_msg( void ) {
     case ACTUATOR_MSG_UNDEFINED:
         break;
     }
+    return ERROR_NONE;
 }
 
 
@@ -905,74 +871,42 @@ int main( int argc, char* argv[] ) {
         exit( 1 );
     }
 
-    init( argc, argv );
-
     char input_buffer;
-
     unsigned int timer_events = 0;
-    unsigned int select_events = 0;
-
-    unsigned long long ts_timer_armed, ts_timer_fired, dts_timer;
-
-    //int max_fd = std::max( fd_timer_to_coordinator[0], fd_wakeup_to_coordinator[0] );
-    //max_fd = std::max( max_fd, fd_controller_to_coordinator[0] );
-
-    int max_fd = std::max( fd_timer_to_coordinator[0], fd_controller_to_coordinator[0] );
-    //max_fd = std::max( max_fd, fd_controller_to_coordinator[0] );
+    unsigned long long ts_timer_armed, ts_timer_fired;
 
     controller_notification_c ctl_msg;
+    fd_set fds_channels;
+    int max_fd;
+
+    init( argc, argv );
+
+    max_fd = std::max( fd_timer_to_coordinator[0], fd_controller_to_coordinator[0] );
+    //max_fd = std::max( max_fd, fd_controller_to_coordinator[0] );
 
     // lock into memory to prevent pagefaults
     mlockall( MCL_CURRENT );
 
     printf( "starting main loop\n" );
 
-    unsigned long long ts_pre_select, ts_post_select;
-
-    timespec tspec_nsleep, tspec_nsleep_rem;
-    tspec_nsleep.tv_sec = 0;
-    //tspec_nsleep.tv_nsec = 10000;
-    tspec_nsleep.tv_nsec = 5000;
-
-    bool nsleep_interrupted = false;
-
     while( 1 ) {
-
-        fd_set fds_channels;
 
         FD_ZERO( &fds_channels );
         FD_SET( fd_timer_to_coordinator[0], &fds_channels );
         //FD_SET( fd_wakeup_to_coordinator[0], &fds_channels );
         FD_SET( fd_controller_to_coordinator[0], &fds_channels );
 
-        rdtscll( ts_pre_select );
-        int result = select( max_fd + 1, &fds_channels, NULL, NULL, NULL );
-        rdtscll( ts_post_select );
-        /*
-        if( ++select_events <= 1000 )
-            timestamp_select_buffer.write( ts_post_select - ts_pre_select );
-        */
-
-        if( result ) {
+        if( select( max_fd + 1, &fds_channels, NULL, NULL, NULL ) ) {
             if( FD_ISSET( fd_timer_to_coordinator[0], &fds_channels ) ) {
-
                 // timer event
+
                 if( read( fd_timer_to_coordinator[0], &ts_timer_fired, sizeof(unsigned long long) ) == -1 ) {
                     std::string err_msg = "(coordinator.cpp) main() failed making system call read(...) on fd_timer_to_coordinator[0]";
                     error_log.write( error_string_bad_read( err_msg, errno ) );
                     // TODO : determine if there is a need to recover
                 }
 
-                ///*
-                if( nsleep_interrupted ) {
-                    //printf( "tspec_nsleep_rem: %ld\n", tspec_nsleep_rem.tv_nsec );
-                    nsleep_interrupted = false;
-                }
-                //*/
-
-                dts_timer = ts_timer_fired - ts_timer_armed;
-
-                timestamp_timer_buffer.write( dts_timer );
+                timestamp_timer_buffer.write( ts_timer_fired - ts_timer_armed );
 
                 if( ++timer_events == SIM_DURATION_CYCLES ) break;
 
@@ -980,8 +914,8 @@ int main( int argc, char* argv[] ) {
                 resume_controller( );
 
             } else if( FD_ISSET( fd_controller_to_coordinator[0], &fds_channels ) ) {
-
                 // controller notification event
+
                 if( read( fd_controller_to_coordinator[0], &ctl_msg, sizeof( controller_notification_c ) ) == -1 ) {
                     std::string err_msg = "(coordinator.cpp) main() failed making system call read(...) on fd_controller_to_coordinator[0]";
                     error_log.write( error_string_bad_read( err_msg, errno ) );
@@ -992,7 +926,11 @@ int main( int argc, char* argv[] ) {
                 // if it's an actuator message then service it
                 // else if it's a schedule request then schedule the controller timer
                 if( ctl_msg.type == CONTROLLER_NOTIFICATION_ACTUATOR_EVENT ) {
-                    service_controller_actuator_msg( );
+                    if( service_controller_actuator_msg( ) != ERROR_NONE) {
+                        sprintf( errstr, "(coordinator.cpp) main() failed calling service_controller_actuator_msg()\n" );
+                        error_log.write( errstr );
+                        break; //?
+                    }
                 } else if( ctl_msg.type == CONTROLLER_NOTIFICATION_SNOOZE ) {
                     // controller is preempted so it cannot run
 
@@ -1002,16 +940,14 @@ int main( int argc, char* argv[] ) {
                     if( arm_timer( ctl_msg.ts, ts_timer_armed ) != TIMER_ERROR_NONE ) {
                         sprintf( errstr, "(coordinator.cpp) main() failed calling arm_timer()\n" );
                         error_log.write( errstr );
-                        return ERROR_FAILED;
+                        break; //?
                     }
+
+                    // possible to nanosleep here to optimize for a single controller; HOWEVER, is would interfere
+                    // for multicontroller designs so the implementation of nanosleep is discouraged
                 }
-
             } else if( FD_ISSET( fd_wakeup_to_coordinator[0], &fds_channels ) ) {
-
                 // wakeup event
-
-                // Q: What if the controller is suspended?
-                // Note: Wakeup doesn't appear to happen because suspension is in main thread and resumption occurs before main thread is blocked
 
                 if( read( fd_wakeup_to_coordinator[0], &input_buffer, 1 ) == -1 ) {
                     std::string err_msg = "(coordinator.cpp) main() failed making system call read(...) on fd_wakeup_to_coordinator[0]";
@@ -1019,12 +955,6 @@ int main( int argc, char* argv[] ) {
                     // TODO : determine if there is a need to recover
                 }
             }
-        }
-
-        if( nanosleep( &tspec_nsleep, &tspec_nsleep_rem ) == -1 ) {
-            if( errno == EINTR )
-                // nanosleep was interrupted by a signal handler
-                nsleep_interrupted = true;
         }
     }
 

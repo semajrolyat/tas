@@ -100,7 +100,9 @@ struct timestamp_t {
 
 class timestamp_buffer_c {
 private:
-    timestamp_t buffer[TIMESTAMP_BUFFER_SIZE];
+    //timestamp_t buffer[TIMESTAMP_BUFFER_SIZE];
+    unsigned long long buffer[TIMESTAMP_BUFFER_SIZE];
+
     unsigned int cursor;
     unsigned long long cpu_hz;
     std::string filename;
@@ -146,8 +148,10 @@ public:
 
         for( unsigned int i = 0; i < cursor; i++ ) {
 
-            buffer[i].seconds = cycles_to_seconds( buffer[i].cycles, cpu_hz );
-            sprintf( strbuffer, "%lld\t%10.9f\n", buffer[i].cycles, buffer[i].seconds );
+	    double seconds = cycles_to_seconds( buffer[i], cpu_hz );
+            sprintf( strbuffer, "%lld\t%10.9f\n", buffer[i], seconds );
+            //buffer[i].seconds = cycles_to_seconds( buffer[i].cycles, cpu_hz );
+            //sprintf( strbuffer, "%lld\t%10.9f\n", buffer[i].cycles, buffer[i].seconds );
             log.write( strbuffer );
         }
 
@@ -181,7 +185,8 @@ public:
     error_t write( const unsigned long long& cycles ) {
         assert( cursor < TIMESTAMP_BUFFER_SIZE - 1 );
 
-        buffer[cursor].cycles = cycles;
+        buffer[cursor] = cycles;
+        //buffer[cursor].cycles = cycles;
         cursor++;
 
         return ERROR_NONE;

@@ -57,3 +57,5 @@ target_link_libraries( dynamics ${TAS_LIBRARIES} )
 #target_link_libraries( interarrivalsignaltest ${TAS_LIBRARIES} )
 
 add_subdirectory( ode )
+
+add_subdirectory( gazebo )

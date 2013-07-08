@@ -5,8 +5,8 @@
 // SIMULATION
 //-----------------------------------------------------------------------------
 
-#define SIM_DURATION_CYCLES 1000
-//#define SIM_DURATION_CYCLES 100000
+//#define SIM_DURATION_CYCLES 1000
+#define SIM_DURATION_CYCLES 100000
 
 //-----------------------------------------------------------------------------
 // PROCESSOR
@@ -18,8 +18,8 @@
 // CONTROLLER
 //-----------------------------------------------------------------------------
 
-#define CONTROLLER_HZ                  1000
-//#define CONTROLLER_HZ                  100
+//#define CONTROLLER_HZ                  1000
+#define CONTROLLER_HZ                  100
 #define CONTROLLER_PROGRAM      "controller"
 
 //-----------------------------------------------------------------------------
