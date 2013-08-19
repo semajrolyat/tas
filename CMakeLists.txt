@@ -26,6 +26,8 @@ set( TAS_HEADERS
     ${CMAKE_CURRENT_SOURCE_DIR}/include/tas/dynamics_plugin.h
     ${CMAKE_CURRENT_SOURCE_DIR}/include/tas/log.h
     ${CMAKE_CURRENT_SOURCE_DIR}/include/tas/experiment.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/tas/thread.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/tas/ipc.h
 )
 
 set( TAS_SOURCES )
@@ -52,6 +54,10 @@ target_link_libraries( coordinator ${TAS_LIBRARIES} )
 
 add_library( dynamics "MODULE" ${CMAKE_CURRENT_SOURCE_DIR}/dynamics.cpp ${TAS_HEADERS} ${TAS_SOURCES} )
 target_link_libraries( dynamics ${TAS_LIBRARIES} )
+
+add_executable( planner ${CMAKE_CURRENT_SOURCE_DIR}/planner.cpp ${TAS_HEADERS} ${TAS_SOURCES} )
+target_link_libraries( planner ${TAS_LIBRARIES} )
+
 
 #add_executable( interarrivalsignaltest ${CMAKE_CURRENT_SOURCE_DIR}/interarrivalsignaltest.cpp ${TAS_HEADERS} ${TAS_SOURCES} )
 #target_link_libraries( interarrivalsignaltest ${TAS_LIBRARIES} )

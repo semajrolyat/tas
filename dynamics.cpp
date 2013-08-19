@@ -36,6 +36,7 @@ Moby plugin
 #include <tas/tas.h>
 #include <tas/actuator.h>
 #include <tas/log.h>
+#include <tas/ipc.h>
 
 //-----------------------------------------------------------------------------
 

@@ -13,6 +13,8 @@ coordinator.cpp
 #include <tas/log.h>
 #include <tas/experiment.h>
 
+#include <tas/thread.h>
+#include <tas/ipc.h>
 //-----------------------------------------------------------------------------
 
 using boost::dynamic_pointer_cast;
@@ -23,28 +25,20 @@ timestamp_buffer_c timestamp_timer_buffer;
 
 //-----------------------------------------------------------------------------
 
-// timer variables
-sigset_t rttimer_mask;
-
-// The signal action to reference controller's process signal handler
-struct sigaction rttimer_sigaction;
-timer_t rttimer_id;
-
-//-----------------------------------------------------------------------------
-
 // Coordinator process information
 static pid_t coordinator_pid;
 static int coordinator_priority;
 
-// Controller process information
-static int controller_pid;
+//-----------------------------------------------------------------------------
 
-bool controller_is_blocked;
-bool controller_is_suspended;
-
+timer_c controller_timer;
+thread_c controller_thread;
 bool controller_fully_initialized = false;
-
 unsigned long long CONTROLLER_PERIOD_NSEC;
+
+//-----------------------------------------------------------------------------
+
+thread_c wakeup_thread;
 
 //-----------------------------------------------------------------------------
 // CPU
@@ -54,8 +48,6 @@ unsigned long long CONTROLLER_PERIOD_NSEC;
 
 //-----------------------------------------------------------------------------
 
-//cpuinfo_c cpuinfo;
-//double cpu_speed_mhz;
 unsigned long long cpu_speed_hz;
 
 //-----------------------------------------------------------------------------
@@ -81,7 +73,7 @@ error_e open_error_log( void ) {
     // know exactly what fd the log file is using
     if( dup2( error_log.get_fd(), FD_ERROR_LOG ) == -1 ) {
         printf( "(coordinator.cpp) ERROR: open_error_log() failed calling dup2(error_log.get_fd(), FD_ERROR_LOG)\n" );
-	return ERROR_FAILED;
+        return ERROR_FAILED;
     }
 
     return ERROR_NONE;
@@ -193,78 +185,161 @@ error_e init_dynamics( const int& argc, char* argv[] ) {
 // INTERPROCESS COMMUNICATION (IPC)
 //-----------------------------------------------------------------------------
 
-int fd_timer_to_coordinator[2];		// channel from timer to coordinator. Timer event
-int fd_wakeup_to_coordinator[2];	// channel from wakeup to coordinator. Wakeup event
-int fd_coordinator_to_controller[2];	// channel from coordinator to controller. Notification
-int fd_controller_to_coordinator[2];	// channel from controller to coordinator. Notification
-
-//-----------------------------------------------------------------------------
-
 /// Initializes all interprocess communication channels.  This must be done
 /// before any controller processes are forked or threads are spawned so that they
 /// will inherit the file descriptors from the coordinator.
 error_e init_pipes( void ) {
     int flags;
+    int fd[2];
 
     // NOTE: a read channel needs to be blocking to force  block waiting for event
     // NOTE: a write channel should be non-blocking (won't ever fill up buffer anyway)
 
     // Open the timer to coordinator channel for timer events
-    if( pipe( fd_timer_to_coordinator ) != 0 ) {
-        sprintf( errstr, "(coordinator.cpp) init_pipes() failed calling pipe(fd_timer_to_coordinator)\n" );
+    if( pipe( fd ) != 0 ) {
+        sprintf( errstr, "(coordinator.cpp) init_pipes() failed calling pipe(FD_TIMER_TO_COORDINATOR)\n" );
         error_log.write( errstr );
         return ERROR_FAILED;
     }
-    flags = fcntl( fd_timer_to_coordinator[0], F_GETFL, 0 );
-    fcntl( fd_timer_to_coordinator[0], F_SETFL, flags );
-    flags = fcntl( fd_timer_to_coordinator[1], F_GETFL, 0 );
-    fcntl( fd_timer_to_coordinator[1], F_SETFL, flags | O_NONBLOCK );
+    flags = fcntl( fd[0], F_GETFL, 0 );
+    fcntl( fd[0], F_SETFL, flags );
+    flags = fcntl( fd[1], F_GETFL, 0 );
+    fcntl( fd[1], F_SETFL, flags | O_NONBLOCK );
+
+    if( dup2( fd[0], FD_TIMER_TO_COORDINATOR_READ_CHANNEL ) == -1 ) {
+        sprintf( errstr, "(coordinator.cpp) init_pipes() failed calling dup2(FD_TIMER_TO_COORDINATOR_READ_CHANNEL)\n" );
+        error_log.write( errstr );
+        close( fd[0] );
+        close( fd[1] );
+        return ERROR_FAILED;
+    }
+    if( dup2( fd[1], FD_TIMER_TO_COORDINATOR_WRITE_CHANNEL ) == -1 ) {
+        sprintf( errstr, "(coordinator.cpp) init_pipes() failed calling dup2(FD_TIMER_TO_COORDINATOR_WRITE_CHANNEL)\n" );
+        error_log.write( errstr );
+        close( FD_TIMER_TO_COORDINATOR_READ_CHANNEL );
+        close( fd[1] );
+        return ERROR_FAILED;
+    }
+
 
     // Open the wakeup to coordinator channel for wakeup (blocking) events
-    if( pipe( fd_wakeup_to_coordinator ) != 0 ) {
-        close( fd_timer_to_coordinator[0] );
-        close( fd_timer_to_coordinator[1] );
-        sprintf( errstr, "(coordinator.cpp) init_pipes() failed calling pipe(fd_wakeup_to_coordinator)\n" );
+    if( pipe( fd ) != 0 ) {
+        close( FD_TIMER_TO_COORDINATOR_READ_CHANNEL );
+        close( FD_TIMER_TO_COORDINATOR_WRITE_CHANNEL );
+        sprintf( errstr, "(coordinator.cpp) init_pipes() failed calling pipe(FD_WAKEUP_TO_COORDINATOR)\n" );
         error_log.write( errstr );
         return ERROR_FAILED;
     }
-    flags = fcntl( fd_wakeup_to_coordinator[0], F_GETFL, 0 );
-    fcntl( fd_wakeup_to_coordinator[0], F_SETFL, flags );
-    flags = fcntl( fd_wakeup_to_coordinator[1], F_GETFL, 0 );
-    //fcntl( fd_wakeup_to_coordinator[1], F_SETFL, flags | O_NONBLOCK );
-    fcntl( fd_wakeup_to_coordinator[1], F_SETFL, flags );
+    flags = fcntl( fd[0], F_GETFL, 0 );
+    fcntl( fd[0], F_SETFL, flags );
+    flags = fcntl( fd[1], F_GETFL, 0 );
+    //fcntl( fd[1], F_SETFL, flags | O_NONBLOCK );
+    fcntl( fd[1], F_SETFL, flags );
+
+    if( dup2( fd[0], FD_WAKEUP_TO_COORDINATOR_READ_CHANNEL ) == -1 ) {
+        sprintf( errstr, "(coordinator.cpp) init_pipes() failed calling dup2(FD_WAKEUP_TO_COORDINATOR_READ_CHANNEL)\n" );
+        error_log.write( errstr );
+        close( fd[0] );
+        close( fd[1] );
+        close( FD_TIMER_TO_COORDINATOR_READ_CHANNEL );
+        close( FD_TIMER_TO_COORDINATOR_WRITE_CHANNEL );
+        return ERROR_FAILED;
+    }
+
+    if( dup2( fd[1], FD_WAKEUP_TO_COORDINATOR_WRITE_CHANNEL ) == -1 ) {
+        sprintf( errstr, "(coordinator.cpp) init_pipes() failed calling dup2(FD_WAKEUP_TO_COORDINATOR_WRITE_CHANNEL)\n" );
+        error_log.write( errstr );
+        close( FD_WAKEUP_TO_COORDINATOR_READ_CHANNEL );
+        close( fd[1] );
+        close( FD_TIMER_TO_COORDINATOR_READ_CHANNEL );
+        close( FD_TIMER_TO_COORDINATOR_WRITE_CHANNEL );
+        return ERROR_FAILED;
+    }
 
     // Open the coordinator to controller channel for notifications
-    if( pipe( fd_coordinator_to_controller ) != 0 ) {
-        close( fd_timer_to_coordinator[0] );
-        close( fd_timer_to_coordinator[1] );
-        close( fd_wakeup_to_coordinator[0] );
-        close( fd_wakeup_to_coordinator[1] );
-        sprintf( errstr, "(coordinator.cpp) init_pipes() failed calling pipe(fd_coordinator_to_controller)\n" );
+    if( pipe( fd ) != 0 ) {
+        close( FD_TIMER_TO_COORDINATOR_READ_CHANNEL );
+        close( FD_TIMER_TO_COORDINATOR_WRITE_CHANNEL );
+        close( FD_WAKEUP_TO_COORDINATOR_READ_CHANNEL );
+        close( FD_WAKEUP_TO_COORDINATOR_WRITE_CHANNEL );
+        sprintf( errstr, "(coordinator.cpp) init_pipes() failed calling pipe(FD_COORDINATOR_TO_CONTROLLER)\n" );
         error_log.write( errstr );
         return ERROR_FAILED;
     }
-    flags = fcntl( fd_coordinator_to_controller[0], F_GETFL, 0 );
-    fcntl( fd_coordinator_to_controller[0], F_SETFL, flags );
-    flags = fcntl( fd_coordinator_to_controller[1], F_GETFL, 0 );
-    fcntl( fd_coordinator_to_controller[1], F_SETFL, flags | O_NONBLOCK );
+    flags = fcntl( fd[0], F_GETFL, 0 );
+    fcntl( fd[0], F_SETFL, flags );
+    flags = fcntl( fd[1], F_GETFL, 0 );
+    fcntl( fd[1], F_SETFL, flags | O_NONBLOCK );
+
+    if( dup2( fd[0], FD_COORDINATOR_TO_CONTROLLER_READ_CHANNEL ) == -1 ) {
+        sprintf( errstr, "(coordinator.cpp) init_pipes() failed calling dup2(FD_COORDINATOR_TO_CONTROLLER_READ_CHANNEL)\n" );
+        error_log.write( errstr );
+        close( fd[0] );
+        close( fd[1] );
+        close( FD_WAKEUP_TO_COORDINATOR_READ_CHANNEL );
+        close( FD_WAKEUP_TO_COORDINATOR_WRITE_CHANNEL );
+        close( FD_TIMER_TO_COORDINATOR_READ_CHANNEL );
+        close( FD_TIMER_TO_COORDINATOR_WRITE_CHANNEL );
+        return ERROR_FAILED;
+    }
+
+    if( dup2( fd[1], FD_COORDINATOR_TO_CONTROLLER_WRITE_CHANNEL ) == -1 ) {
+        sprintf( errstr, "(coordinator.cpp) init_pipes() failed calling dup2(FD_COORDINATOR_TO_CONTROLLER_WRITE_CHANNEL)\n" );
+        error_log.write( errstr );
+        close( FD_COORDINATOR_TO_CONTROLLER_READ_CHANNEL );
+        close( fd[1] );
+        close( FD_WAKEUP_TO_COORDINATOR_READ_CHANNEL );
+        close( FD_WAKEUP_TO_COORDINATOR_WRITE_CHANNEL );
+        close( FD_TIMER_TO_COORDINATOR_READ_CHANNEL );
+        close( FD_TIMER_TO_COORDINATOR_WRITE_CHANNEL );
+        return ERROR_FAILED;
+    }
+
 
     // Open the controller to coordinator channel for notifications
-    if( pipe( fd_controller_to_coordinator ) != 0 ) {
-        close( fd_timer_to_coordinator[0] );
-        close( fd_timer_to_coordinator[1] );
-        close( fd_wakeup_to_coordinator[0] );
-        close( fd_wakeup_to_coordinator[1] );
-        close( fd_coordinator_to_controller[0] );
-        close( fd_coordinator_to_controller[1] );
-        sprintf( errstr, "(coordinator.cpp) init_pipes() failed calling pipe(fd_controller_to_coordinator)\n" );
+    if( pipe( fd ) != 0 ) {
+        close( FD_TIMER_TO_COORDINATOR_READ_CHANNEL );
+        close( FD_TIMER_TO_COORDINATOR_WRITE_CHANNEL );
+        close( FD_WAKEUP_TO_COORDINATOR_READ_CHANNEL );
+        close( FD_WAKEUP_TO_COORDINATOR_WRITE_CHANNEL );
+        close( FD_COORDINATOR_TO_CONTROLLER_READ_CHANNEL );
+        close( FD_COORDINATOR_TO_CONTROLLER_WRITE_CHANNEL );
+        sprintf( errstr, "(coordinator.cpp) init_pipes() failed calling pipe(FD_CONTROLLER_TO_COORDINATOR)\n" );
         error_log.write( errstr );
         return ERROR_FAILED;
     }
-    flags = fcntl( fd_controller_to_coordinator[0], F_GETFL, 0 );
-    fcntl( fd_controller_to_coordinator[0], F_SETFL, flags );
-    flags = fcntl( fd_controller_to_coordinator[1], F_GETFL, 0 );
-    fcntl( fd_controller_to_coordinator[1], F_SETFL, flags | O_NONBLOCK );
+    flags = fcntl( fd[0], F_GETFL, 0 );
+    fcntl( fd[0], F_SETFL, flags );
+    flags = fcntl( fd[1], F_GETFL, 0 );
+    fcntl( fd[1], F_SETFL, flags | O_NONBLOCK );
+
+    if( dup2( fd[0], FD_CONTROLLER_TO_COORDINATOR_READ_CHANNEL ) == -1 ) {
+        sprintf( errstr, "(coordinator.cpp) init_pipes() failed calling dup2(FD_CONTROLLER_TO_COORDINATOR_READ_CHANNEL)\n" );
+        error_log.write( errstr );
+        close( fd[0] );
+        close( fd[1] );
+        close( FD_COORDINATOR_TO_CONTROLLER_READ_CHANNEL );
+        close( FD_COORDINATOR_TO_CONTROLLER_WRITE_CHANNEL );
+        close( FD_WAKEUP_TO_COORDINATOR_READ_CHANNEL );
+        close( FD_WAKEUP_TO_COORDINATOR_WRITE_CHANNEL );
+        close( FD_TIMER_TO_COORDINATOR_READ_CHANNEL );
+        close( FD_TIMER_TO_COORDINATOR_WRITE_CHANNEL );
+        return ERROR_FAILED;
+    }
+
+    if( dup2( fd[1], FD_CONTROLLER_TO_COORDINATOR_WRITE_CHANNEL ) == -1 ) {
+        sprintf( errstr, "(coordinator.cpp) init_pipes() failed calling dup2(FD_CONTROLLER_TO_COORDINATOR_WRITE_CHANNEL)\n" );
+        error_log.write( errstr );
+        close( FD_CONTROLLER_TO_COORDINATOR_READ_CHANNEL );
+        close( fd[1] );
+        close( FD_COORDINATOR_TO_CONTROLLER_READ_CHANNEL );
+        close( FD_COORDINATOR_TO_CONTROLLER_WRITE_CHANNEL );
+        close( FD_WAKEUP_TO_COORDINATOR_READ_CHANNEL );
+        close( FD_WAKEUP_TO_COORDINATOR_WRITE_CHANNEL );
+        close( FD_TIMER_TO_COORDINATOR_READ_CHANNEL );
+        close( FD_TIMER_TO_COORDINATOR_WRITE_CHANNEL );
+        return ERROR_FAILED;
+    }
 
     return ERROR_NONE;
 }
@@ -272,224 +347,34 @@ error_e init_pipes( void ) {
 //-----------------------------------------------------------------------------
 /// Clean up the pipes to prevent leakage
 void close_pipes( void ) {
-    close( fd_timer_to_coordinator[0] );
-    close( fd_timer_to_coordinator[1] );
-    close( fd_wakeup_to_coordinator[0] );
-    close( fd_wakeup_to_coordinator[1] );
-    close( fd_coordinator_to_controller[0] );
-    close( fd_coordinator_to_controller[1] );
-    close( fd_controller_to_coordinator[0] );
-    close( fd_controller_to_coordinator[1] );
+    close( FD_TIMER_TO_COORDINATOR_READ_CHANNEL );
+    close( FD_TIMER_TO_COORDINATOR_WRITE_CHANNEL );
+    close( FD_WAKEUP_TO_COORDINATOR_READ_CHANNEL );
+    close( FD_WAKEUP_TO_COORDINATOR_WRITE_CHANNEL );
+    close( FD_COORDINATOR_TO_CONTROLLER_READ_CHANNEL );
+    close( FD_COORDINATOR_TO_CONTROLLER_WRITE_CHANNEL );
+    close( FD_CONTROLLER_TO_COORDINATOR_READ_CHANNEL );
+    close( FD_CONTROLLER_TO_COORDINATOR_WRITE_CHANNEL );
 }
 
 //-----------------------------------------------------------------------------
-// PROCESS MANAGEMENT
-//-----------------------------------------------------------------------------
-
-
-/// Creates the controller process with a priority level one step below the coordinator.
-/// Note: an ERROR_NONE in the coordinator does not really guarantee that the controller
-/// started properly
-error_e fork_controller( void ) {
-
-    controller_pid = fork( );
-
-    // handle any fork error
-    if( controller_pid < 0 ) {
-        sprintf( errstr, "(coordinator.cpp) fork_controller() failed calling fork()\n" );
-        error_log.write( errstr );
-        return ERROR_FAILED;
-    }
-
-    // start of the contoller process
-    if( controller_pid == 0 ) {
-
-        controller_pid = getpid( );
-        int controller_priority;
-
-        set_cpu( controller_pid, DEFAULT_PROCESSOR );
-        set_realtime_schedule_rel( controller_pid, controller_priority, 1 );
-
-        if( set_cpu( controller_pid, DEFAULT_PROCESSOR ) != ERROR_NONE ) {
-            sprintf( errstr, "(coordinator.cpp) fork_controller() failed calling set_cpu(coordinator_pid,DEFAULT_PROCESSOR).\nExiting\n" );
-            error_log.write( errstr );
-            error_log.close( );
-            printf( "%s", errstr );
-            return ERROR_FAILED;
-        }
-
-        if( set_realtime_schedule_rel( controller_pid, controller_priority, 1 ) != ERROR_NONE ) {
-            sprintf( errstr, "(coordinator.cpp) fork_controller() failed calling set_realtime_schedule_rel(controller_pid,controller_priority,1).\nExiting\n" );
-            error_log.write( errstr );
-            error_log.close( );
-            printf( "%s", errstr );
-            return ERROR_FAILED;
-        }
-
-        printf( "controller process priority: %d\n", controller_priority );
-
-        //+++++++++++++++++++++++++++++++++
-        // set up explicit IPC interface
-        
-        // duplicate the default fd's into known fd's so that the controller explicitly knows
-        // what the channels are.
-        // Note: dup2 explicitly closes the channel you are duping into so there is no need
-        // for a seperate close call preceding the dup2 call unless some kernel programmer
-        // didn't meet the spec.
-        // TODO : error handling
-        dup2( fd_coordinator_to_controller[0], FD_COORDINATOR_TO_CONTROLLER_READ_CHANNEL );
-        dup2( fd_controller_to_coordinator[1], FD_CONTROLLER_TO_COORDINATOR_WRITE_CHANNEL );
-
-        // close the ends of the pipes that the controller is not allowed to use
-        close( fd_coordinator_to_controller[1] );   // close the write end for the controller
-        close( fd_controller_to_coordinator[0] );   // close the read end for the controller
-
-        // close the other pipes that the controller should have no knowledge of
-        close( fd_timer_to_coordinator[0] );
-        close( fd_timer_to_coordinator[1] );
-        close( fd_wakeup_to_coordinator[0] );
-        close( fd_wakeup_to_coordinator[1] );
-
-        // execute the controller program
-        // TODO : error handling
-        execl( CONTROLLER_PROGRAM, "controller", NULL );
-
-        // exit on fail to exec.  Can only get here if execl fails.
-        _exit( 1 );
-    }
-
-    return ERROR_NONE;
-}
-
-//-----------------------------------------------------------------------------
-
-/// Pause the controller from the coordinator process
-void suspend_controller( void ) {
-
-    kill( controller_pid, SIGSTOP );
-
-    controller_is_suspended = true;
-}
-
-//-----------------------------------------------------------------------------
-
-/// Continue the controller from the coordinator process
-void resume_controller( void ) {
-
-    controller_is_suspended = false;
-
-    kill( controller_pid, SIGCONT );
-}
-
-//-----------------------------------------------------------------------------
-
-void shutdown_controller( void ) {
-
-    kill( controller_pid, SIGTERM );
-    //kill( controller_pid, SIGKILL );
-}
-
-//-----------------------------------------------------------------------------
-// TIMER CONTROL
+// TIMER
 //-----------------------------------------------------------------------------
 
 /// The signal handler for the controller's timer.  Is called only when the controller's
 /// budget is exhausted.  Puts a message out onto the comm channel the coordinator
 /// is listening to for notifications about this event
-void rttimer_sighandler( int signum, siginfo_t *si, void *data ) {
+void controller_timer_sighandler( int signum, siginfo_t *si, void *data ) {
 
     unsigned long long ts;
 
     rdtscll( ts );
 
-    if( write( fd_timer_to_coordinator[1], &ts, sizeof(unsigned long long) ) == -1) {
+    if( write( FD_TIMER_TO_COORDINATOR_WRITE_CHANNEL, &ts, sizeof(unsigned long long) ) == -1) {
         std::string err_msg = "(coordinator.cpp) rttimer_sighandler(...) failed making system call write(...)";
         error_log.write( error_string_bad_write( err_msg, errno ) );
         // TODO : determine if there is a need to recover
     }
-
-    // get overrun!?!
-}
-
-//-----------------------------------------------------------------------------
-
-/// Blocks the timer signal if it is necessary to suppress the timer
-timer_err_e block_rttimer( void ) {
-    if( sigprocmask( SIG_SETMASK, &rttimer_mask, NULL ) == -1 )
-        return TIMER_ERROR_SIGPROCMASK;
-    return TIMER_ERROR_NONE;
-}
-
-//-----------------------------------------------------------------------------
-
-/// Unblocks a blocked timer signal
-timer_err_e unblock_rttimer( void ) {
-    if( sigprocmask( SIG_UNBLOCK, &rttimer_mask, NULL ) == -1 )
-        return TIMER_ERROR_SIGPROCMASK;
-    return TIMER_ERROR_NONE;
-}
-
-//-----------------------------------------------------------------------------
-
-timer_err_e arm_timer( const unsigned long long& ts_req, unsigned long long& ts_arm ) {
-
-    struct itimerspec its;
-    unsigned long long ts_now;
-
-    // sanity check.  Not supporting controllers that run at 1 Hz or slower or faster than 1ns.
-    assert( CONTROLLER_HZ > 1 && CONTROLLER_HZ <= NSECS_PER_SEC );
-
-    rdtscll( ts_now );
-
-    unsigned long long dts = ts_now - ts_req;
-    unsigned long long dns = cycles_to_nanoseconds( dts, cpu_speed_hz );
-    its.it_interval.tv_sec = 0;
-    its.it_interval.tv_nsec = 0;
-    its.it_value.tv_sec = 0;
-    //its.it_value.tv_nsec = NSECS_PER_SEC / CONTROLLER_HZ;
-    its.it_value.tv_nsec = (unsigned long long)(CONTROLLER_PERIOD_NSEC - dns);
-
-    //if( timer_settime( rttimer_id, TIMER_ABSTIME, &its, NULL ) == -1 )
-    if( timer_settime( rttimer_id, 0, &its, NULL ) == -1 ) {
-	printf( "dts: %lld, dns: %lld, nsec: %d\n", dts, dns, its.it_value.tv_nsec );
-        return TIMER_ERROR_SETTIME;
-    }
-
-    //printf( "%lld, %lld\n", dts, dns );
-
-    // timestamp
-    //rdtscll( ts_arm );
-    ts_arm = ts_req;
-
-    return TIMER_ERROR_NONE;
-}
-
-//-----------------------------------------------------------------------------
-
-/// Creates a high-resolution real-time timer to monitor the controller process
-timer_err_e create_hrrttimer( void ) {
-    struct sigevent sevt;
-    struct itimerspec its;
-
-    // Establish handler for timer signal
-    rttimer_sigaction.sa_flags = SA_SIGINFO; //<-
-    rttimer_sigaction.sa_sigaction = rttimer_sighandler;
-    sigemptyset( &rttimer_sigaction.sa_mask );  //<-
-    if( sigaction( RTTIMER_SIGNAL, &rttimer_sigaction, NULL ) == -1)
-        return TIMER_ERROR_SIGACTION;
-
-    // intialize the signal mask
-    sigemptyset( &rttimer_mask );
-    sigaddset( &rttimer_mask, RTTIMER_SIGNAL );
-
-    sevt.sigev_notify = SIGEV_SIGNAL;
-    sevt.sigev_signo = RTTIMER_SIGNAL;
-    sevt.sigev_value.sival_ptr = &rttimer_id;
-    if( timer_create( CLOCK_MONOTONIC, &sevt, &rttimer_id ) == -1 )
-    //if( timer_create( CLOCK_REALTIME, &sevt, &rttimer_id ) == -1 )
-       return TIMER_ERROR_CREATE;
-
-    return TIMER_ERROR_NONE;
 }
 
 //-----------------------------------------------------------------------------
@@ -497,7 +382,7 @@ timer_err_e create_hrrttimer( void ) {
 //-----------------------------------------------------------------------------
 
 // the reference to the wakeup thread
-pthread_t wakeup_thread;
+//pthread_t wakeup_thread;
 
 //-----------------------------------------------------------------------------
 
@@ -517,16 +402,16 @@ void* wakeup( void* ) {
     while( 1 ) {
         buf = 0;
 
-        if( controller_is_blocked ) {
+        if( controller_thread.blocked ) {
             //clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, time, NULL);
             //nanosleep( &ts_sleep, &ts_rem );  // DONT USE.  USE clock_nanosleep(...)
             continue;
         }
 
         // Note: may need mutex protection!
-        controller_is_blocked = true;
+        controller_thread.blocked = true;
 
-        if( write( fd_wakeup_to_coordinator[1], &buf, 1 ) == -1) {
+        if( write( FD_WAKEUP_TO_COORDINATOR_WRITE_CHANNEL, &buf, 1 ) == -1) {
             std::string err_msg = "(coordinator.cpp) wakeup() failed making system call write(...)";
             error_log.write( error_string_bad_write( err_msg, errno ) );
             // TODO : determine if there is a need to bomb or recover
@@ -536,7 +421,7 @@ void* wakeup( void* ) {
 }
 
 //-----------------------------------------------------------------------------
-
+/*
 /// Spawns the wakeup thread with a priority level one below the controller thread
 /// (therefore two below the coordinator).  For more information see
 /// wakeup( void* ) above
@@ -587,7 +472,7 @@ error_e create_wakeup_thread( void ) {
 
     return ERROR_NONE;
 }
-
+*/
 //-----------------------------------------------------------------------------
 
 void init( int argc, char* argv[] ) {
@@ -697,8 +582,9 @@ void init( int argc, char* argv[] ) {
     //++++++++++++++++++++++++++++++++++++++++++++++++
     // initialize controller
 
-    if( fork_controller( ) != ERROR_NONE ) {
-        sprintf( errstr, "(coordinator.cpp) init() failed calling fork_controller()\nExiting\n" );
+    controller_thread = thread_c( CONTROLLER_PROGRAM );
+    if( controller_thread.create( DEFAULT_PROCESSOR ) != ERROR_NONE ) {
+        sprintf( errstr, "(coordinator.cpp) init() failed calling controller_thread.create(DEFAULT_PROCESSOR)\nExiting\n" );
         error_log.write( errstr );
         printf( "%s", errstr );
 
@@ -714,8 +600,8 @@ void init( int argc, char* argv[] ) {
 
     printf( "(coordinator) setting initial timer\n" );
 
-    if( create_hrrttimer( ) != TIMER_ERROR_NONE ) {
-        sprintf( errstr, "(coordinator.cpp) init() failed calling create_hrrttimer()\nExiting\n" );
+    if( controller_timer.create( controller_timer_sighandler, RTTIMER_SIGNAL ) != TIMER_ERROR_NONE ) {
+        sprintf( errstr, "(coordinator.cpp) init() failed calling controller_timer.create(rttimer_sighandler,RTTIMER_SIGNAL)\nExiting\n" );
         error_log.write( errstr );
         printf( "%s", errstr );
 
@@ -724,6 +610,17 @@ void init( int argc, char* argv[] ) {
         error_log.close( );
         exit( 1 );
     }
+
+    /*
+    // initialize the wakeup thread
+    if( wakeup_thread.create( coordinator_priority - 2, wakeup ) != ERROR_NONE ) {
+        amsgbuffer.close( );
+        close_pipes( );
+        error_log.close( );
+        printf( "(coordinator.cpp) init() failed calling wakeup_thread.create(...,wakeup)\nExiting\n" );
+        exit( 1 );
+    }
+    */
 
 /*
     // initialize the wakeup thread
@@ -775,8 +672,7 @@ void shutdown( void ) {
     //pthread_join( wakeup_thread, NULL );
     //pthread_kill( wakeup_thread, SIGKILL );
 
-    shutdown_controller( );
-    //resume_controller( );
+    controller_thread.shutdown( );
 
     sleep( 1 );  // block for a second to allow controller to receive signal
 
@@ -818,7 +714,7 @@ error_e service_controller_actuator_msg( void ) {
         dynamics_get_command( );
         break;
     case ACTUATOR_MSG_REQUEST:
-        // Note: the controller is blocking now on read from fd_coordinator_to_controller[0]
+        // Note: the controller is blocking now on read from FD_COORDINATOR_TO_CONTROLLER_READ_CHANNEL
 
         if( !controller_fully_initialized ) {
             // this is a query for initial state
@@ -842,8 +738,8 @@ error_e service_controller_actuator_msg( void ) {
             return ERROR_FAILED;
         }
 
-        if( write( fd_coordinator_to_controller[1], &buf, 1 ) == -1 ) {
-            std::string err_msg = "(coordinator.cpp) main() failed making system call write(...) on fd_coordinator_to_controller[1]";
+        if( write( FD_COORDINATOR_TO_CONTROLLER_WRITE_CHANNEL, &buf, 1 ) == -1 ) {
+            std::string err_msg = "(coordinator.cpp) main() failed making system call write(...) on FD_COORDINATOR_TO_CONTROLLER_WRITE_CHANNEL";
             error_log.write( error_string_bad_write( err_msg, errno ) );
             // TODO : determine if there is a need to recover
             return ERROR_FAILED;
@@ -881,8 +777,8 @@ int main( int argc, char* argv[] ) {
 
     init( argc, argv );
 
-    max_fd = std::max( fd_timer_to_coordinator[0], fd_controller_to_coordinator[0] );
-    //max_fd = std::max( max_fd, fd_controller_to_coordinator[0] );
+    max_fd = std::max( FD_TIMER_TO_COORDINATOR_READ_CHANNEL, FD_CONTROLLER_TO_COORDINATOR_READ_CHANNEL );
+    //max_fd = std::max( max_fd, FD_WAKEUP_TO_COORDINATOR_READ_CHANNEL );
 
     // lock into memory to prevent pagefaults
     mlockall( MCL_CURRENT );
@@ -892,16 +788,16 @@ int main( int argc, char* argv[] ) {
     while( 1 ) {
 
         FD_ZERO( &fds_channels );
-        FD_SET( fd_timer_to_coordinator[0], &fds_channels );
-        //FD_SET( fd_wakeup_to_coordinator[0], &fds_channels );
-        FD_SET( fd_controller_to_coordinator[0], &fds_channels );
+        FD_SET( FD_TIMER_TO_COORDINATOR_READ_CHANNEL, &fds_channels );
+        //FD_SET( FD_WAKEUP_TO_COORDINATOR_READ_CHANNEL, &fds_channels );
+        FD_SET( FD_CONTROLLER_TO_COORDINATOR_READ_CHANNEL, &fds_channels );
 
         if( select( max_fd + 1, &fds_channels, NULL, NULL, NULL ) ) {
-            if( FD_ISSET( fd_timer_to_coordinator[0], &fds_channels ) ) {
+            if( FD_ISSET( FD_TIMER_TO_COORDINATOR_READ_CHANNEL, &fds_channels ) ) {
                 // timer event
 
-                if( read( fd_timer_to_coordinator[0], &ts_timer_fired, sizeof(unsigned long long) ) == -1 ) {
-                    std::string err_msg = "(coordinator.cpp) main() failed making system call read(...) on fd_timer_to_coordinator[0]";
+                if( read( FD_TIMER_TO_COORDINATOR_READ_CHANNEL, &ts_timer_fired, sizeof(unsigned long long) ) == -1 ) {
+                    std::string err_msg = "(coordinator.cpp) main() failed making system call read(...) on FD_TIMER_TO_COORDINATOR_READ_CHANNEL";
                     error_log.write( error_string_bad_read( err_msg, errno ) );
                     // TODO : determine if there is a need to recover
                 }
@@ -911,13 +807,13 @@ int main( int argc, char* argv[] ) {
                 if( ++timer_events == SIM_DURATION_CYCLES ) break;
 
                 // controller needs to run!
-                resume_controller( );
+                controller_thread.resume( );
 
-            } else if( FD_ISSET( fd_controller_to_coordinator[0], &fds_channels ) ) {
+            } else if( FD_ISSET( FD_CONTROLLER_TO_COORDINATOR_READ_CHANNEL, &fds_channels ) ) {
                 // controller notification event
 
-                if( read( fd_controller_to_coordinator[0], &ctl_msg, sizeof( controller_notification_c ) ) == -1 ) {
-                    std::string err_msg = "(coordinator.cpp) main() failed making system call read(...) on fd_controller_to_coordinator[0]";
+                if( read( FD_CONTROLLER_TO_COORDINATOR_READ_CHANNEL, &ctl_msg, sizeof( controller_notification_c ) ) == -1 ) {
+                    std::string err_msg = "(coordinator.cpp) main() failed making system call read(...) on FD_CONTROLLER_TO_COORDINATOR_READ_CHANNEL";
                     error_log.write( error_string_bad_read( err_msg, errno ) );
                     // TODO : determine if there is a need to recover
                 }
@@ -935,22 +831,19 @@ int main( int argc, char* argv[] ) {
                     // controller is preempted so it cannot run
 
                     // set a timer, suspend the controller until the timer fires
-                    suspend_controller( );
+                    controller_thread.suspend( );
 
-                    if( arm_timer( ctl_msg.ts, ts_timer_armed ) != TIMER_ERROR_NONE ) {
+                    if( controller_timer.arm( ctl_msg.ts, ts_timer_armed, CONTROLLER_PERIOD_NSEC, cpu_speed_hz ) != TIMER_ERROR_NONE ) {
                         sprintf( errstr, "(coordinator.cpp) main() failed calling arm_timer()\n" );
                         error_log.write( errstr );
                         break; //?
                     }
-
-                    // possible to nanosleep here to optimize for a single controller; HOWEVER, is would interfere
-                    // for multicontroller designs so the implementation of nanosleep is discouraged
                 }
-            } else if( FD_ISSET( fd_wakeup_to_coordinator[0], &fds_channels ) ) {
+            } else if( FD_ISSET( FD_WAKEUP_TO_COORDINATOR_READ_CHANNEL, &fds_channels ) ) {
                 // wakeup event
 
-                if( read( fd_wakeup_to_coordinator[0], &input_buffer, 1 ) == -1 ) {
-                    std::string err_msg = "(coordinator.cpp) main() failed making system call read(...) on fd_wakeup_to_coordinator[0]";
+                if( read( FD_WAKEUP_TO_COORDINATOR_READ_CHANNEL, &input_buffer, 1 ) == -1 ) {
+                    std::string err_msg = "(coordinator.cpp) main() failed making system call read(...) on FD_WAKEUP_TO_COORDINATOR_READ_CHANNEL";
                     error_log.write( error_string_bad_read( err_msg, errno ) );
                     // TODO : determine if there is a need to recover
                 }

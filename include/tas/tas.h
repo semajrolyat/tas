@@ -39,19 +39,6 @@ typedef double Real;
 
 
 //-----------------------------------------------------------------------------
-// MAPPED IPC CHANNELS
-//-----------------------------------------------------------------------------
-
-#define FD_ERROR_LOG				    100
-
-#define FD_COORDINATOR_TO_CONTROLLER_READ_CHANNEL   1000
-#define FD_COORDINATOR_TO_CONTROLLER_WRITE_CHANNEL  1001
-
-#define FD_CONTROLLER_TO_COORDINATOR_READ_CHANNEL   1002
-#define FD_CONTROLLER_TO_COORDINATOR_WRITE_CHANNEL  1003
-
-
-//-----------------------------------------------------------------------------
 // NOTIFICATIONS
 //-----------------------------------------------------------------------------
 

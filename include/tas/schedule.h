@@ -6,6 +6,16 @@
 
 //-----------------------------------------------------------------------------
 
+class scheduler_c {
+public:
+    scheduler_c( void ) { }
+    virtual ~scheduler_c( void ) { }
+
+
+};
+
+//-----------------------------------------------------------------------------
+
 error_e set_cpu( const int& pid, const int& processor ) {
     // restrict the cpu set s.t. controller only runs on a single processor
     cpu_set_t cpuset_mask;
@@ -77,5 +87,53 @@ error_e set_realtime_schedule_rel( const int& pid, int& priority, const int& pri
 }
 
 //-----------------------------------------------------------------------------
+
+// priority, processor
+error_e set_schedule_max( const int& pid, int& priority ) {
+
+    struct sched_param param;
+
+    // set the scheduling policy and the priority where priority should be the
+    // highest possible priority, i.e. min, for the round robin scheduler
+    param.sched_priority = sched_get_priority_max( SCHED_OTHER );
+    sched_setscheduler( pid, SCHED_OTHER, &param );
+
+    // validate the scheduling policy
+    int policy = sched_getscheduler( pid );
+    if( policy != SCHED_OTHER ) {
+        return ERROR_FAILED;
+    }
+
+    // validate the priority
+    sched_getparam( pid, &param );
+    priority = param.sched_priority;
+
+    return ERROR_NONE;
+}
+
+//-----------------------------------------------------------------------------
+
+error_e set_schedule_rel( const int& pid, int& priority, const int& priority_offset ) {
+
+    struct sched_param param;
+
+    param.sched_priority = sched_get_priority_max( SCHED_OTHER ) - priority_offset;
+    sched_setscheduler( pid, SCHED_OTHER, &param );
+
+    // query the current policy
+    int policy = sched_getscheduler( pid );
+    if( policy == -1 ) {
+        return ERROR_FAILED;
+    }
+
+    // validate the priority
+    sched_getparam( pid, &param );
+    priority = param.sched_priority;
+
+    return ERROR_NONE;
+}
+
+//-----------------------------------------------------------------------------
+
 
 #endif // _SCHEDULE_H_

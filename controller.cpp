@@ -20,6 +20,7 @@ controller.cpp
 #include <tas/log.h>
 #include <tas/cpu.h>
 #include <tas/experiment.h>
+#include <tas/ipc.h>
 
 //-----------------------------------------------------------------------------
 

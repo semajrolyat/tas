@@ -1,3 +1,98 @@
+We will dynamically adjust the priority.  If a thread is not running, the priority is moved down below the priority
+of the wakeup thread.
+
+-------------------------------------------------
+
+For the rlimits, it is fairly simple:  Linux will block your processes and let non-RT scheduled code run
+at random intervals that will equal 5% of the CPU time.  We don't like this.  We want to control all
+CPU time.  If we want to let "background" stuff execute, we can build that into the scheduler in the
+coordinator, but we need to be in control, not the kernel.  So the code I pointed you to just gets rid
+of that 5% taken away from your coordinator.  Down with the kernel oppressor!!!
+
+The other issue is an API for your functionality.  Let me explain from a more foundation standpoint and from a higher
+level of abstraction.  Don't hesitate to follow up with questions.
+
+You want to provide an API for the functionality you now provide.  That functionality currently includes the ability to
+switch to the controller and execute it.
+enable the controller to block itself waiting for data from the environment.
+enable the controller to block on arbitrary I/O (though we haven't discussed the "wake up" part).
+get notifications of the passage of time at a fixed granularity (timer tick).
+execute a "step" in the simulation environment at varying granularities, including at a simulation-provided granularity.
+If you try and cobble these functionalities together into a working app, you're looking at a maintenance
+nightmare that will be very difficult to change and adapt to different ways of switching between the sim and
+the controller (for example based on the causal relations between sensing and actuation).
+
+So we need an API for these functions that is
+easy to use -- abstraction needs to hide details
+general -- it can be used in the largest variety of ways possible; it does not limit the policy of the system
+(how this mechanism is used)
+concise -- a narrow API is really required for ease of understanding/debugging
+So what should this API look like (i.e. what is the prototype for the functions that will wrap 1-5)?
+
+An option is this (in strange latex + C syntax):
+
+yourtime_t dispatch(thread \in \{controller, simulator\}, yourtime_t max_duration, thd_status_t *status);
+
+The return value is the amount of time that either the controller or simulator executes after its execution.
+This should be bounded for the controller by a timer tick length (i.e. if a timer tick occurs, we return
+from this function with the amount of time that passed before the tick).  thread is the specific "thread"
+we want to execute.  In your current system, this might be either the controller or the dynamics (simulator).
+In a future system where we might have multiple controllers, or whatnot, it would allow expansion.
+max_duration is the maximum amount of time that you want dispatch to execute thread.  The return value is
+only guaranteed to be <= TIMER_TICK_DURATION, so any max_duration < TIMER_TICK_DURATION might be violated.
+In fact, a simple (recommended) implementation will always return after at most a timer tick.  The status
+is the status of the thread that was executed in the call to dispatch (i.e. it is a return value).  If the
+controller blocks, and it shouldn't be run now, status = THD_BLOCKED.  If the thread is waiting for sensor
+input, status = THD_WAITING_IO, if it is active and executing, status = THD_EXEC.
+
+So how is this function that hides all of the difficulties of your implementation so far used?
+The simplest policy that simply switches back and forth between the dynamics and controller:
+
+next = sim;
+sched_loop:
+     status = 0;
+     dispatch(next, TIMER_TICK_DURATION, &status);
+     next = next == sim ? controller : sim;
+
+This is stupid policy.  It doesn't pay any attention to time.  It doesn't care if the controller blocks.
+All it does is let the controller run, then the dynamics, etc...  This is called scheduling policy.
+
+So my main point here is:  we need to abstract your functionality into a nice API that can be used to define
+different scheduling policies.  My suggestion for now is the simple dispatch function.  We can't really
+experiment with intelligent policies until we can constrain the complexity of the mechanisms you've provided
+so far into something that is easy to reason about.  dispatch is easy to reason about.
+
+--B
+Thanks for starting the list, Evan.  I'll add some ideas.
+
+(E) Integration/handling of multiple controlled processes can be used,some of which run at a particular
+rate (controllers), and some of which do not (planners); the latter need to be paused and restarted as
+necessary
+(G) Another way to look at this, I believe, is simply that we need to control the timing of multiple processes.
+
+(E) Implementation of API function get_time() that gets the virtual time from a controlled process
+(or the "clock time" on a real robot)
+(G) In addition to this one, the notion that we want to have "perfect" cycle-accurate control of time if
+required means that we cannot use a quanta-based scheduler as is done now.  Being able to "move the slider"
+and select the accuracy all the way to cycle accuracy would mean that we would have to do scheduling also
+based on when sensor/actuator commands/requests are made, and synchronizing around these events.
+An aspect we haven't touched is how we can make the trade-off between the efficiency of the dynamics
+(i.e. taking the step it _wants_ to take), and the accuracy of time management (that step might be far
+too large and introduce timing errors) seems interesting, and not straightforward.
+Provide an accurate virtualized environment for the control/planning modules.  This means accurately dealing
+with I/O, providing an interface to sensors/actuators that mimics that of an established platform (e.g. ROS),
+etc...  The idea is that we want the exact same code to execute in the simulator, and on the robot.
+
+(E) Construction of a complete example system with perceptual module, planning module, task control module
+(that sends a planned kinematic trajectory to the controller), and controller module (that implements
+a control policy) with necessary links between them (see architecture diagram on isrr paper).
+(G) It seems to me that there are concrete directions to move both in terms of breadth (supporting more,
+real systems), and depth (refining, and making more accurate and more capable the existing mechanisms).
+There's a lot of interesting research to be done in all of this.  My current feeling is that we have a
+good proof of concept, but not a real system.
+
+--------------------------------------------------------
+
 Controller makes initial perception request to Coordinator -> objective start point of controller, i.e. post initialization
 
 Controller makes a perception request to Coordinator -> determine run time.  equal to the current time less the last posted time
@@ -62,8 +157,27 @@ Resume Controller.  Dynamics has completed running.
 
 Controller does not know how long it may run for.
 
+---------------------------------------------------------------
 
 
+
+*OPERATING SYSTEM*
+SCHEDULING
+default scheduling
+realtime scheduling
+TIMING
+polling vs. signal handler
+timer vs. hrtimer
+
+REALTIME OPERATING SYSTEM
+vanilla kernel vs. realtime-kernel
+
+INTERPROCESS COMMUNCATION
+shared buffer vs. pipes
+
+TIME ACCOUNTING
+
+TIME MANAGEMENT
 
 
 

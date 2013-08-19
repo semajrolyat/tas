@@ -87,9 +87,16 @@ struct timespec subtract_ts( const struct timespec& ts1, const struct timespec& 
 //-----------------------------------------------------------------------------
 
 struct timestamp_t {
-    unsigned long long cycles;
-    double seconds;
+    unsigned long long t_cycle;
 };
+
+
+struct realtime_t {
+    Real seconds;
+};
+
+
+
 
 //-----------------------------------------------------------------------------
 
@@ -256,11 +263,11 @@ struct timespec add_timespecs( const struct timespec& a, const struct timespec& 
     int nsof = ns - 1000000000;
 
     if( nsof >= 0 ) {
-    result.tv_sec = s + 1;
-    result.tv_nsec = nsof;
+        result.tv_sec = s + 1;
+        result.tv_nsec = nsof;
     } else {
-    result.tv_sec = s;
-    result.tv_nsec = ns;
+        result.tv_sec = s;
+        result.tv_nsec = ns;
     }
     return result;
 }
@@ -310,6 +317,127 @@ unsigned long long calibrate_cycles_per_second( void ) {
 */
 }
 //*/
+
+
+typedef void ( *timer_sighandler )( int signum, siginfo_t *si, void *data );
+
+class timer_c {
+public:
+    timer_c( void ) {
+        first_arming = true;
+        agg_error = 0;
+        last_overrun = 0;
+        ts_prev_arm = 0;
+    }
+    virtual ~timer_c( void ) { }
+
+    sigset_t rttimer_mask;
+    struct sigaction rttimer_sigaction;
+    timer_t rttimer_id;
+
+    bool first_arming;
+    long long agg_error;
+    unsigned long long last_overrun;
+    unsigned long long ts_prev_arm;
+
+    /// Error codes for timer control
+    enum timer_err_e {
+        TIMER_ERROR_NONE = 0,
+        TIMER_ERROR_SIGACTION,
+        TIMER_ERROR_SIGPROCMASK,
+        TIMER_ERROR_CREATE,
+        TIMER_ERROR_SETTIME,
+        TIMER_ERROR_GETCLOCKID
+    };
+
+    /// Blocks the timer signal if it is necessary to suppress the timer
+    timer_err_e block( void ) {
+        if( sigprocmask( SIG_SETMASK, &rttimer_mask, NULL ) == -1 )
+            return TIMER_ERROR_SIGPROCMASK;
+        return TIMER_ERROR_NONE;
+    }
+
+    //-----------------------------------------------------------------------------
+
+    /// Unblocks a blocked timer signal
+    timer_err_e unblock( void ) {
+        if( sigprocmask( SIG_UNBLOCK, &rttimer_mask, NULL ) == -1 )
+            return TIMER_ERROR_SIGPROCMASK;
+        return TIMER_ERROR_NONE;
+    }
+
+    /// Creates a high-resolution real-time timer to monitor the controller process
+    timer_err_e create( timer_sighandler sighandler, int signum ) {
+        struct sigevent sevt;
+        //struct itimerspec its;
+
+        // Establish handler for timer signal
+        rttimer_sigaction.sa_flags = SA_SIGINFO;
+        rttimer_sigaction.sa_sigaction = sighandler;
+        sigemptyset( &rttimer_sigaction.sa_mask );
+        if( sigaction( signum, &rttimer_sigaction, NULL ) == -1)
+            return TIMER_ERROR_SIGACTION;
+
+        // intialize the signal mask
+        sigemptyset( &rttimer_mask );
+        sigaddset( &rttimer_mask, signum );
+
+        sevt.sigev_notify = SIGEV_SIGNAL;
+        sevt.sigev_signo = signum;
+        sevt.sigev_value.sival_ptr = &rttimer_id;
+        if( timer_create( CLOCK_MONOTONIC, &sevt, &rttimer_id ) == -1 )
+        //if( timer_create( CLOCK_REALTIME, &sevt, &rttimer_id ) == -1 )
+           return TIMER_ERROR_CREATE;
+
+        return TIMER_ERROR_NONE;
+    }
+
+
+    timer_err_e arm( const unsigned long long& ts_req, unsigned long long& ts_arm, const unsigned long long& period_nsec, const unsigned long long& cpu_speed_hz ) {
+        struct itimerspec its;
+        unsigned long long ts_now;
+
+        // sanity check.  Not supporting controllers that run at 1 Hz or slower or faster than 1ns.
+        //assert( CONTROLLER_HZ > 1 && CONTROLLER_HZ <= NSECS_PER_SEC );
+
+        unsigned long long ts_err = 0;
+        unsigned long long ns_err = 0;
+
+        unsigned long long period = period_nsec;
+
+        rdtscll( ts_now );
+
+        if( first_arming ) {
+            // cannot compute err correction
+            first_arming = false;
+            } else {
+            ts_err = ts_now - ts_prev_arm;
+            ns_err = cycles_to_nanoseconds( ts_err, cpu_speed_hz );
+            long long error = (long long) period - (long long) ns_err;
+
+            agg_error += error;
+            period += agg_error;
+        }
+
+        its.it_interval.tv_sec = 0;
+        its.it_interval.tv_nsec = 0;
+        its.it_value.tv_sec = 0;
+
+        its.it_value.tv_nsec = (unsigned long long)(period);
+
+        ts_arm = ts_req;
+        ts_prev_arm = ts_now;
+
+        if( timer_settime( rttimer_id, 0, &its, NULL ) == -1 ) {
+            //printf( "dts: %lld, dns: %lld, nsec: %d\n", dts, dns, its.it_value.tv_nsec );
+            return TIMER_ERROR_SETTIME;
+        }
+
+        return TIMER_ERROR_NONE;
+    }
+
+};
+
 
 
 /*
