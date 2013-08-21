@@ -326,7 +326,7 @@ int main( int argc, char* argv[] ) {
 
     int cycle = 0;
     controller_notification_c notification;
-    unsigned long long ts;
+    timestamp_t ts;
     const Real INTERVAL = 1.0 / (double) CONTROLLER_HZ;
     Real t = 0.0;
 
@@ -344,21 +344,24 @@ int main( int argc, char* argv[] ) {
     mlockall( MCL_CURRENT );
 
     // get the current timestamp
-    rdtscll( ts );
+    rdtscll( ts.cycle );
 
     // start the main process loop
     while( 1 ) {
 
-        notification.ts = ts;
+        notification.ts.cycle = ts.cycle;
 
         // send a snooze notification
-        write( FD_CONTROLLER_TO_COORDINATOR_WRITE_CHANNEL, &notification, sizeof( controller_notification_c ) );
+        //write( FD_CONTROLLER_TO_COORDINATOR_WRITE_CHANNEL, &notification, sizeof( controller_notification_c ) );
+        if( write( FD_CONTROLLER_TO_COORDINATOR_WRITE_CHANNEL, &notification, sizeof( controller_notification_c ) ) == -1 ) {
+            // failed to write, should record in error log?
+        }
 
         //READ? to get the controller to block and to ensure it doesn't overrun?  Ideally, the write event
         // causes the coordinator to wake and interrupt this process so there shouldn't be overrun.
 
         // unsnoozed here, so get a new timestamp
-        rdtscll( ts );
+        rdtscll( ts.cycle );
         // Note: may have some long term drift due to fp math
         t += INTERVAL;
 

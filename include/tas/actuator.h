@@ -160,6 +160,7 @@ enum actuator_msg_buffer_err_e {
     BUFFER_ERROR_MAPPING,
     BUFFER_ERROR_UNMAPPING,
     BUFFER_ERROR_OPENING,
+    BUFFER_ERROR_TRUNCATING,
     BUFFER_ERROR_UNLINKING,
     BUFFER_ERROR_SYNCING,
     BUFFER_ERROR_MUTEX
@@ -243,7 +244,10 @@ private:
             return BUFFER_ERROR_OPENING;
         }
 
-        ftruncate( fd_mutex, sizeof(pthread_mutex_t) );
+        if( ftruncate( fd_mutex, sizeof(pthread_mutex_t) ) == -1 ) {
+            return BUFFER_ERROR_TRUNCATING;
+        }
+
 
         shm_mutex_addr = mmap( NULL, sizeof(pthread_mutex_t), PROT_READ | PROT_WRITE, MAP_SHARED, fd_mutex, 0 );
 
@@ -311,7 +315,9 @@ private:
             return BUFFER_ERROR_OPENING;
         }
 
-        ftruncate( fd_buffer, sizeof(actuator_msg_c) );
+        if( ftruncate( fd_buffer, sizeof(actuator_msg_c) ) == -1 ) {
+            return BUFFER_ERROR_TRUNCATING;
+        }
 
         shm_buffer_addr = mmap( NULL, sizeof(actuator_msg_c), PROT_READ | PROT_WRITE, MAP_SHARED, fd_buffer, 0 );
 

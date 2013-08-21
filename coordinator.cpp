@@ -38,7 +38,18 @@ unsigned long long CONTROLLER_PERIOD_NSEC;
 
 //-----------------------------------------------------------------------------
 
+// NEED TO SORT OUT HOW DYNAMICS CAN BE HANDLED THE SAME AS OTHER THREADS
+thread_c dynamics_thread;
+
+//-----------------------------------------------------------------------------
+
 thread_c wakeup_thread;
+
+//-----------------------------------------------------------------------------
+// SCHEDULER
+//-----------------------------------------------------------------------------
+
+scheduler_c scheduler;
 
 //-----------------------------------------------------------------------------
 // CPU
@@ -366,11 +377,11 @@ void close_pipes( void ) {
 /// is listening to for notifications about this event
 void controller_timer_sighandler( int signum, siginfo_t *si, void *data ) {
 
-    unsigned long long ts;
+    timestamp_t ts;
 
-    rdtscll( ts );
+    rdtscll( ts.cycle );
 
-    if( write( FD_TIMER_TO_COORDINATOR_WRITE_CHANNEL, &ts, sizeof(unsigned long long) ) == -1) {
+    if( write( FD_TIMER_TO_COORDINATOR_WRITE_CHANNEL, &ts, sizeof(timestamp_t) ) == -1) {
         std::string err_msg = "(coordinator.cpp) rttimer_sighandler(...) failed making system call write(...)";
         error_log.write( error_string_bad_write( err_msg, errno ) );
         // TODO : determine if there is a need to recover
@@ -379,11 +390,6 @@ void controller_timer_sighandler( int signum, siginfo_t *si, void *data ) {
 
 //-----------------------------------------------------------------------------
 // WAKEUP THREAD
-//-----------------------------------------------------------------------------
-
-// the reference to the wakeup thread
-//pthread_t wakeup_thread;
-
 //-----------------------------------------------------------------------------
 
 /// the wakeup thread function itself.  Established at the priority level one
@@ -400,6 +406,8 @@ void* wakeup( void* ) {
     ts_sleep.tv_nsec = 100;
 
     while( 1 ) {
+        // REMARKED FOR NOW TO PREVENT LOCKUP UNTIL THIS GETS CLOSER VETTING AND INSTEAD SLEEP
+        /*
         buf = 0;
 
         if( controller_thread.blocked ) {
@@ -416,63 +424,12 @@ void* wakeup( void* ) {
             error_log.write( error_string_bad_write( err_msg, errno ) );
             // TODO : determine if there is a need to bomb or recover
         }
+        */
+        clock_nanosleep( CLOCK_MONOTONIC, 0, &ts_sleep, &ts_rem );
     }
     return NULL;
 }
 
-//-----------------------------------------------------------------------------
-/*
-/// Spawns the wakeup thread with a priority level one below the controller thread
-/// (therefore two below the coordinator).  For more information see
-/// wakeup( void* ) above
-error_e create_wakeup_thread( void ) {
-
-    pthread_attr_t attributes;
-    struct sched_param param;
-
-    pthread_attr_init( &attributes );
-
-    // set an explicit schedule for the wakeup thread
-    if( pthread_attr_setinheritsched( &attributes, PTHREAD_EXPLICIT_SCHED )  != 0 ) {
-        sprintf( errstr, "(coordinator.cpp) create_wakeup_thread() failed calling pthread_attr_setinheritsched(...)\n" );
-        error_log.write( errstr );
-        return ERROR_FAILED;
-    }
-
-    // set schedule policy to round robin
-    if( pthread_attr_setschedpolicy( &attributes, SCHED_RR ) != 0 ) {
-        sprintf( errstr, "(coordinator.cpp) create_wakeup_thread() failed calling pthread_attr_setschedpolicy(...)\n" );
-        error_log.write( errstr );
-        return ERROR_FAILED;
-    }
-
-    // set schedule priority (2 below coordinator -> 1 below controller)
-    param.sched_priority = coordinator_priority - 2;
-    if( pthread_attr_setschedparam( &attributes, &param ) != 0 ) {
-        sprintf( errstr, "(coordinator.cpp) create_wakeup_thread() failed calling pthread_attr_setschedparam(...)\n" );
-        error_log.write( errstr );
-        return ERROR_FAILED;
-    }
-
-    // create the wakeup thread
-    if( pthread_create( &wakeup_thread, &attributes, wakeup, NULL ) != 0 ) {
-        sprintf( errstr, "(coordinator.cpp) create_wakeup_thread() failed calling pthread_create(wakeup_thread,...)\n" );
-        error_log.write( errstr );
-        return ERROR_FAILED;
-    }
-
-    printf( "wakeup created\n" );
-
-    // validation of the priority
-    int policy;
-    pthread_getschedparam( wakeup_thread, &policy, &param );
-    printf( "wakeup priority: %d\n", param.sched_priority );
-
-    pthread_attr_destroy( &attributes );
-
-    return ERROR_NONE;
-}
-*/
 //-----------------------------------------------------------------------------
 
 void init( int argc, char* argv[] ) {
@@ -549,6 +506,7 @@ void init( int argc, char* argv[] ) {
         error_log.close( );
         exit( 1 );
     }
+    // Note : From here on out, if error, close pipes
 
     // Create and initialize the actuator message buffer
     amsgbuffer = actuator_msg_buffer_c( ACTUATOR_MSG_BUFFER_NAME, ACTUATOR_MSG_BUFFER_MUTEX_NAME, true );
@@ -561,8 +519,7 @@ void init( int argc, char* argv[] ) {
         error_log.close( );
         exit( 1 );
     }
-
-    //if( VERBOSE ) printf( "coordinator process initialized\n" );
+    // Note : From here on out, if error, close the buffer
 
     //++++++++++++++++++++++++++++++++++++++++++++++++
     // initialize dynamics
@@ -581,10 +538,8 @@ void init( int argc, char* argv[] ) {
 
     //++++++++++++++++++++++++++++++++++++++++++++++++
     // initialize controller
-
-    controller_thread = thread_c( CONTROLLER_PROGRAM );
-    if( controller_thread.create( DEFAULT_PROCESSOR ) != ERROR_NONE ) {
-        sprintf( errstr, "(coordinator.cpp) init() failed calling controller_thread.create(DEFAULT_PROCESSOR)\nExiting\n" );
+    if( scheduler.create( controller_thread, CONTROLLER_PROGRAM, 1, DEFAULT_PROCESSOR ) != SCHED_ERROR_NONE ) {
+        sprintf( errstr, "(coordinator.cpp) init() failed calling scheduler.create(controller_thread,DEFAULT_PROCESSOR)\nExiting\n" );
         error_log.write( errstr );
         printf( "%s", errstr );
 
@@ -600,7 +555,7 @@ void init( int argc, char* argv[] ) {
 
     printf( "(coordinator) setting initial timer\n" );
 
-    if( controller_timer.create( controller_timer_sighandler, RTTIMER_SIGNAL ) != TIMER_ERROR_NONE ) {
+    if( controller_timer.create( controller_timer_sighandler, RTTIMER_SIGNAL ) != timer_c::TIMER_ERROR_NONE ) {
         sprintf( errstr, "(coordinator.cpp) init() failed calling controller_timer.create(rttimer_sighandler,RTTIMER_SIGNAL)\nExiting\n" );
         error_log.write( errstr );
         printf( "%s", errstr );
@@ -611,27 +566,15 @@ void init( int argc, char* argv[] ) {
         exit( 1 );
     }
 
-    /*
     // initialize the wakeup thread
-    if( wakeup_thread.create( coordinator_priority - 2, wakeup ) != ERROR_NONE ) {
+    if( scheduler.create( wakeup_thread, coordinator_priority - 2, wakeup ) != SCHED_ERROR_NONE ) {
         amsgbuffer.close( );
         close_pipes( );
         error_log.close( );
         printf( "(coordinator.cpp) init() failed calling wakeup_thread.create(...,wakeup)\nExiting\n" );
         exit( 1 );
     }
-    */
 
-/*
-    // initialize the wakeup thread
-    if( create_wakeup_thread( ) != ERROR_NONE ) {
-        amsgbuffer.close( );
-        close_pipes( );
-        error_log.close( );
-        printf( "(coordinator.cpp) init() failed calling create_wakeup_thread()\nExiting\n" );
-        exit( 1 );
-    }
-*/
     //++++++++++++++++++++++++++++++++++++++++++++++++
     // open any other logs
 
@@ -660,6 +603,35 @@ void init( int argc, char* argv[] ) {
         error_log.close( );
         exit( 1 );
     }
+
+    //********** SOME TESTING *****************
+    /*
+    // Validated : thread_c.set_priority can successfully adjust priority for a PROCESS
+    if( controller_thread.set_priority( coordinator_priority - 2 ) == ERROR_FAILED ) {
+        sprintf( errstr, "(coordinator.cpp) init() failed calling controller_thread.set_priority(...)\nExiting\n" );
+        error_log.write( errstr );
+        printf( "%s", errstr );
+
+        amsgbuffer.close( );
+        close_pipes( );
+        error_log.close( );
+        exit( 1 );
+
+    }
+
+    // Validated : thread_c.set_priority can successfully adjust priority for a THREAD
+    if( wakeup_thread.set_priority( coordinator_priority - 3 ) == ERROR_FAILED ) {
+        sprintf( errstr, "(coordinator.cpp) init() failed calling wakeup_thread.set_priority(...)\nExiting\n" );
+        error_log.write( errstr );
+        printf( "%s", errstr );
+
+        amsgbuffer.close( );
+        close_pipes( );
+        error_log.close( );
+        exit( 1 );
+
+    }
+    */
 }
 
 //-----------------------------------------------------------------------------
@@ -672,7 +644,7 @@ void shutdown( void ) {
     //pthread_join( wakeup_thread, NULL );
     //pthread_kill( wakeup_thread, SIGKILL );
 
-    controller_thread.shutdown( );
+    scheduler.shutdown( controller_thread );
 
     sleep( 1 );  // block for a second to allow controller to receive signal
 
@@ -769,7 +741,7 @@ int main( int argc, char* argv[] ) {
 
     char input_buffer;
     unsigned int timer_events = 0;
-    unsigned long long ts_timer_armed, ts_timer_fired;
+    timestamp_t ts_timer_armed, ts_timer_fired;
 
     controller_notification_c ctl_msg;
     fd_set fds_channels;
@@ -778,7 +750,7 @@ int main( int argc, char* argv[] ) {
     init( argc, argv );
 
     max_fd = std::max( FD_TIMER_TO_COORDINATOR_READ_CHANNEL, FD_CONTROLLER_TO_COORDINATOR_READ_CHANNEL );
-    //max_fd = std::max( max_fd, FD_WAKEUP_TO_COORDINATOR_READ_CHANNEL );
+    max_fd = std::max( max_fd, FD_WAKEUP_TO_COORDINATOR_READ_CHANNEL );
 
     // lock into memory to prevent pagefaults
     mlockall( MCL_CURRENT );
@@ -789,25 +761,31 @@ int main( int argc, char* argv[] ) {
 
         FD_ZERO( &fds_channels );
         FD_SET( FD_TIMER_TO_COORDINATOR_READ_CHANNEL, &fds_channels );
-        //FD_SET( FD_WAKEUP_TO_COORDINATOR_READ_CHANNEL, &fds_channels );
+        FD_SET( FD_WAKEUP_TO_COORDINATOR_READ_CHANNEL, &fds_channels );
         FD_SET( FD_CONTROLLER_TO_COORDINATOR_READ_CHANNEL, &fds_channels );
 
         if( select( max_fd + 1, &fds_channels, NULL, NULL, NULL ) ) {
             if( FD_ISSET( FD_TIMER_TO_COORDINATOR_READ_CHANNEL, &fds_channels ) ) {
                 // timer event
 
-                if( read( FD_TIMER_TO_COORDINATOR_READ_CHANNEL, &ts_timer_fired, sizeof(unsigned long long) ) == -1 ) {
+                if( read( FD_TIMER_TO_COORDINATOR_READ_CHANNEL, &ts_timer_fired, sizeof(timestamp_t) ) == -1 ) {
                     std::string err_msg = "(coordinator.cpp) main() failed making system call read(...) on FD_TIMER_TO_COORDINATOR_READ_CHANNEL";
                     error_log.write( error_string_bad_read( err_msg, errno ) );
                     // TODO : determine if there is a need to recover
                 }
 
-                timestamp_timer_buffer.write( ts_timer_fired - ts_timer_armed );
+                //timestamp_timer_buffer.write( ts_timer_fired.cycle - ts_timer_armed.cycle );
 
+                timestamp_t ts_dtimer;
+                ts_dtimer.cycle = ts_timer_fired.cycle - ts_timer_armed.cycle;
+                timestamp_timer_buffer.write( ts_dtimer );
+
+                // Note : following is current exit strategy, e.g. run for a limited number of timer events
                 if( ++timer_events == SIM_DURATION_CYCLES ) break;
 
                 // controller needs to run!
-                controller_thread.resume( );
+                //controller_thread.resume( );
+                scheduler.resume( controller_thread );
 
             } else if( FD_ISSET( FD_CONTROLLER_TO_COORDINATOR_READ_CHANNEL, &fds_channels ) ) {
                 // controller notification event
@@ -831,9 +809,10 @@ int main( int argc, char* argv[] ) {
                     // controller is preempted so it cannot run
 
                     // set a timer, suspend the controller until the timer fires
-                    controller_thread.suspend( );
+                    //controller_thread.suspend( );
+                    scheduler.suspend( controller_thread );
 
-                    if( controller_timer.arm( ctl_msg.ts, ts_timer_armed, CONTROLLER_PERIOD_NSEC, cpu_speed_hz ) != TIMER_ERROR_NONE ) {
+                    if( controller_timer.arm( ctl_msg.ts, ts_timer_armed, CONTROLLER_PERIOD_NSEC, cpu_speed_hz ) != timer_c::TIMER_ERROR_NONE ) {
                         sprintf( errstr, "(coordinator.cpp) main() failed calling arm_timer()\n" );
                         error_log.write( errstr );
                         break; //?

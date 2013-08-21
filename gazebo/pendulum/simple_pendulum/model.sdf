@@ -1,0 +1,142 @@
+<?xml version="1.0" ?>
+<sdf version="1.4">
+  <model name="pendulum">
+    <link name="base">
+      <inertial>
+        <pose>0 0 0.00099 0 0 0</pose>
+        <inertia>
+          <ixx>1.11</ixx>
+          <ixy>0</ixy>
+          <ixz>0</ixz>
+          <iyy>100.11</iyy>
+          <iyz>0</iyz>
+          <izz>1.01</izz>
+        </inertia>
+        <mass>101.0</mass>
+      </inertial>
+      <collision name="base_geom">
+        <pose>0 0 0.05 0 0 0</pose>
+        <geometry>
+          <box>
+            <size>1.0 1.0 0.1</size>
+          </box>
+        </geometry>
+      </collision>
+      <visual name="base_geom_visual">
+        <pose>0 0 0.05 0 0 0</pose>
+        <geometry>
+          <box>
+            <size>1.0 1.0 0.1</size>
+          </box>
+        </geometry>
+        <material>
+          <script>
+            <uri>file://media/materials/scripts/gazebo.material</uri>
+            <name>Gazebo/Blue</name>
+          </script>
+        </material>
+      </visual>
+      <visual name="base_geom_trunk_visual">
+        <pose>0 0 0.6 0 0 0</pose>
+        <geometry>
+          <cylinder>
+            <radius>0.05</radius>
+            <length>1.0</length>
+          </cylinder>
+        </geometry>
+        <material>
+          <script>
+            <uri>file://media/materials/scripts/gazebo.material</uri>
+            <name>Gazebo/Blue</name>
+          </script>
+        </material>
+      </visual>
+      <visual name="base_connector_geom_visual">
+        <pose>0 0 1.15 0 0 0</pose>
+        <geometry>
+          <cylinder>
+            <radius>0.05</radius>
+            <length>0.1</length>
+          </cylinder>
+        </geometry>
+        <material>
+          <script>
+            <uri>file://media/materials/scripts/gazebo.material</uri>
+            <name>Gazebo/Blue</name>
+          </script>
+        </material>
+      </visual>
+      <visual name="base_shoulder_visual">
+        <pose>0.55 0 1.15 0 0 0</pose>
+        <geometry>
+          <box>
+            <size>1.0 0.05 0.1</size>
+          </box>
+        </geometry>
+        <material>
+          <script>
+            <uri>file://media/materials/scripts/gazebo.material</uri>
+            <name>Gazebo/Blue</name>
+          </script>
+        </material>
+      </visual>
+    </link>
+    <link name="pivot">
+      <pose>0 0 1.15 3.14159 0 0</pose>
+      <inertial>
+	<pose>0 0 1.15 0 0 0</pose>
+        <inertia>
+          <ixx>0</ixx>
+          <ixy>0</ixy>
+          <ixz>0</ixz>
+          <iyy>0.4</iyy>
+          <iyz>0</iyz>
+          <izz>0.4</izz>
+        </inertia>
+        <mass>1.2</mass>
+      </inertial>
+      <visual name="pivot_geom_visual">
+        <pose>1.05 0 0 0 0 0</pose>
+        <geometry>
+          <sphere>
+            <radius>0.05</radius>
+          </sphere>
+        </geometry>
+        <material>
+          <script>
+            <uri>file://media/materials/scripts/gazebo.material</uri>
+            <name>Gazebo/Red</name>
+          </script>
+        </material>
+      </visual>
+      <visual name="arm_geom_visual">
+        <pose>1.05 0 0.5 0 0 0</pose>
+        <geometry>
+          <box>
+            <size>0.03 0.1 1.0</size> 
+          </box>
+        </geometry>
+        <material>
+          <script>
+            <uri>file://media/materials/scripts/gazebo.material</uri>
+            <name>Gazebo/Yellow</name>
+          </script>
+        </material>
+      </visual>
+    </link>
+    <joint name="pivot_joint" type="revolute">
+      <parent>base</parent>
+      <child>pivot</child>
+      <axis>
+        <dynamics>
+          <damping>0.000000</damping>
+          <friction>0.000000</friction>
+        </dynamics>
+        <xyz>1 0 0</xyz>
+      </axis>
+    </joint>
+
+<!--    <plugin name='pendulum_standup_controller' filename='/home/james/tas/build/gazebo/libpendulum_standup_controller.so'/>
+-->
+  </model>
+</sdf>

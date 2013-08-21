@@ -49,6 +49,7 @@ static dJointGroup coll_contacts;
 
 //-----------------------------------------------------------------------------
 
+/*
 static void cb_start( ) {
 	dAllocateODEDataForThread(dAllocateMaskAll);
 
@@ -56,7 +57,7 @@ static void cb_start( ) {
     static float hpr[3] = { 90.0f, -90.0f, 0 };
 
 }
-
+*/
 //-----------------------------------------------------------------------------
 
 static void cb_near_collision( void *data, dGeomID o1, dGeomID o2 ) {
@@ -130,7 +131,9 @@ static void cb_sim_step( int pause ) {
 
         rdtscll( ts_after );
 
-        timestamp_buffer.write( ts_after - ts_before );
+        timestamp_t dts;
+        dts.cycle = ts_after - ts_before;
+        timestamp_buffer.write( dts );
 
     }
 

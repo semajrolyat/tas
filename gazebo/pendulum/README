@@ -1,0 +1,7 @@
+Tested against gazebo-1.8.6
+
+* Build the project from project parent directory *
+
+* In the build directory for the gazebo/pendulum project *
+source setup.sh
+gazebo pendulum.world

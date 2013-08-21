@@ -31,6 +31,8 @@ tas.h
 #include <Moby/Simulator.h>
 #include <Moby/RCArticulatedBody.h>
 
+#include <tas/time.h>
+
 //-----------------------------------------------------------------------------
 
 typedef double Real;
@@ -54,14 +56,14 @@ class controller_notification_c {
 public:
     controller_notification_c( void ) {
         type = CONTROLLER_NOTIFICATION_UNDEFINED;
-        ts = 0;
+        ts.cycle = 0;
         duration = 0.0;
     }
 
     virtual ~controller_notification_c( void ) { }
 
     controller_notification_type_e type;
-    unsigned long long ts;          // timestamp in cycles
+    timestamp_t ts;
     double duration;
 };
 

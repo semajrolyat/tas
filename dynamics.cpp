@@ -435,7 +435,9 @@ void process_xml_options(const std::string& xml_fname)
         std::string pathname = xml_fname.substr(0,last_path_sep+1);
 
         // change to the new working path
-        chdir(pathname.c_str());
+        if( chdir(pathname.c_str()) == -1 ) {
+            // Error
+        }
 
         // get the new filename
         filename = xml_fname.substr(last_path_sep+1,std::string::npos);
@@ -447,7 +449,9 @@ void process_xml_options(const std::string& xml_fname)
     {
         std::cerr << "process_xml_options() - unable to open file " << xml_fname;
         std::cerr << " for reading" << std::endl;
-        chdir(cwd.get());
+        if( chdir(cwd.get()) == -1 ) {
+            // Error
+        }
         return;
     }
 
@@ -457,7 +461,9 @@ void process_xml_options(const std::string& xml_fname)
     // make sure that the driver node was found
     if (!driver_tree)
     {
-        chdir(cwd.get());
+        if( chdir(cwd.get()) == -1 ) {
+            // Error
+        }
         return;
     }
 
@@ -466,7 +472,9 @@ void process_xml_options(const std::string& xml_fname)
     process_tag("camera", driver_tree, process_camera_tag);
 
     // change back to current directory
-    chdir(cwd.get());
+    if( chdir(cwd.get()) == -1 ) {
+        // Error
+    }
 }
 
 //-----------------------------------------------------------------------------
@@ -549,14 +557,14 @@ void init( int argc, char** argv ) {
             UPDATE_GRAPHICS = true;
             check_osg();
             THREED_IVAL = std::atoi(&argv[i][ONECHAR_ARG]);
-            assert(THREED_IVAL >= 0);
+            //assert(THREED_IVAL >= 0);     // Note: remarked because always true
         }
         else if (option.find("-i=") != std::string::npos)
         {
             check_osg();
             UPDATE_GRAPHICS = true;
             IMAGE_IVAL = std::atoi(&argv[i][ONECHAR_ARG]);
-            assert(IMAGE_IVAL >= 0);
+            //assert(IMAGE_IVAL >= 0);      // Note: remarked because always true
         }
         else if (option.find("-t") != std::string::npos)
             OUTPUT_TO_TIME = true;

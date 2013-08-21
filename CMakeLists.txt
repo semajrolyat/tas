@@ -13,9 +13,6 @@ find_package( DL REQUIRED )
 find_package( Pthread REQUIRED )
 find_package( Moby REQUIRED )
 
-#message( ${MOBY_LIBRARIES} )
-#message( ${MOBY_INCLUDE_DIR} )
-
 set( TAS_HEADERS
     ${CMAKE_CURRENT_SOURCE_DIR}/include/tas/tas.h
     ${CMAKE_CURRENT_SOURCE_DIR}/include/tas/error.h
@@ -57,10 +54,6 @@ target_link_libraries( dynamics ${TAS_LIBRARIES} )
 
 add_executable( planner ${CMAKE_CURRENT_SOURCE_DIR}/planner.cpp ${TAS_HEADERS} ${TAS_SOURCES} )
 target_link_libraries( planner ${TAS_LIBRARIES} )
-
-
-#add_executable( interarrivalsignaltest ${CMAKE_CURRENT_SOURCE_DIR}/interarrivalsignaltest.cpp ${TAS_HEADERS} ${TAS_SOURCES} )
-#target_link_libraries( interarrivalsignaltest ${TAS_LIBRARIES} )
 
 add_subdirectory( ode )
 
