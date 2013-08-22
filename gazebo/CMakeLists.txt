@@ -11,3 +11,5 @@ link_directories( ${GAZEBO_LIBRARY_DIRS} )
 
 add_subdirectory( pendulum )
 
+add_subdirectory( pursuit )
+

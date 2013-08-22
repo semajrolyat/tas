@@ -27,7 +27,7 @@
       <uri>model://ground_plane</uri>
     </include>
     <include>
-      <uri>file://standup_pendulum</uri>
+      <uri>file://models/standup_pendulum</uri>
       <pose>0 0 0 0 0 0</pose>
     </include>
   </world>
