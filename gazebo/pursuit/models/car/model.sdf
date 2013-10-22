@@ -473,9 +473,21 @@
       <speed_control_kp>500.0</speed_control_kp>
 -->
       <!-- Lissajous -->
-      <steering_control_kp>10.0</steering_control_kp>
-      <steering_control_kd>1.0</steering_control_kd>
-      <speed_control_kp>500.0</speed_control_kp>
+<!--
+      <planner_step_size>0.020</planner_step_size>
+      <steering_control_kp>240.0</steering_control_kp>
+      <steering_control_kd>0.24</steering_control_kd>
+      <speed_control_kp>360.0</speed_control_kp>
+-->
+      <!-- Lissajous : Best -->
+<!--
+-->
+      <planner_step_size>0.025</planner_step_size>
+      <steering_control_kp>120.0</steering_control_kp>
+      <steering_control_kd>0.16</steering_control_kd>
+      <speed_control_kp>250.0</speed_control_kp>
+<!--
+-->
       <!-- Testing Parameters -->
       <lissajous_ks>0.500</lissajous_ks>
       <lissajous_kd>0.0001</lissajous_kd>

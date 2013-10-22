@@ -2,6 +2,13 @@
 #define _GAZEBO_CAR_H_
 
 //-----------------------------------------------------------------------------
+#include <ostream>
+#include <fstream>
+#include <vector>
+#include <string>
+#include <iostream>
+#include <valarray>
+#include <limits>
 
 #include <gazebo/gazebo.hh>
 #include <gazebo/common/Plugin.hh>
@@ -9,10 +16,14 @@
 #include <gazebo/common/Events.hh>
 #include <gazebo/physics/physics.hh>
 
-#include <ostream>
-#include <fstream>
-#include <vector>
-#include <string>
+#include <ompl/control/SpaceInformation.h>
+#include <ompl/base/goals/GoalState.h>
+#include <ompl/base/spaces/SE2StateSpace.h>
+#include <ompl/control/spaces/RealVectorControlSpace.h>
+#include <ompl/control/planners/kpiece/KPIECE1.h>
+#include <ompl/control/planners/rrt/RRT.h>
+#include <ompl/control/SimpleSetup.h>
+#include <ompl/config.h>
 
 //-----------------------------------------------------------------------------
 
@@ -63,7 +74,6 @@ public:
   static std::string header( void ) {
     return "x, y, theta";
   }
-
 
   friend std::ostream& operator<<(std::ostream& ostr, const car_state_c& state);
 };
@@ -235,6 +245,7 @@ private:
 
   Real WHEEL_BASE;
 
+  Real PLANNER_STEP_SIZE;
 
 private:
   Real MAX_STEERING_ANGLE;
@@ -265,7 +276,8 @@ public:
   // Constructors
   //---------------------------------------------------------------------------
   car_c( void );
-
+  car_c( const ompl::base::StateSpace *space );
+    
   //---------------------------------------------------------------------------
   // Destructor
   //---------------------------------------------------------------------------
@@ -306,13 +318,24 @@ protected:
   void compensate_for_roll_pitch( void );
 
   //---------------------------------------------------------------------------
+  // OMPL
+  //---------------------------------------------------------------------------
+  void plan_via_ompl( void );
+public:
+  void operator()( const ompl::base::State *state, const ompl::control::Control *control, std::valarray<double> &dstate) const;
+  void update(ompl::base::State *state, const std::valarray<double> &dstate) const;
+
+protected:
+  const ompl::base::StateSpace *space_;
+
+  //---------------------------------------------------------------------------
   // ODE 
   //---------------------------------------------------------------------------
   car_state_c ode( const Real& theta, const car_command_c& command );
   car_command_c inverse_ode( const Real& theta, const car_state_c& dstate );
 
   //Real backtracking_line_search( const Real& u_s )
-  Real speed_optimization_function( const Real& u_s, const Real& x_dot, const Real& y_dot, const Real& costheta, const Real& sintheta );
+  Real lissajous_speed_optimization_function( const Real& u_s, const Real& x_dot, const Real& y_dot, const Real& costheta, const Real& sintheta );
 
   //---------------------------------------------------------------------------
   // Auditing 
@@ -347,6 +370,114 @@ protected:
 private:
 };
 
+//-----------------------------------------------------------------------------
+
+/// Simple integrator: Euclidean method
+template<typename F>
+class EulerIntegrator {
+public:
+
+  EulerIntegrator(const ompl::base::StateSpace *space, double timeStep) : 
+    space_(space), 
+    timeStep_(timeStep), 
+    ode_(space) 
+  { }
+
+  void propagate(const ompl::base::State *start, const ompl::control::Control *control, const double duration, ompl::base::State *result) const {
+    double t = timeStep_;
+    std::valarray<double> dstate;
+    space_->copyState(result, start);
+    while( t < duration + std::numeric_limits<double>::epsilon() ) {
+      ode_( result, control, dstate );
+      ode_.update( result, timeStep_ * dstate );
+      t += timeStep_;
+    }
+    if( t + std::numeric_limits<double>::epsilon() > duration ) {
+      ode_(result, control, dstate);
+      ode_.update(result, (t - duration) * dstate);
+    }
+  }
+
+  double getTimeStep(void) const {
+    return timeStep_;
+  }
+
+  void setTimeStep(double timeStep) {
+    timeStep_ = timeStep;
+  }
+
+private:
+  const ompl::base::StateSpace *space_;
+  double timeStep_;
+  F      ode_;
+};
+
+//-----------------------------------------------------------------------------
+
+bool isStateValid(const ompl::control::SpaceInformation *si, const ompl::base::State *state) {
+  //    ompl::base::ScopedState<ompl::base::SE2StateSpace>
+  /// cast the abstract state type to the type we expect
+  const ompl::base::SE2StateSpace::StateType *se2state = state->as<ompl::base::SE2StateSpace::StateType>();
+
+  /// extract the first component of the state and cast it to what we expect
+  const ompl::base::RealVectorStateSpace::StateType *pos = se2state->as<ompl::base::RealVectorStateSpace::StateType>(0);
+
+  /// extract the second component of the state and cast it to what we expect
+  const ompl::base::SO2StateSpace::StateType *rot = se2state->as<ompl::base::SO2StateSpace::StateType>(1);
+
+  /// check validity of state defined by pos & rot
+
+  // return a value that is always true but uses the two variables we define, so we avoid compiler warnings
+  return si->satisfiesBounds(state) && (const void*)rot != (const void*)pos;
+}
+
+//-----------------------------------------------------------------------------
+
+/// @cond IGNORE
+class DemoControlSpace : public ompl::control::RealVectorControlSpace
+{
+public:
+
+  DemoControlSpace(const ompl::base::StateSpacePtr &stateSpace) : 
+    ompl::control::RealVectorControlSpace(stateSpace, 2)
+  { }
+};
+
+//-----------------------------------------------------------------------------
+
+class DemoStatePropagator : public ompl::control::StatePropagator
+{
+public:
+
+  DemoStatePropagator(const ompl::control::SpaceInformationPtr &si) : 
+    ompl::control::StatePropagator(si), integrator_(si->getStateSpace().get(), 0.0)
+  { }
+
+  virtual void propagate(const ompl::base::State *state, const ompl::control::Control* control, const double duration, ompl::base::State *result) const {
+    integrator_.propagate(state, control, duration, result);
+  }
+
+  void setIntegrationTimeStep(double timeStep) {
+    integrator_.setTimeStep(timeStep);
+  }
+
+  double getIntegrationTimeStep(void) const {
+    return integrator_.getTimeStep();
+  }
+
+  EulerIntegrator< car_c > integrator_;
+};
+
+/*
+int main(int, char **)
+{
+    std::cout << "OMPL version: " << OMPL_VERSION << std::endl;
+
+    planWithSimpleSetup();
+
+    return 0;
+}
+*/
 //-----------------------------------------------------------------------------
 
 #endif // _GAZEBO_CAR_H_

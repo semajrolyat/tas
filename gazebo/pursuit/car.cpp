@@ -9,6 +9,10 @@ GZ_REGISTER_MODEL_PLUGIN( car_c )
 car_c::car_c( void ) { 
 
 }
+//-----------------------------------------------------------------------------
+car_c::car_c( const ompl::base::StateSpace *space ) : space_(space) {
+
+}
 
 //-----------------------------------------------------------------------------
 //-----------------------------------------------------------------------------
@@ -198,6 +202,12 @@ void car_c::Load(gazebo::physics::ModelPtr _model, sdf::ElementPtr _sdf) {
     return;
   } 
   SPINDLE_LEVER_LENGTH = _sdf->GetElement( "spindle_lever_length" )->GetValueDouble();
+
+  if( !_sdf->HasElement("planner_step_size") ) {
+    gzerr << "Unable to find parameter: planner_step_size\n";
+    return;
+  } 
+  PLANNER_STEP_SIZE = _sdf->GetElement( "planner_step_size" )->GetValueDouble();
 
   // Compute Steering Linkage Helpers
   BASE_LINK_LENGTH_SQ = BASE_LINK_LENGTH * BASE_LINK_LENGTH;
@@ -398,30 +408,8 @@ void car_c::push( const car_command_c& command ) {
 
   Real desired_speed = command.speed;
   Real actual_speed = speed();
-///*
-  Real f = SPEED_CONTROL_KP * ( desired_speed - actual_speed );
-//*/
-/*
-  Real f = SPEED_CONTROL_KP * ( desired_speed - actual_speed ) +
-           50.0 * ( 2.0 - model->GetRelativeLinearAccel().x);
-*/
-  /*
-  car_state_c _state = state();
-  gazebo::math::Quaternion r = gazebo::math::Quaternion(0.0, 0.0, _state.theta);
-  gazebo::math::Vector3 _speed = gazebo::math::Vector3( f,0.0,0.0 );
-  gazebo::math::Vector3 v = r.RotateVector( _speed );
-  body->AddForce( v );
-  */
-/*
-  car_state_c _state = state();
-  gazebo::math::Quaternion r = gazebo::math::Quaternion(0.0, 0.0, _state.theta);
-  gazebo::math::Vector3 _x = gazebo::math::Vector3( 1.0, 0.0, 0.0 );
-  gazebo::math::Vector3 d = r.RotateVector( _x );
-  d.z = 0.0;
-  gazebo::math::Vector3 v = d.Normalize() * f;
-  body->AddForce( v );
-*/
 
+  Real f = SPEED_CONTROL_KP * ( desired_speed - actual_speed );
 
   gazebo::math::Vector3 d = orientation( );
   gazebo::math::Vector3 v = d * f;
@@ -435,16 +423,6 @@ void car_c::steer_direct( const Real& _steering_angle ) {
   kingpin_front_left->SetAngle( 0, gazebo::math::Angle( _steering_angle ) );
   kingpin_front_right->SetAngle( 0, gazebo::math::Angle( _steering_angle ) );
 
-/*
-  gazebo::math::Pose l = wheel_front_left->GetRelativePose();
-  gazebo::math::Pose r = wheel_front_right->GetRelativePose();
-
-  l.Set( l.pos.x, l.pos.y, l.pos.z, l.rot.GetRoll(), l.rot.GetPitch(), _steering_angle );
-  r.Set( r.pos.x, r.pos.y, r.pos.z, r.rot.GetRoll(), r.rot.GetPitch(), _steering_angle );
-
-  wheel_front_left->SetRelativePose( l );
-  wheel_front_right->SetRelativePose( r );
-*/
 }
 
 //-----------------------------------------------------------------------------
@@ -483,7 +461,7 @@ car_state_c car_c::ode( const Real& theta, const car_command_c& command ) {
 
 
 //------------------------------------------------------------------------------
-Real car_c::speed_optimization_function( const Real& u_s, const Real& dx, const Real& dy, const Real& costheta, const Real& sintheta ) {
+Real car_c::lissajous_speed_optimization_function( const Real& u_s, const Real& dx, const Real& dy, const Real& costheta, const Real& sintheta ) {
   return u_s * u_s + dx * dx + dy * dy - 2.0 * u_s * ( dx * costheta + dy * sintheta );
 }
 
@@ -518,11 +496,11 @@ car_command_c car_c::inverse_ode(const Real& theta, const car_state_c& dstate) {
 
     d1 = 2.0 * u_s - 2.0 * ( dstate.x * c + dstate.y * s );
     du = -d1/2.0;
-    f0 = speed_optimization_function(u_s, dstate.x, dstate.y, c, s );
-    f = speed_optimization_function( u_s + t * du, dstate.x, dstate.y, c, s );
+    f0 = lissajous_speed_optimization_function(u_s, dstate.x, dstate.y, c, s );
+    f = lissajous_speed_optimization_function( u_s + t * du, dstate.x, dstate.y, c, s );
     while( f > f0 + alpha * t * d1 * du ) {
       t = beta * t;
-      f = speed_optimization_function( u_s + t * du, dstate.x, dstate.y, c, s );
+      f = lissajous_speed_optimization_function( u_s + t * du, dstate.x, dstate.y, c, s );
     }
     u_s = u_s + t * du;
   
@@ -653,13 +631,14 @@ car_state_c car_c::lissajous( const Real& t, const Real& a, const Real& b, const
 
 //-----------------------------------------------------------------------------
 void car_c::plan_lissajous( void ) {
-  Real dt = 0.025;  // Note: this is the highest possible step size before loss of stability
+  //Real dt = 0.025;  // Note: this is the highest possible step size before loss of stability
+  Real dt = PLANNER_STEP_SIZE;
   Real Ks = LISSAJOUS_KS;
   Real Kd = LISSAJOUS_KD;
   Real DU_speed = LISSAJOUS_DU_SPEED;
   Real DU_angle = LISSAJOUS_DU_ANGLE;
   Real period = 2 * PI;
-  car_state_c initial( 2.0, 0.0, PI/2.0 );
+  car_state_c initial( 4.0, 0.0, PI/2.0 );
   state( initial );
   car_state_c dq( 0.0, 0.0, 0.0 );
   car_state_c q = state();
@@ -669,7 +648,7 @@ void car_c::plan_lissajous( void ) {
 
   Real alpha = 10.0;
   for( Real t = dt; t <= period * alpha + dt; t += dt ) {
-    car_state_c q_desired = lissajous( t / alpha, 1.0, 2.0, 2.0, 2.0, PI/2.0 );
+    car_state_c q_desired = lissajous( t / alpha, 1.0, 2.0, 4.0, 4.0, PI/2.0 );
     q = state();
     car_state_c dq_desired = q_desired - q;
     car_state_c delta_q = Ks * (q_desired - q) + Kd * (dq_desired - dq);
@@ -696,5 +675,100 @@ void car_c::plan_lissajous( void ) {
   state( initial );
 }
 
+//-----------------------------------------------------------------------------
+// OMPL
+//-----------------------------------------------------------------------------
+
+void car_c::plan_via_ompl(void) {
+  /// construct the state space we are planning in
+  ompl::base::StateSpacePtr space(new ompl::base::SE2StateSpace());
+
+  /// set the bounds for the R^2 part of SE(2)
+  ompl::base::RealVectorBounds bounds(2);
+  bounds.setLow(-25.0);
+  bounds.setHigh(25.0);
+
+  space->as<ompl::base::SE2StateSpace>()->setBounds(bounds);
+
+  // create a control space
+  ompl::control::ControlSpacePtr cspace(new DemoControlSpace(space));
+
+  // set the bounds for the control space
+  ompl::base::RealVectorBounds cbounds(2);
+  cbounds.setLow(-0.3);
+  cbounds.setHigh(0.3);
+
+  cspace->as<DemoControlSpace>()->setBounds(cbounds);
+
+  // define a simple setup class
+  ompl::control::SimpleSetup ss(cspace);
+
+  ompl::control::SpaceInformationPtr si( ss.getSpaceInformation() );
+  ompl::base::ProblemDefinition pdef(si);
+
+  /// set state validity checking for this space
+  ss.setStateValidityChecker(boost::bind(&isStateValid, ss.getSpaceInformation().get(), _1));
+
+  /// set the propagation routine for this space
+  ss.setStatePropagator(ompl::control::StatePropagatorPtr(new DemoStatePropagator(ss.getSpaceInformation())));
+
+  /// create a start state
+  ompl::base::ScopedState<ompl::base::SE2StateSpace> start(space);
+  start->setX(0.0);
+  start->setY(1.0);
+  start->setYaw(0.0);
+
+  /// create a  goal state; use the hard way to set the elements
+  ompl::base::ScopedState<ompl::base::SE2StateSpace> goal(space);
+  goal->setX(0.0);
+  goal->setY(0.0);
+  goal->setYaw(0.0);
+
+  /// set the start and goal states
+  ss.setStartAndGoalStates(start, goal, 0.05);
+
+  ompl::base::PlannerPtr planner( new ompl::control::RRT(si) );
+  //planner->setProblemDefinition( pdef );
+  ss.setPlanner( planner );
+
+  /// we want to have a reasonable value for the propagation step size
+  ss.setup();
+  static_cast<DemoStatePropagator*>(ss.getStatePropagator().get())->setIntegrationTimeStep(ss.getSpaceInformation()->getPropagationStepSize());
+
+  /// attempt to solve the problem within one second of planning time
+  ompl::base::PlannerStatus solved = ss.solve(10.0);
+
+  if (solved) {
+    std::cout << "Found solution:" << std::endl;
+    /// print the path to screen
+
+    ss.getSolutionPath().asGeometric().print(std::cout);
+  } else {
+    std::cout << "No solution found" << std::endl;
+  }
+}
+
+//-----------------------------------------------------------------------------
+
+    /// implement the function describing the robot motion: qdot = f(q, u)
+void car_c::operator()(const ompl::base::State *state, const ompl::control::Control *control, std::valarray<double> &dstate) const {
+        const double *u = control->as<ompl::control::RealVectorControlSpace::ControlType>()->values;
+        const double theta = state->as<ompl::base::SE2StateSpace::StateType>()->getYaw();
+
+        dstate.resize(3);
+        dstate[0] = u[0] * cos(theta);
+        dstate[1] = u[0] * sin(theta);
+        dstate[2] = u[0] * tan(u[1]) / WHEEL_BASE;
+    }
+//-----------------------------------------------------------------------------
+
+    /// implement y(n+1) = y(n) + d
+void car_c::update(ompl::base::State *state, const std::valarray<double> &dstate) const {
+        ompl::base::SE2StateSpace::StateType &s = *state->as<ompl::base::SE2StateSpace::StateType>();
+        s.setX(s.getX() + dstate[0]);
+        s.setY(s.getY() + dstate[1]);
+        s.setYaw(s.getYaw() + dstate[2]);
+        space_->enforceBounds(state);
+    }
 //-----------------------------------------------------------------------------
 
