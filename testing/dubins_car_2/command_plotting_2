@@ -1,0 +1,9 @@
+n = length(v_desired);
+
+hold on
+plot(time,phi_actual,'LineWidth',2, 'Color', [0.0,0.0,0.0]);
+plot(time,phi_desired,'-r','LineWidth',2);
+
+plot(time,v_actual,'-g','LineWidth',2);
+plot(time,v_desired,'-b','LineWidth',2);
+hold off

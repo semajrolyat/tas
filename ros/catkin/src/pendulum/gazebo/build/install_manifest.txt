@@ -1,0 +1,1 @@
+/home/james/local/lib/gazebo_plugins/libros_pendulum_plugin.so

@@ -1,0 +1,2 @@
+/home/james/tas/ros/src/pendulum/gazebo/build/CMakeFiles/ros_model_plugin.dir
+/home/james/tas/ros/src/pendulum/gazebo/build/CMakeFiles/ros_pendulum_plugin.dir

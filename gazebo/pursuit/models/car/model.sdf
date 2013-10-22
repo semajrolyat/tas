@@ -1,0 +1,494 @@
+<?xml version="1.0" ?>
+<sdf version="1.4">
+  <model name="car">
+    <link name="body">
+      <pose>0 0 0.09 0 0 0</pose>
+      <inertial>
+        <pose>0 0 0 0 0 0</pose>
+        <inertia>
+          <ixx>0.41667</ixx>
+          <ixy>0</ixy>
+          <ixz>0</ixz>
+          <iyy>1.41667</iyy>
+          <iyz>0</iyz>
+          <izz>1.66667</izz>
+        </inertia>
+        <mass>100.0</mass>
+<!--
+        <inertia>
+          <ixx>1000.0</ixx>
+          <ixy>0</ixy>
+          <ixz>0</ixz>
+          <iyy>1000.0</iyy>
+          <iyz>0</iyz>
+          <izz>1.66667</izz>
+        </inertia>
+        <mass>1000.0</mass>
+-->
+      </inertial>
+      <collision name="body_col">
+        <pose>0 0 0 0 0 0</pose>
+        <geometry>
+          <box>
+            <size>0.4 0.2 0.1</size>
+          </box>
+        </geometry>
+      </collision>
+      <visual name="body_vis">
+        <pose>0 0 0 0 0 0</pose>
+        <geometry>
+          <box>
+            <size>0.4 0.2 0.1</size>
+          </box>
+        </geometry>
+        <material>
+          <script>
+            <uri>file://media/materials/scripts/gazebo.material</uri>
+            <name>Gazebo/Green</name>
+          </script>
+        </material>
+      </visual>
+    </link>
+    <link name="rear_driveshaft">
+      <pose>-0.125 0 0.04 0 1.5708 0</pose>
+      <inertial>
+	<pose>0 0 0 0 0 0</pose>
+        <inertia>
+          <ixx>0.001</ixx>
+          <ixy>0</ixy>
+          <ixz>0</ixz>
+          <iyy>0.001</iyy>
+          <iyz>0</iyz>
+          <izz>0.001</izz>
+        </inertia>
+        <mass>1.0</mass>
+      </inertial>
+<!--
+      <visual name="rear_driveshaft_vis">
+        <pose>0 0 0 0 0 0</pose>
+        <geometry>
+          <cylinder>
+            <radius>0.004</radius>
+            <length>0.01</length>
+          </cylinder>
+        </geometry>
+        <material>
+          <script>
+            <uri>file://media/materials/scripts/gazebo.material</uri>
+            <name>Gazebo/Green</name>
+          </script>
+        </material>
+      </visual>
+-->
+    </link>
+    <link name="steering_link">
+      <pose>0.125 0 0.04 0 1.5708 0</pose>
+      <inertial>
+	<pose>0 0 0 0 0 0</pose>
+        <inertia>
+          <ixx>0.001</ixx>
+          <ixy>0</ixy>
+          <ixz>0</ixz>
+          <iyy>0.001</iyy>
+          <iyz>0</iyz>
+          <izz>0.001</izz>
+        </inertia>
+        <mass>1.0</mass>
+      </inertial>
+<!--
+      <visual name="steering_link_vis">
+        <pose>0 0 0 0 0 0</pose>
+        <geometry>
+          <cylinder>
+            <radius>0.004</radius>
+            <length>0.01</length>
+          </cylinder>
+        </geometry>
+        <material>
+          <script>
+            <uri>file://media/materials/scripts/gazebo.material</uri>
+            <name>Gazebo/Green</name>
+          </script>
+        </material>
+      </visual>
+-->
+    </link>
+    <link name="spindle_front_left">
+<!--      <pose>0.125 0.095 0.04 1.5708 0 0</pose> -->
+      <pose>0.125 0.12 0.04 1.5708 0 0</pose>
+      <inertial>
+	<pose>0 0 0 0 0 0</pose>
+        <inertia>
+          <ixx>0.001</ixx>
+          <ixy>0</ixy>
+          <ixz>0</ixz>
+          <iyy>0.001</iyy>
+          <iyz>0</iyz>
+          <izz>0.001</izz>
+        </inertia>
+        <mass>1.0</mass>
+      </inertial>
+<!--
+      <visual name="spindle_front_left_vis">
+        <pose>0 0 0 0 0 0</pose>
+        <geometry>
+          <cylinder>
+            <radius>0.004</radius>
+            <length>0.01</length>
+          </cylinder>
+        </geometry>
+        <material>
+          <script>
+            <uri>file://media/materials/scripts/gazebo.material</uri>
+            <name>Gazebo/Green</name>
+          </script>
+        </material>
+      </visual>
+-->
+    </link>
+    <link name="spindle_front_right">
+<!--      <pose>0.125 -0.095 0.04 1.5708 0 0</pose> -->
+      <pose>0.125 -0.12 0.04 1.5708 0 0</pose>
+      <inertial>
+	<pose>0 0 0 0 0 0</pose>
+        <inertia>
+          <ixx>0.001</ixx>
+          <ixy>0</ixy>
+          <ixz>0</ixz>
+          <iyy>0.001</iyy>
+          <iyz>0</iyz>
+          <izz>0.001</izz>
+        </inertia>
+        <mass>1.0</mass>
+      </inertial>
+<!--
+      <visual name="spindle_front_right_vis">
+        <pose>0 0 0 0 0 0</pose>
+        <geometry>
+          <cylinder>
+            <radius>0.005</radius>
+            <length>0.01</length>
+          </cylinder>
+        </geometry>
+        <material>
+          <script>
+            <uri>file://media/materials/scripts/gazebo.material</uri>
+            <name>Gazebo/Green</name>
+          </script>
+        </material>
+      </visual>
+-->
+    </link>
+    <link name="wheel_front_left">
+      <pose>0.125 0.12 0.04 1.5708 0 0</pose>
+      <inertial>
+	<pose>0 0 0 0 0 0</pose>
+        <inertia>
+          <ixx>0.0008</ixx>
+          <ixy>0</ixy>
+          <ixz>0</ixz>
+          <iyy>0.000533</iyy>
+          <iyz>0</iyz>
+          <izz>0.000533</izz>
+        </inertia>
+        <mass>1.0</mass>
+      </inertial>
+      <collision name="wheel_front_left_col">
+        <pose>0 0 0 0 0 0</pose>
+        <geometry>
+          <cylinder>
+            <radius>0.04</radius>
+            <length>0.04</length>
+          </cylinder>
+        </geometry>
+      </collision>
+      <visual name="wheel_front_left_vis">
+        <pose>0 0 0 0 0 0</pose>
+        <geometry>
+          <cylinder>
+            <radius>0.04</radius>
+            <length>0.04</length>
+          </cylinder>
+        </geometry>
+        <material>
+          <script>
+            <uri>file://media/materials/scripts/gazebo.material</uri>
+            <name>Gazebo/Red</name>
+          </script>
+        </material>
+      </visual>
+    </link>
+    <link name="wheel_front_right">
+      <pose>0.125 -0.12 0.04 1.5708 0 0</pose>
+      <inertial>
+	<pose>0 0 0 0 0 0</pose>
+        <inertia>
+          <ixx>0.0008</ixx>
+          <ixy>0</ixy>
+          <ixz>0</ixz>
+          <iyy>0.000533</iyy>
+          <iyz>0</iyz>
+          <izz>0.000533</izz>
+        </inertia>
+        <mass>1.0</mass>
+      </inertial>
+      <collision name="wheel_front_right_col">
+        <pose>0 0 0 0 0 0</pose>
+        <geometry>
+          <cylinder>
+            <radius>0.04</radius>
+            <length>0.04</length>
+          </cylinder>
+        </geometry>
+      </collision>
+      <visual name="wheel_front_right_vis">
+        <pose>0 0 0 0 0 0</pose>
+        <geometry>
+          <cylinder>
+            <radius>0.04</radius>
+            <length>0.04</length>
+          </cylinder>
+        </geometry>
+        <material>
+          <script>
+            <uri>file://media/materials/scripts/gazebo.material</uri>
+            <name>Gazebo/Red</name>
+          </script>
+        </material>
+      </visual>
+    </link>
+    <link name="wheel_rear_left">
+      <pose>-0.125 0.12 0.04 1.5708 0 0</pose>
+      <inertial>
+	<pose>0 0 0 0 0 0</pose>
+        <inertia>
+          <ixx>0.0008</ixx>
+          <ixy>0</ixy>
+          <ixz>0</ixz>
+          <iyy>0.000533</iyy>
+          <iyz>0</iyz>
+          <izz>0.000533</izz>
+        </inertia>
+        <mass>1.0</mass>
+      </inertial>
+      <collision name="wheel_rear_left_col">
+        <pose>0 0 0 0 0 0</pose>
+        <geometry>
+          <cylinder>
+            <radius>0.04</radius>
+            <length>0.04</length>
+          </cylinder>
+        </geometry>
+      </collision>
+      <visual name="wheel_rear_left_vis">
+        <pose>0 0 0 0 0 0</pose>
+        <geometry>
+          <cylinder>
+            <radius>0.04</radius>
+            <length>0.04</length>
+          </cylinder>
+        </geometry>
+        <material>
+          <script>
+            <uri>file://media/materials/scripts/gazebo.material</uri>
+            <name>Gazebo/Red</name>
+          </script>
+        </material>
+      </visual>
+    </link>
+    <link name="wheel_rear_right">
+      <pose>-0.125 -0.12 0.04 1.5708 0 0</pose>
+      <inertial>
+	<pose>0 0 0 0 0 0</pose>
+        <inertia>
+          <ixx>0.0008</ixx>
+          <ixy>0</ixy>
+          <ixz>0</ixz>
+          <iyy>0.000533</iyy>
+          <iyz>0</iyz>
+          <izz>0.000533</izz>
+        </inertia>
+        <mass>1.0</mass>
+      </inertial>
+      <collision name="wheel_rear_right_col">
+        <pose>0 0 0 0 0 0</pose>
+        <geometry>
+          <cylinder>
+            <radius>0.04</radius>
+            <length>0.04</length>
+          </cylinder>
+        </geometry>
+      </collision>
+      <visual name="wheel_rear_right_vis">
+        <pose>0 0 0 0 0 0</pose>
+        <geometry>
+          <cylinder>
+            <radius>0.04</radius>
+            <length>0.04</length>
+          </cylinder>
+        </geometry>
+        <material>
+          <script>
+            <uri>file://media/materials/scripts/gazebo.material</uri>
+            <name>Gazebo/Red</name>
+          </script>
+        </material>
+      </visual>
+    </link>
+
+    <!-- STEERING JOINTS -->
+    <joint name="steering_box" type="revolute">
+      <parent>body</parent>
+      <child>steering_link</child>
+      <axis>
+        <dynamics>
+          <damping>0.000000</damping>
+          <friction>0.000000</friction>
+        </dynamics>
+        <xyz>1 0 0</xyz>
+<!--
+	<limit>
+          <lower>-0.7854</lower> 
+          <upper>0.7854</upper> 
+	</limit>
+-->
+      </axis>
+    </joint>
+    <joint name="rear_differential" type="revolute">
+      <parent>body</parent>
+      <child>rear_driveshaft</child>
+      <axis>
+        <dynamics>
+          <damping>0.000000</damping>
+          <friction>0.000000</friction>
+        </dynamics>
+        <xyz>1 0 0</xyz>
+<!--
+	<limit>
+          <lower>-0.7854</lower> 
+          <upper>0.7854</upper> 
+	</limit>
+-->
+      </axis>
+    </joint>
+    <joint name="kingpin_front_left" type="revolute">
+      <parent>body</parent>
+      <child>spindle_front_left</child>
+      <axis>
+        <dynamics>
+          <damping>0.000000</damping>
+          <friction>0.000000</friction>
+        </dynamics>
+        <xyz>0 0 1</xyz>
+      </axis>
+    </joint>
+    <joint name="kingpin_front_right" type="revolute">
+      <parent>body</parent>
+      <child>spindle_front_right</child>
+      <axis>
+        <dynamics>
+          <damping>0.000000</damping>
+          <friction>0.000000</friction>
+        </dynamics>
+        <xyz>0 0 1</xyz>
+      </axis>
+    </joint>
+
+    <!-- WHEEL BEARINGS -->
+    <joint name="bearing_front_left" type="revolute">
+      <parent>spindle_front_left</parent>
+      <child>wheel_front_left</child>
+      <axis>
+        <dynamics>
+          <damping>0.000000</damping>
+          <friction>0.000000</friction>
+        </dynamics>
+        <xyz>0 1 0</xyz>
+      </axis>
+    </joint>
+    <joint name="bearing_front_right" type="revolute">
+      <parent>spindle_front_right</parent>
+      <child>wheel_front_right</child>
+      <axis>
+        <dynamics>
+          <damping>0.000000</damping>
+          <friction>0.000000</friction>
+        </dynamics>
+        <xyz>0 1 0</xyz>
+      </axis>
+    </joint>
+    <joint name="bearing_rear_left" type="revolute">
+      <parent>body</parent>
+      <child>wheel_rear_left</child>
+      <axis>
+        <dynamics>
+          <damping>0.000000</damping>
+          <friction>0.000000</friction>
+        </dynamics>
+        <xyz>0 1 0</xyz>
+<!--
+	<limit>
+	  <upper>0.0</upper>
+	  <lower>0.0</lower>
+	</limit>
+-->
+      </axis>
+    </joint>
+    <joint name="bearing_rear_right" type="revolute">
+      <parent>body</parent>
+      <child>wheel_rear_right</child>
+      <axis>
+        <dynamics>
+          <damping>0.000000</damping>
+          <friction>0.000000</friction>
+        </dynamics>
+        <xyz>0 1 0</xyz>
+<!--
+	<limit>
+	  <upper>0.0</upper>
+	  <lower>0.0</lower>
+	</limit>
+-->
+      </axis>
+    </joint>
+
+    <plugin name='car_controller' filename='libcar_controller.so'>
+      <!-- Tunable Parameters -->
+      <max_speed>1.0</max_speed>
+      <max_steering_velocity>0.31416</max_steering_velocity>
+<!--
+      <steering_control_kp>100.0</steering_control_kp>
+      <steering_control_kd>10.0</steering_control_kd>
+      <speed_control_kp>10000.0</speed_control_kp>
+-->
+<!--
+      <steering_control_kp>100.0</steering_control_kp>
+      <steering_control_kd>20.0</steering_control_kd>
+-->
+
+      <!-- Ellipse -->
+<!--
+      <steering_control_kp>10.0</steering_control_kp>
+      <steering_control_kd>1.0</steering_control_kd>
+      <speed_control_kp>500.0</speed_control_kp>
+-->
+      <!-- Lissajous -->
+      <steering_control_kp>10.0</steering_control_kp>
+      <steering_control_kd>1.0</steering_control_kd>
+      <speed_control_kp>500.0</speed_control_kp>
+      <!-- Testing Parameters -->
+      <lissajous_ks>0.500</lissajous_ks>
+      <lissajous_kd>0.0001</lissajous_kd>
+      <lissajous_du_speed>48.00</lissajous_du_speed>
+      <lissajous_du_angle>1.425</lissajous_du_angle>
+      <!-- Steering Linkage - Tune at own risk - Deactive -->
+      <max_steering_angle_deg>30.0</max_steering_angle_deg>
+      <kingpin_distance>0.09</kingpin_distance>
+      <steering_lever_base_angle_deg>75.0</steering_lever_base_angle_deg>
+      <steering_lever_length>0.03</steering_lever_length>
+      <tie_rod_length>0.075</tie_rod_length>
+      <spindle_lever_length>0.055</spindle_lever_length>
+    </plugin>
+
+  </model>
+</sdf>

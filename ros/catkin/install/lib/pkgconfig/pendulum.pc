@@ -1,0 +1,6 @@
+Name: pendulum
+Description: Description of pendulum
+Version: 0.0.0
+Cflags: -I/home/james/tas/ros/catkin/install/include
+Libs: -L/home/james/tas/ros/catkin/install/lib 
+Requires: roscpp rospy std_msgs message_runtime

@@ -1,0 +1,33 @@
+To run open three terminals
+
+Terminal #1 - ROSCORE
+roscore
+
+Terminal #2 - CONTROLLER (RPC)
+in catkin directory
+source ./devel/setup.bash
+run pendulum rpc_standup_controller
+
+Terminal #3 - GAZEBO
+in catkin directory
+source ./devel/setup.bash
+??export GAZEBO_PLUGIN_PATH=${GAZEBO_PLUGIN_PATH}:/home/james/tas/ros/catkin/src/pendulum/gazebo/build
+??export GAZEBO_MODEL_PATH=${GAZEBO_MODEL_PATH}:/home/james/tas/ros/catkin/src/pendulum/gazebo/models/
+gazebo /home/james/tas/ros/catkin/src/pendulum/gazebo/my.world
+
+
+
+
+******************ABOVE WORKED BUT BELOW IS MORE LIKELY CORRECT****************
+
+
+*For Robot*
+source /home/james/tas/ros/catkin/devel/setup.bash
+export GAZEBO_PLUGIN_PATH=/home/james/tas/ros/catkin/devel/lib:${GAZEBO_PLUGIN_PATH}
+export GAZEBO_MODEL_PATH=/home/james/tas/ros/catkin/src/pendulum/gazebo/models:${GAZEBO_MODEL_PATH}
+gazebo /home/james/tas/ros/catkin/src/pendulum/gazebo/my.world
+
+
+*For Controller*
+source /home/james/tas/ros/catkin/devel/setup.bash
+rosrun pendulum standup_controller

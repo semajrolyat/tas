@@ -1,0 +1,18 @@
+n = length(v_desired);
+%for i=1:n
+%    while theta(i) < 0
+%        theta(i) = theta(i) + 2*pi;
+%    end
+%    while theta(i) >= 2*pi
+%        theta(i) = theta(i) - 2*pi;
+%    end   
+%end
+
+%u = cos(theta);
+%v = sin(theta);
+hold on
+plot(v_command_x,v_command_y,'-r','LineWidth',2);
+%quiver(x,y,u,v,0.1,'-b','LineWidth',2);
+%plot(x(1),y(1),'-ko','LineWidth',2,'MarkerSize',10);
+%plot(x(n),y(n),'-kx','LineWidth',2,'MarkerSize',10);
+hold off

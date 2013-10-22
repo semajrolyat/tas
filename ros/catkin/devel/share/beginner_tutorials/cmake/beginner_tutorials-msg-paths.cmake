@@ -1,0 +1,2 @@
+set(beginner_tutorials_MSG_INCLUDE_DIRS )
+set(beginner_tutorials_MSG_DEPENDENCIES std_msgs)
