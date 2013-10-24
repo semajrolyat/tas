@@ -137,11 +137,18 @@ void car_c::Load(gazebo::physics::ModelPtr _model, sdf::ElementPtr _sdf) {
   //---------------------------------------------------------------------------
   // Parameters
   //---------------------------------------------------------------------------
+  
   if( !_sdf->HasElement("max_speed") ) {
     gzerr << "Unable to find parameter: max_speed\n";
     return;
   } 
   MAX_SPEED = _sdf->GetElement( "max_speed" )->GetValueDouble();
+
+  if( !_sdf->HasElement("max_acceleration") ) {
+    gzerr << "Unable to find parameter: max_acceleration\n";
+    return;
+  } 
+  MAX_ACCELERATION = _sdf->GetElement( "max_acceleration" )->GetValueDouble();
 
   if( !_sdf->HasElement("max_steering_velocity") ) {
     gzerr << "Unable to find parameter: max_steering_velocity\n";
@@ -149,24 +156,97 @@ void car_c::Load(gazebo::physics::ModelPtr _model, sdf::ElementPtr _sdf) {
   } 
   MAX_STEERING_VELOCITY = _sdf->GetElement( "max_steering_velocity" )->GetValueDouble();
 
-  if( !_sdf->HasElement("steering_control_kp") ) {
-    gzerr << "Unable to find parameter: steering_control_kp\n";
+  // Planner Parameters
+  if( !_sdf->HasElement("planner") ) {
+    gzerr << "Unable to find parameter: planner\n";
     return;
   } 
-  STEERING_CONTROL_KP = _sdf->GetElement( "steering_control_kp" )->GetValueDouble();
+  std::string planner = _sdf->GetElement( "planner" )->GetValueString();
+  if( planner.compare("rrt") == 0 ) {
+    PLANNER = RRT;
+  } else if( planner.compare("lissajous") == 0 ) {
+    PLANNER = LISSAJOUS;
+  } else {
+    PLANNER = LISSAJOUS;
+  }
 
-  if( !_sdf->HasElement("steering_control_kd") ) {
-    gzerr << "Unable to find parameter: steering_control_kd\n";
+  if( PLANNER == RRT ) {
+    if( !_sdf->HasElement("rrt_planner_step_size") ) {
+      gzerr << "Unable to find parameter: rrt_planner_step_size\n";
+      return;
+    } 
+    PLANNER_STEP_SIZE = _sdf->GetElement( "rrt_planner_step_size" )->GetValueDouble();
+    if( !_sdf->HasElement("rrt_steering_control_kp") ) {
+      gzerr << "Unable to find parameter: rrt_steering_control_kp\n";
+      return;
+    } 
+    STEERING_CONTROL_KP = _sdf->GetElement( "rrt_steering_control_kp" )->GetValueDouble();
+
+    if( !_sdf->HasElement("rrt_steering_control_kd") ) {
+      gzerr << "Unable to find parameter: rrt_steering_control_kd\n";
+      return;
+    } 
+    STEERING_CONTROL_KD = _sdf->GetElement( "rrt_steering_control_kd" )->GetValueDouble();
+
+    if( !_sdf->HasElement("rrt_speed_control_kp") ) {
+      gzerr << "Unable to find parameter: rrt_speed_control_kp\n";
+      return;
+    } 
+    SPEED_CONTROL_KP = _sdf->GetElement( "rrt_speed_control_kp" )->GetValueDouble();
+
+    if( !_sdf->HasElement("rrt_speed_control_kd") ) {
+      gzerr << "Unable to find parameter: rrt_speed_control_kd\n";
+      return;
+    } 
+    SPEED_CONTROL_KD = _sdf->GetElement( "rrt_speed_control_kd" )->GetValueDouble();
+  
+  } else if( PLANNER == LISSAJOUS ) {
+    if( !_sdf->HasElement("lissajous_planner_step_size") ) {
+      gzerr << "Unable to find parameter: lissajous_planner_step_size\n";
+      return;
+    } 
+    PLANNER_STEP_SIZE = _sdf->GetElement( "lissajous_planner_step_size" )->GetValueDouble();
+
+    if( !_sdf->HasElement("lissajous_steering_control_kp") ) {
+      gzerr << "Unable to find parameter: lissajous_steering_control_kp\n";
+      return;
+    } 
+    STEERING_CONTROL_KP = _sdf->GetElement( "lissajous_steering_control_kp" )->GetValueDouble();
+
+    if( !_sdf->HasElement("lissajous_steering_control_kd") ) {
+      gzerr << "Unable to find parameter: lissajous_steering_control_kd\n";
+      return;
+    } 
+    STEERING_CONTROL_KD = _sdf->GetElement( "lissajous_steering_control_kd" )->GetValueDouble();
+
+    if( !_sdf->HasElement("lissajous_speed_control_kp") ) {
+      gzerr << "Unable to find parameter: lissajous_speed_control_kp\n";
+      return;
+    } 
+    SPEED_CONTROL_KP = _sdf->GetElement( "lissajous_speed_control_kp" )->GetValueDouble();
+  
+    if( !_sdf->HasElement("lissajous_speed_control_kd") ) {
+      gzerr << "Unable to find parameter: lissajous_speed_control_kd\n";
+      return;
+    } 
+    SPEED_CONTROL_KD = _sdf->GetElement( "lissajous_speed_control_kd" )->GetValueDouble();
+  }
+
+  // Steering Parameters
+  if( !_sdf->HasElement("steering") ) {
+    gzerr << "Unable to find parameter: steering\n";
     return;
   } 
-  STEERING_CONTROL_KD = _sdf->GetElement( "steering_control_kd" )->GetValueDouble();
-
-  if( !_sdf->HasElement("speed_control_kp") ) {
-    gzerr << "Unable to find parameter: speed_control_kp\n";
-    return;
-  } 
-  SPEED_CONTROL_KP = _sdf->GetElement( "speed_control_kp" )->GetValueDouble();
-
+  std::string steering = _sdf->GetElement( "steering" )->GetValueString();
+  if( steering.compare("direct") == 0 ) {
+    STEERING = DIRECT;
+  } else if( planner.compare("fourbar") == 0 ) {
+    STEERING = FOURBAR;
+  } else {
+    STEERING = FOURBAR;
+  }
+ 
+  // Double Four Bar Steering Linkage Parameters
   if( !_sdf->HasElement("max_steering_angle_deg") ) {
     gzerr << "Unable to find parameter: max_steering_angle_deg\n";
     return;
@@ -178,12 +258,6 @@ void car_c::Load(gazebo::physics::ModelPtr _model, sdf::ElementPtr _sdf) {
     return;
   } 
   STEERING_LEVER_BASE_ANGLE = _sdf->GetElement( "steering_lever_base_angle_deg" )->GetValueDouble() * PI / 180.0;
-
-  if( !_sdf->HasElement("kingpin_distance") ) {
-    gzerr << "Unable to find parameter: kingpin_distance\n";
-    return;
-  } 
-  BASE_LINK_LENGTH = _sdf->GetElement( "kingpin_distance" )->GetValueDouble();
 
   if( !_sdf->HasElement("steering_lever_length") ) {
     gzerr << "Unable to find parameter: steering_lever_length\n";
@@ -203,13 +277,10 @@ void car_c::Load(gazebo::physics::ModelPtr _model, sdf::ElementPtr _sdf) {
   } 
   SPINDLE_LEVER_LENGTH = _sdf->GetElement( "spindle_lever_length" )->GetValueDouble();
 
-  if( !_sdf->HasElement("planner_step_size") ) {
-    gzerr << "Unable to find parameter: planner_step_size\n";
-    return;
-  } 
-  PLANNER_STEP_SIZE = _sdf->GetElement( "planner_step_size" )->GetValueDouble();
 
-  // Compute Steering Linkage Helpers
+  BASE_LINK_LENGTH = (kingpin_front_left->GetAnchor( 0 ) - steering_box->GetAnchor( 0 )).GetLength();
+
+  // Compute Four Bar Steering Linkage Helpers
   BASE_LINK_LENGTH_SQ = BASE_LINK_LENGTH * BASE_LINK_LENGTH;
   STEERING_LEVER_LENGTH_SQ = STEERING_LEVER_LENGTH * STEERING_LEVER_LENGTH;
   TIEROD_LENGTH_SQ = TIEROD_LENGTH * TIEROD_LENGTH;
@@ -217,7 +288,7 @@ void car_c::Load(gazebo::physics::ModelPtr _model, sdf::ElementPtr _sdf) {
  
   WHEEL_BASE = (steering_link->GetWorldPose().pos - rear_driveshaft->GetWorldPose().pos).GetLength();
 
-  // Derive Steering Linkage Variables
+  // Derive Four Bar Steering Linkage Variables
   Real theta = STEERING_LEVER_BASE_ANGLE;
   Real h_sq = BASE_LINK_LENGTH_SQ + STEERING_LEVER_LENGTH_SQ - 
           2.0 * BASE_LINK_LENGTH * STEERING_LEVER_LENGTH * cos( theta );
@@ -270,8 +341,6 @@ void car_c::Update( ) {
   time = world->GetSimTime().Double() - time_start;
   dtime = time - time_last;
 
-  if( states.size() == 0 )
-    plan_lissajous();
 
   sense( );
   plan( );
@@ -318,6 +387,11 @@ void car_c::sense( void ) {
 
 //-----------------------------------------------------------------------------
 void car_c::plan( void ) {
+  if( states.size() == 0 )
+    if( PLANNER == LISSAJOUS )
+      plan_lissajous();
+    else if( PLANNER == RRT )
+      plan_via_ompl();
 
 }
 
@@ -380,25 +454,30 @@ Real car_c::speed( void ) {
 }
 
 //-----------------------------------------------------------------------------
+Real car_c::acceleration( void ) {
+  return model->GetRelativeLinearAccel().x;
+}
+
+//-----------------------------------------------------------------------------
 void car_c::steer( const car_command_c& command ) {
 
-  //steer_direct( 0.0 );
-  steer_direct( steering_angle() );
-  //steer_double_four_bar( steering_angle() );
+  if( STEERING == FOURBAR ) {
+    steer_double_four_bar( steering_angle() );
+  } else if( STEERING == DIRECT ) {
+    steer_direct( steering_angle() );
+  } else {
+    steer_direct( steering_angle() );
+  }
 
   Real desired_angle = command.angle;
   Real actual_angle = steering_angle();
-  //Real desired_velocity = 0.0;
+
   Real desired_velocity = MAX_STEERING_VELOCITY;
   Real actual_velocity = steering_box->GetVelocity( 0 );
-///*
+
   Real torque = STEERING_CONTROL_KP * ( desired_angle - actual_angle ) + 
                 STEERING_CONTROL_KD * ( desired_velocity - actual_velocity );
-//*/
-/*
-  Real torque = STEERING_CONTROL_KP * ( desired_angle - actual_angle ) + 
-                STEERING_CONTROL_KD * ( 0.0 - actual_velocity );
-*/
+
   steering_box->SetForce( 0, torque );
 
 }
@@ -409,7 +488,13 @@ void car_c::push( const car_command_c& command ) {
   Real desired_speed = command.speed;
   Real actual_speed = speed();
 
+  Real desired_acceleration = MAX_ACCELERATION;
+  Real actual_acceleration = acceleration();
+
   Real f = SPEED_CONTROL_KP * ( desired_speed - actual_speed );
+
+  //Real f = SPEED_CONTROL_KP * ( desired_speed - actual_speed ) + 
+  //         SPEED_CONTROL_KD * ( desired_acceleration - actual_acceleration );
 
   gazebo::math::Vector3 d = orientation( );
   gazebo::math::Vector3 v = d * f;
@@ -695,8 +780,9 @@ void car_c::plan_via_ompl(void) {
 
   // set the bounds for the control space
   ompl::base::RealVectorBounds cbounds(2);
-  cbounds.setLow(-0.3);
-  cbounds.setHigh(0.3);
+  //const Real max_steering_angle = PI/5.0;
+  cbounds.setLow( -MAX_STEERING_ANGLE );
+  cbounds.setHigh( MAX_STEERING_ANGLE );
 
   cspace->as<DemoControlSpace>()->setBounds(cbounds);
 
@@ -712,17 +798,21 @@ void car_c::plan_via_ompl(void) {
   /// set the propagation routine for this space
   ss.setStatePropagator(ompl::control::StatePropagatorPtr(new DemoStatePropagator(ss.getSpaceInformation())));
 
+  car_state_c initial( 0.0, 4.0, 0.0 );
+  car_state_c final( 0.0, 0.0, 0.0 );
+  state( initial );
+
   /// create a start state
   ompl::base::ScopedState<ompl::base::SE2StateSpace> start(space);
-  start->setX(0.0);
-  start->setY(1.0);
-  start->setYaw(0.0);
+  start->setX( initial.x );
+  start->setY( initial.y );
+  start->setYaw( initial.theta );
 
   /// create a  goal state; use the hard way to set the elements
   ompl::base::ScopedState<ompl::base::SE2StateSpace> goal(space);
-  goal->setX(0.0);
-  goal->setY(0.0);
-  goal->setYaw(0.0);
+  goal->setX( final.x );
+  goal->setY( final.y );
+  goal->setYaw( final.theta );
 
   /// set the start and goal states
   ss.setStartAndGoalStates(start, goal, 0.05);
@@ -731,6 +821,7 @@ void car_c::plan_via_ompl(void) {
   //planner->setProblemDefinition( pdef );
   ss.setPlanner( planner );
 
+  //ss.getSpaceInformation()->setPropagationStepSize( PLANNER_STEP_SIZE );
   /// we want to have a reasonable value for the propagation step size
   ss.setup();
   static_cast<DemoStatePropagator*>(ss.getStatePropagator().get())->setIntegrationTimeStep(ss.getSpaceInformation()->getPropagationStepSize());
@@ -743,6 +834,31 @@ void car_c::plan_via_ompl(void) {
     /// print the path to screen
 
     ss.getSolutionPath().asGeometric().print(std::cout);
+
+    unsigned int state_count = ss.getSolutionPath().getStateCount();
+    for( unsigned int i = 0; i < state_count; i++ ) {
+      ompl::base::State* state = ss.getSolutionPath().getState( i );
+      Real x = state->as<ompl::base::SE2StateSpace::StateType>()->getX();
+      Real y = state->as<ompl::base::SE2StateSpace::StateType>()->getY();
+      Real theta = state->as<ompl::base::SE2StateSpace::StateType>()->getYaw();
+
+      car_state_c q( x, y, theta );
+      states.push_back( q );
+      write_audit_datum( audit_file_planned_states, q );
+    }
+
+    unsigned int control_count = ss.getSolutionPath().getControlCount();
+    for( unsigned int i = 0; i < control_count; i++ ) {
+      ompl::control::Control* control = ss.getSolutionPath().getControl( i );
+      double duration = ss.getSolutionPath().getControlDuration( i );
+      Real speed = control->as<ompl::control::RealVectorControlSpace::ControlType>()->values[0];
+      Real phi = control->as<ompl::control::RealVectorControlSpace::ControlType>()->values[1];
+ 
+      car_command_c u( duration, speed, phi );
+      commands.push_back( u );
+      write_audit_datum( audit_file_planned_commands, u );
+    }
+
   } else {
     std::cout << "No solution found" << std::endl;
   }

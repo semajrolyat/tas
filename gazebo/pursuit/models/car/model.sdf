@@ -453,9 +453,17 @@
     </joint>
 
     <plugin name='car_controller' filename='libcar_controller.so'>
-      <!-- Tunable Parameters -->
+      <planner>lissajous</planner>     <!--lissajous|rrt-->
+      <steering>fourbar</steering>      <!--direct|fourbar-->
       <max_speed>1.0</max_speed>
+      <max_acceleration>1.0</max_acceleration>
       <max_steering_velocity>0.31416</max_steering_velocity>
+      <!-- RRT -->
+      <rrt_planner_step_size>1.0</rrt_planner_step_size>
+      <rrt_steering_control_kp>120.0</rrt_steering_control_kp>
+      <rrt_steering_control_kd>0.16</rrt_steering_control_kd>
+      <rrt_speed_control_kp>500.0</rrt_speed_control_kp>
+      <rrt_speed_control_kd>5.0</rrt_speed_control_kd>
 <!--
       <steering_control_kp>100.0</steering_control_kp>
       <steering_control_kd>10.0</steering_control_kd>
@@ -465,29 +473,13 @@
       <steering_control_kp>100.0</steering_control_kp>
       <steering_control_kd>20.0</steering_control_kd>
 -->
-
-      <!-- Ellipse -->
-<!--
-      <steering_control_kp>10.0</steering_control_kp>
-      <steering_control_kd>1.0</steering_control_kd>
-      <speed_control_kp>500.0</speed_control_kp>
--->
       <!-- Lissajous -->
-<!--
-      <planner_step_size>0.020</planner_step_size>
-      <steering_control_kp>240.0</steering_control_kp>
-      <steering_control_kd>0.24</steering_control_kd>
-      <speed_control_kp>360.0</speed_control_kp>
--->
-      <!-- Lissajous : Best -->
-<!--
--->
-      <planner_step_size>0.025</planner_step_size>
-      <steering_control_kp>120.0</steering_control_kp>
-      <steering_control_kd>0.16</steering_control_kd>
-      <speed_control_kp>250.0</speed_control_kp>
-<!--
--->
+      <lissajous_planner_step_size>0.025</lissajous_planner_step_size>
+      <lissajous_steering_control_kp>120.0</lissajous_steering_control_kp>
+      <lissajous_steering_control_kd>0.16</lissajous_steering_control_kd>
+      <!-- <lissajous_speed_control_kp>250.0</lissajous_speed_control_kp> -->
+      <lissajous_speed_control_kp>250.0</lissajous_speed_control_kp>
+      <lissajous_speed_control_kd>25.0</lissajous_speed_control_kd>
       <!-- Testing Parameters -->
       <lissajous_ks>0.500</lissajous_ks>
       <lissajous_kd>0.0001</lissajous_kd>
@@ -495,11 +487,17 @@
       <lissajous_du_angle>1.425</lissajous_du_angle>
       <!-- Steering Linkage - Tune at own risk - Deactive -->
       <max_steering_angle_deg>30.0</max_steering_angle_deg>
-      <kingpin_distance>0.09</kingpin_distance>
+      <steering_lever_base_angle_deg>75.0</steering_lever_base_angle_deg>
+      <steering_lever_length>0.04</steering_lever_length>
+      <tie_rod_length>0.1</tie_rod_length>
+      <spindle_lever_length>0.055</spindle_lever_length>
+<!--
+      <max_steering_angle_deg>30.0</max_steering_angle_deg>
       <steering_lever_base_angle_deg>75.0</steering_lever_base_angle_deg>
       <steering_lever_length>0.03</steering_lever_length>
       <tie_rod_length>0.075</tie_rod_length>
       <spindle_lever_length>0.055</spindle_lever_length>
+-->
     </plugin>
 
   </model>

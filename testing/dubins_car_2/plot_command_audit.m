@@ -1,5 +1,7 @@
 hold on;
 
+STEP = 0.001;
+
 import_statefile('car_planned_commands.txt')
 n = length(speed);
 

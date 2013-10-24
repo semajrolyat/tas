@@ -238,14 +238,29 @@ private:
   gazebo::physics::JointPtr bearing_rear_right;
 
   Real MAX_SPEED;
+  Real MAX_ACCELERATION;
   Real MAX_STEERING_VELOCITY;
   Real STEERING_CONTROL_KP;
   Real STEERING_CONTROL_KD;
   Real SPEED_CONTROL_KP;
+  Real SPEED_CONTROL_KD;
 
   Real WHEEL_BASE;
 
+  enum planner_type_e {
+    LISSAJOUS,
+    RRT
+  };
+
+  planner_type_e PLANNER;
   Real PLANNER_STEP_SIZE;
+
+  enum steering_type_e {
+    DIRECT,
+    FOURBAR
+  };
+
+  steering_type_e STEERING;  
 
 private:
   Real MAX_STEERING_ANGLE;
@@ -307,6 +322,7 @@ protected:
   gazebo::math::Vector3 orientation( void );
   Real steering_angle( void );
   Real speed( void );
+  Real acceleration( void );
 
   void steer( const car_command_c& command );
   void push( const car_command_c& command );
@@ -468,16 +484,6 @@ public:
   EulerIntegrator< car_c > integrator_;
 };
 
-/*
-int main(int, char **)
-{
-    std::cout << "OMPL version: " << OMPL_VERSION << std::endl;
-
-    planWithSimpleSetup();
-
-    return 0;
-}
-*/
 //-----------------------------------------------------------------------------
 
 #endif // _GAZEBO_CAR_H_
