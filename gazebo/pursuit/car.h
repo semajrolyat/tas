@@ -285,6 +285,11 @@ private:
   Real LISSAJOUS_DU_ANGLE;
 
   car_command_c active_command;
+  car_state_c active_state;
+  Real active_state_duration;
+
+  car_state_c dstate;
+  car_state_c prev_state;
 
 public:
   //---------------------------------------------------------------------------
@@ -375,6 +380,7 @@ protected:
   // Planning
   //---------------------------------------------------------------------------
   std::vector<car_state_c> states;
+  std::vector<car_state_c> desired_states;
   std::vector<car_command_c> commands;
 
   Real signed_angle( const Real& ux, const Real& uy, const Real& vx, const Real& vy ); 
@@ -442,6 +448,9 @@ bool isStateValid(const ompl::control::SpaceInformation *si, const ompl::base::S
   const ompl::base::SO2StateSpace::StateType *rot = se2state->as<ompl::base::SO2StateSpace::StateType>(1);
 
   /// check validity of state defined by pos & rot
+  // These constants are based on the size of the pen.
+  if( fabs(pos->values[0]) >= 25.0 || fabs(pos->values[1]) >= 25.0 )
+    return false;
 
   // return a value that is always true but uses the two variables we define, so we avoid compiler warnings
   return si->satisfiesBounds(state) && (const void*)rot != (const void*)pos;

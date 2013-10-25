@@ -327,6 +327,8 @@ void car_c::Load(gazebo::physics::ModelPtr _model, sdf::ElementPtr _sdf) {
   } 
   LISSAJOUS_DU_ANGLE = _sdf->GetElement( "lissajous_du_angle" )->GetValueDouble();
 
+  dstate = car_state_c( 0.0, 0.0, 0.0 );
+
   //---------------------------------------------------------------------------
   // Call Init Function (Note: target function subject to inheritance)
   //---------------------------------------------------------------------------
@@ -383,6 +385,8 @@ void car_c::init( void ) {
 //-----------------------------------------------------------------------------
 void car_c::sense( void ) {
 
+  dstate = state() - prev_state;
+
 }
 
 //-----------------------------------------------------------------------------
@@ -393,23 +397,31 @@ void car_c::plan( void ) {
     else if( PLANNER == RRT )
       plan_via_ompl();
 
-}
-
-//-----------------------------------------------------------------------------
-void car_c::act( void ) {
-
   if( active_command.duration <= 0.0 ) {
     if( !commands.size() ) return;
 
     active_command = commands.front();
     commands.erase( commands.begin() );
   }
+
+  if( desired_states.size() ) {
+    //compute wheter to transition to next state
+    if( active_state_duration <= 0.0 ) {
+      active_state = desired_states.front();
+      active_state_duration = PLANNER_STEP_SIZE;
+      desired_states.erase( desired_states.begin() );
+    }
+  }
+}
+
+//-----------------------------------------------------------------------------
+void car_c::act( void ) {
   
   active_command.duration -= dtime;
-///*
+  active_state_duration -= dtime;
+
   steer( active_command );
   push( active_command );
-//*/
 
   car_command_c actual_command( dtime, speed(), steering_angle() );
   car_state_c actual_state = state();
@@ -484,17 +496,41 @@ void car_c::steer( const car_command_c& command ) {
 
 //-----------------------------------------------------------------------------
 void car_c::push( const car_command_c& command ) {
+  // feedback
+/*
+  Real Ks = 0.5;
+  Real Kd = 0.0001;
+  Real DU_speed = 0.05;
+  Real DU_angle = 1.425;
 
+  car_state_c q = state();
+  car_state_c dq( dstate );
+  car_state_c q_desired( active_state );
+  car_state_c dq_desired = q_desired - q;
+  car_state_c delta_q = Ks * (q_desired - q) + Kd * (dq_desired - dq);
+  car_command_c u = inverse_ode( q.theta, delta_q );
+
+  u.speed *= DU_speed;
+  u.angle *= DU_angle;
+  u.duration = dtime ;
+
+  dq = ode( q.theta, u );
+*/
+
+  // feedforward
   Real desired_speed = command.speed;
   Real actual_speed = speed();
 
-  Real desired_acceleration = MAX_ACCELERATION;
-  Real actual_acceleration = acceleration();
+  //Real desired_acceleration = MAX_ACCELERATION;
+  //Real actual_acceleration = acceleration();
 
   Real f = SPEED_CONTROL_KP * ( desired_speed - actual_speed );
 
   //Real f = SPEED_CONTROL_KP * ( desired_speed - actual_speed ) + 
   //         SPEED_CONTROL_KD * ( desired_acceleration - actual_acceleration );
+
+ 
+  //f += u.speed;
 
   gazebo::math::Vector3 d = orientation( );
   gazebo::math::Vector3 v = d * f;
@@ -576,20 +612,21 @@ car_command_c car_c::inverse_ode(const Real& theta, const car_state_c& dstate) {
   const Real EPSILON = 1e-3;
   const Real EPSILON2 = 1e-3; 
 
-  do{
-    t = 1.0;
-
-    d1 = 2.0 * u_s - 2.0 * ( dstate.x * c + dstate.y * s );
-    du = -d1/2.0;
-    f0 = lissajous_speed_optimization_function(u_s, dstate.x, dstate.y, c, s );
-    f = lissajous_speed_optimization_function( u_s + t * du, dstate.x, dstate.y, c, s );
-    while( f > f0 + alpha * t * d1 * du ) {
-      t = beta * t;
+  if( PLANNER == LISSAJOUS ) {
+    do{
+      t = 1.0;
+      d1 = 2.0 * u_s - 2.0 * ( dstate.x * c + dstate.y * s );
+      du = -d1/2.0;
+      f0 = lissajous_speed_optimization_function(u_s, dstate.x, dstate.y, c, s );
       f = lissajous_speed_optimization_function( u_s + t * du, dstate.x, dstate.y, c, s );
-    }
-    u_s = u_s + t * du;
+      while( f > f0 + alpha * t * d1 * du ) {
+        t = beta * t;
+        f = lissajous_speed_optimization_function( u_s + t * du, dstate.x, dstate.y, c, s );
+      }
+      u_s = u_s + t * du;
   
-  } while(its++ < MAX_ITS && f0 > EPSILON && fabs(du) > EPSILON2 );
+    } while(its++ < MAX_ITS && f0 > EPSILON && fabs(du) > EPSILON2 );
+  }
 
   // *Second Compute Steering Angle*
   // atan2 ill behaved for (0,0) so handle that case if it arises *brute force*
@@ -749,15 +786,14 @@ void car_c::plan_lissajous( void ) {
 
     state( q );
 
-    //states.push_back( q_desired );
-    //write_audit_datum( audit_file_planned_states, q_desired );
     commands.push_back( u );
     write_audit_datum( audit_file_planned_commands, u );
     states.push_back( q );
     write_audit_datum( audit_file_planned_states, q );
-    //write_audit_datum( audit_file_planned_states, delta_q );
   }
   state( initial );
+  dstate = car_state_c( 0.0, 0.0, 0.0 );
+  prev_state = car_state_c( initial );
 }
 
 //-----------------------------------------------------------------------------
@@ -801,6 +837,9 @@ void car_c::plan_via_ompl(void) {
   car_state_c initial( 0.0, 4.0, 0.0 );
   car_state_c final( 0.0, 0.0, 0.0 );
   state( initial );
+  active_state = car_state_c( initial );
+  dstate = car_state_c( 0.0, 0.0, 0.0 );
+  prev_state = car_state_c( initial );
 
   /// create a start state
   ompl::base::ScopedState<ompl::base::SE2StateSpace> start(space);
@@ -821,7 +860,9 @@ void car_c::plan_via_ompl(void) {
   //planner->setProblemDefinition( pdef );
   ss.setPlanner( planner );
 
-  //ss.getSpaceInformation()->setPropagationStepSize( PLANNER_STEP_SIZE );
+  ss.getSpaceInformation()->setPropagationStepSize( PLANNER_STEP_SIZE );
+  //ss.getSpaceInformation()->setPropagationStepSize( 0.001 );
+  //ss.getSpaceInformation()->setPropagationStepSize( 0.025 );
   /// we want to have a reasonable value for the propagation step size
   ss.setup();
   static_cast<DemoStatePropagator*>(ss.getStatePropagator().get())->setIntegrationTimeStep(ss.getSpaceInformation()->getPropagationStepSize());
@@ -833,17 +874,29 @@ void car_c::plan_via_ompl(void) {
     std::cout << "Found solution:" << std::endl;
     /// print the path to screen
 
-    ss.getSolutionPath().asGeometric().print(std::cout);
+    //ss.getSolutionPath().asGeometric().print(std::cout);
 
-    unsigned int state_count = ss.getSolutionPath().getStateCount();
+    ompl::geometric::PathGeometric path = ss.getSolutionPath().asGeometric();
+/*
+    Real l = path.length();
+    unsigned int c = path.getStateCount(); 
+    Real dt = dtime;
+    Real t = l / dt;
+    unsigned int it = (unsigned int) t;
+    unsigned int a = it - c;
+    std::cout << "length:" << l << " dt:" << dtime << " t:" << t << " c:" << c << " a:" << a << std::endl;
+    path.interpolate( a );
+*/
+    unsigned int state_count = path.getStateCount();
     for( unsigned int i = 0; i < state_count; i++ ) {
-      ompl::base::State* state = ss.getSolutionPath().getState( i );
+      ompl::base::State* state = path.getState( i );
       Real x = state->as<ompl::base::SE2StateSpace::StateType>()->getX();
       Real y = state->as<ompl::base::SE2StateSpace::StateType>()->getY();
       Real theta = state->as<ompl::base::SE2StateSpace::StateType>()->getYaw();
 
       car_state_c q( x, y, theta );
       states.push_back( q );
+      desired_states.push_back( q );
       write_audit_datum( audit_file_planned_states, q );
     }
 
