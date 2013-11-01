@@ -46,15 +46,26 @@ public:
 
   car_state_c( const car_state_c& _state ) : 
     x(_state.x), 
-    y(_state.y), 
-    theta(_state.theta) 
-  {}
+    y(_state.y) 
+  {
+    theta = _state.theta;
+    while( theta > PI )
+      theta -= 2.0 * PI;
+    while( theta <= -PI )
+      theta += 2.0 * PI;
+
+  }
 
   car_state_c( const Real& _x, const Real& _y, const Real& _theta ) : 
     x(_x), 
-    y(_y), 
-    theta(_theta) 
-  {}
+    y(_y) 
+  {
+    theta = _theta;
+    while( theta > PI )
+      theta -= 2.0 * PI;
+    while( theta <= -PI )
+      theta += 2.0 * PI;
+  }
 
   //---------------------------------------------------------------------------
   // Destructor
@@ -80,38 +91,50 @@ public:
 car_state_c operator+( const car_state_c& a, const car_state_c& b ) {
   Real theta = a.theta + b.theta;
   while( theta > PI )
-    theta -= 2 * PI;
+    theta -= 2.0 * PI;
   while( theta <= -PI )
-    theta += 2 * PI;
+    theta += 2.0 * PI;
 
   return car_state_c( a.x + b.x, a.y + b.y, theta );
 }
 car_state_c operator-( const car_state_c& a, const car_state_c& b ) {
   Real theta = a.theta - b.theta;
   while( theta > PI )
-    theta -= 2 * PI;
+    theta -= 2.0 * PI;
   while( theta <= -PI )
-    theta += 2 * PI;
+    theta += 2.0 * PI;
 
   return car_state_c( a.x - b.x, a.y - b.y, theta );
 }
 car_state_c operator*( const Real& c, const car_state_c& a ) {
   Real theta = c * a.theta;
   while( theta > PI )
-    theta -= 2 * PI;
+    theta -= 2.0 * PI;
   while( theta <= -PI )
-    theta += 2 * PI;
+    theta += 2.0 * PI;
 
   return car_state_c( c * a.x , c * a.y, theta );
 }
 car_state_c operator*( const car_state_c& a, const Real& c ) {
   Real theta = c * a.theta;
   while( theta > PI )
-    theta -= 2 * PI;
+    theta -= 2.0 * PI;
   while( theta <= -PI )
-    theta += 2 * PI;
+    theta += 2.0 * PI;
 
   return car_state_c( c * a.x , c * a.y, theta );
+}
+car_state_c operator/( const car_state_c& a, const Real& c ) {
+  const Real EPSILON = 1e-16;
+  assert( fabs(c) > EPSILON );
+
+  Real theta = a.theta / c;
+  while( theta > PI )
+    theta -= 2.0 * PI;
+  while( theta <= -PI )
+    theta += 2.0 * PI;
+
+  return car_state_c( a.x / c, a.y / c, theta );
 }
 std::ostream& operator<<(std::ostream& ostr, const car_state_c& state) {
   return ostr << state.x << "," << state.y << "," << state.theta;
@@ -169,6 +192,16 @@ public:
 
   friend std::ostream& operator<<(std::ostream& ostr, const car_command_c& cmd);
 };
+
+car_command_c operator+( const car_command_c& a, const car_command_c& b ) {
+  Real theta = a.angle + b.angle;
+  while( theta > PI )
+    theta -= 2.0 * PI;
+  while( theta <= -PI )
+    theta += 2.0 * PI;
+
+  return car_command_c( a.speed + b.speed, theta );
+}
 
 std::ostream& operator<<(std::ostream& ostr, const car_command_c& cmd) {
   return ostr << cmd.duration << "," << cmd.speed << "," << cmd.angle;
@@ -285,11 +318,15 @@ private:
   Real LISSAJOUS_DU_ANGLE;
 
   car_command_c active_command;
-  car_state_c active_state;
-  Real active_state_duration;
 
-  car_state_c dstate;
+  car_state_c desired_state_0;
+  car_state_c desired_state_1;
+  int state_step;
+  Real desired_state_duration;
+
   car_state_c prev_state;
+
+  void update_desired_state( void );
 
 public:
   //---------------------------------------------------------------------------
@@ -316,21 +353,22 @@ protected:
   //---------------------------------------------------------------------------
   virtual void init( void );
   virtual void sense( void );
-  virtual void plan( void );
+  virtual bool plan( void );
   virtual void act( void );
 
   //---------------------------------------------------------------------------
   // Car Interface
   //---------------------------------------------------------------------------
   car_state_c state( void );
+  car_state_c dstate( void );
   void state( const car_state_c& _state );
   gazebo::math::Vector3 orientation( void );
   Real steering_angle( void );
   Real speed( void );
   Real acceleration( void );
 
-  void steer( const car_command_c& command );
-  void push( const car_command_c& command );
+  void steer( const car_command_c& u );
+  void push( const car_command_c& u );
 
   void steer_direct( const Real& _steering_angle );
   void steer_double_four_bar( const Real& _steering_angle );
@@ -338,10 +376,12 @@ protected:
 
   void compensate_for_roll_pitch( void );
 
+  car_command_c compute_kinematic_command( void );
+
   //---------------------------------------------------------------------------
   // OMPL
   //---------------------------------------------------------------------------
-  void plan_via_ompl( void );
+  bool plan_via_ompl( void );
 public:
   void operator()( const ompl::base::State *state, const ompl::control::Control *control, std::valarray<double> &dstate) const;
   void update(ompl::base::State *state, const std::valarray<double> &dstate) const;
@@ -352,11 +392,11 @@ protected:
   //---------------------------------------------------------------------------
   // ODE 
   //---------------------------------------------------------------------------
-  car_state_c ode( const Real& theta, const car_command_c& command );
-  car_command_c inverse_ode( const Real& theta, const car_state_c& dstate );
+  car_state_c ode( const car_state_c& q, const car_command_c& u );
+  car_command_c inverse_ode( const car_state_c& q, const car_state_c& dq );
 
-  //Real backtracking_line_search( const Real& u_s )
-  Real lissajous_speed_optimization_function( const Real& u_s, const Real& x_dot, const Real& y_dot, const Real& costheta, const Real& sintheta );
+  Real speed_optimization_function( const Real& u_s, const Real& x_dot, const Real& y_dot, const Real& costheta, const Real& sintheta );
+  car_state_c interpolate_linear( const car_state_c& q0, const car_state_c& qf, const Real& dt, const Real& deltat, const int& step );
 
   //---------------------------------------------------------------------------
   // Auditing 
@@ -365,6 +405,9 @@ protected:
   std::string audit_file_planned_states;
   std::string audit_file_actual_commands;
   std::string audit_file_actual_states;
+  std::string audit_file_fb_commands;
+  std::string audit_file_ff_commands;
+  std::string audit_file_interp_states;
   bool write_command_audit_header( const std::string& filename );
   bool write_state_audit_header( const std::string& filename );
   bool write_audit_datum(const std::string& filename, const car_command_c& cmd);
@@ -385,7 +428,7 @@ protected:
 
   Real signed_angle( const Real& ux, const Real& uy, const Real& vx, const Real& vy ); 
   car_state_c lissajous( const Real& t, const Real& a, const Real& b, const Real& A, const Real& B, const Real& delta );
-  void plan_lissajous( void );
+  bool plan_lissajous( void );
 
   //---------------------------------------------------------------------------
 

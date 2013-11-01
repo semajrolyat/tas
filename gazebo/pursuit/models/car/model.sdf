@@ -453,33 +453,34 @@
     </joint>
 
     <plugin name='car_controller' filename='libcar_controller.so'>
-      <planner>rrt</planner>     <!--lissajous|rrt-->
+      <planner>lissajous</planner>     <!--lissajous|rrt-->
       <steering>fourbar</steering>      <!--direct|fourbar-->
       <max_speed>1.0</max_speed>
       <max_acceleration>1.0</max_acceleration>
       <max_steering_velocity>0.31416</max_steering_velocity>
       <!-- RRT -->
       <rrt_planner_step_size>0.5</rrt_planner_step_size>
-      <rrt_steering_control_kp>120.0</rrt_steering_control_kp>
-      <rrt_steering_control_kd>0.16</rrt_steering_control_kd>
-      <rrt_speed_control_kp>250.0</rrt_speed_control_kp>
-      <rrt_speed_control_kd>25.0</rrt_speed_control_kd>
-<!--
-      <steering_control_kp>100.0</steering_control_kp>
-      <steering_control_kd>10.0</steering_control_kd>
-      <speed_control_kp>10000.0</speed_control_kp>
--->
-<!--
-      <steering_control_kp>100.0</steering_control_kp>
-      <steering_control_kd>20.0</steering_control_kd>
--->
+      <rrt_steering_control_kp>0.001</rrt_steering_control_kp>
+      <rrt_steering_control_kd>0.0001</rrt_steering_control_kd>
+      <rrt_speed_control_kp>0.001</rrt_speed_control_kp>
+      <rrt_speed_control_kd>0.0001</rrt_speed_control_kd>
       <!-- Lissajous -->
+<!--
+      <lissajous_planner_step_size>0.025</lissajous_planner_step_size>
+      <lissajous_steering_control_kp>0.01</lissajous_steering_control_kp>
+      <lissajous_steering_control_kd>0.001</lissajous_steering_control_kd>
+      <lissajous_speed_control_kp>0.01</lissajous_speed_control_kp>
+      <lissajous_speed_control_kd>0.001</lissajous_speed_control_kd>
+-->
+<!--
+-->
       <lissajous_planner_step_size>0.025</lissajous_planner_step_size>
       <lissajous_steering_control_kp>120.0</lissajous_steering_control_kp>
       <lissajous_steering_control_kd>0.16</lissajous_steering_control_kd>
-      <!-- <lissajous_speed_control_kp>250.0</lissajous_speed_control_kp> -->
       <lissajous_speed_control_kp>250.0</lissajous_speed_control_kp>
       <lissajous_speed_control_kd>25.0</lissajous_speed_control_kd>
+<!--
+-->
       <!-- Testing Parameters -->
       <lissajous_ks>0.500</lissajous_ks>
       <lissajous_kd>0.0001</lissajous_kd>

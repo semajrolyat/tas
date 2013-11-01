@@ -327,8 +327,6 @@ void car_c::Load(gazebo::physics::ModelPtr _model, sdf::ElementPtr _sdf) {
   } 
   LISSAJOUS_DU_ANGLE = _sdf->GetElement( "lissajous_du_angle" )->GetValueDouble();
 
-  dstate = car_state_c( 0.0, 0.0, 0.0 );
-
   //---------------------------------------------------------------------------
   // Call Init Function (Note: target function subject to inheritance)
   //---------------------------------------------------------------------------
@@ -343,13 +341,14 @@ void car_c::Update( ) {
   time = world->GetSimTime().Double() - time_start;
   dtime = time - time_last;
 
-
   sense( );
-  plan( );
+  if( !plan( ) ) {
+    std::cout << "planning failed\n";
+    time_last = time;
+    return;
+  }
+  //std::cout << "acting\n";
   act( );
-
-  //test_state_functions();
-  //test_command_functions();
 
   time_last = time;
 }
@@ -371,10 +370,16 @@ void car_c::init( void ) {
   audit_file_planned_states = "car_planned_states.txt";
   audit_file_actual_commands = "car_actual_commands.txt";
   audit_file_actual_states = "car_actual_states.txt";
+  audit_file_fb_commands = "car_fb_commands.txt";
+  audit_file_ff_commands = "car_ff_commands.txt";
+  audit_file_interp_states = "car_interp_states.txt";
   write_command_audit_header( audit_file_planned_commands );
   write_state_audit_header( audit_file_planned_states );
   write_command_audit_header( audit_file_actual_commands );
   write_state_audit_header( audit_file_actual_states );
+  write_command_audit_header( audit_file_ff_commands );
+  write_command_audit_header( audit_file_fb_commands );
+  write_state_audit_header( audit_file_interp_states );
 
   std::cerr << "Car Controller Plugin Started" << std::endl;
 
@@ -385,48 +390,149 @@ void car_c::init( void ) {
 //-----------------------------------------------------------------------------
 void car_c::sense( void ) {
 
-  dstate = state() - prev_state;
-
 }
 
 //-----------------------------------------------------------------------------
-void car_c::plan( void ) {
-  if( states.size() == 0 )
-    if( PLANNER == LISSAJOUS )
-      plan_lissajous();
-    else if( PLANNER == RRT )
-      plan_via_ompl();
+bool car_c::plan( void ) {
+  if( states.size() == 0 ) {
+    if( PLANNER == LISSAJOUS ) {
+      if( !plan_lissajous() ) return false;
+    } else if( PLANNER == RRT ) {
+      if( plan_via_ompl() ) return false;
+    }
+  }
 
   if( active_command.duration <= 0.0 ) {
-    if( !commands.size() ) return;
+    //std::cout << "commands:" << commands.size() << std::endl;
+    if( commands.size() == 0 ) return false;
 
     active_command = commands.front();
     commands.erase( commands.begin() );
   }
 
-  if( desired_states.size() ) {
-    //compute wheter to transition to next state
-    if( active_state_duration <= 0.0 ) {
-      active_state = desired_states.front();
-      active_state_duration = PLANNER_STEP_SIZE;
-      desired_states.erase( desired_states.begin() );
-    }
+  //if( desired_states.size() ) {
+    //compute whether to transition to next state
+  if( desired_state_duration >= PLANNER_STEP_SIZE ) {
+    update_desired_state( );
   }
+  //}
+  return true;
+}
+
+Real sgn(Real x)
+{
+  if (x > 0.0)
+    return 1.0;
+  else if (x < 0.0)
+    return -1.0;
+  else
+    return 0.0;
 }
 
 //-----------------------------------------------------------------------------
 void car_c::act( void ) {
   
   active_command.duration -= dtime;
-  active_state_duration -= dtime;
 
-  steer( active_command );
-  push( active_command );
+  car_command_c cmd = compute_kinematic_command( );
+
+  steer( cmd );
+  push( cmd );
 
   car_command_c actual_command( dtime, speed(), steering_angle() );
   car_state_c actual_state = state();
-  write_audit_datum( audit_file_actual_commands, actual_command );
+  write_audit_datum( audit_file_actual_commands, cmd );
   write_audit_datum( audit_file_actual_states, actual_state );
+  //assert( actual_state.theta <= PI && actual_state.theta > -PI );
+}
+//-----------------------------------------------------------------------------
+car_command_c car_c::compute_kinematic_command( void ) {
+  car_command_c ff_command = active_command;
+//  std::cout << "interpolating [[" << desired_state_0 << "],[" << desired_state_1 << "]," << dtime << "," << PLANNER_STEP_SIZE << "," << state_step << "]" << std::endl;
+  car_state_c qx = interpolate_linear(desired_state_0, desired_state_1, dtime, PLANNER_STEP_SIZE, ++state_step );
+
+  Real Ks = 0.0005;
+  Real Kd = 0.0000001;
+  Real DU_speed = 0.000005;
+  Real DU_angle = 1.0;
+  car_state_c q = state();
+  car_state_c dq = dstate();
+  car_state_c dq_desired = qx - q;
+  car_state_c dqx = Ks * (qx - q) + Kd * (dq_desired - dq);
+  car_command_c fb_command;
+  const Real EPSILON = 1e-3;
+/*
+  if( fabs(dq.x) < EPSILON && fabs(dq.x) < EPSILON && fabs(dq.x) < EPSILON)
+    // do not have any feedback when the car is starting from rest
+    // as it will cause a spike in commands
+    fb_command = car_command_c( 0.0, 0.0 );
+  else
+*/
+  fb_command = inverse_ode( q, dqx );
+/*
+  fb_command.speed *= DU_speed;
+  fb_command.angle *= DU_angle;
+  fb_command.duration = dtime;
+*/
+/*
+  fb_command.speed *= dtime;
+  fb_command.angle *= dtime;
+  fb_command.duration = dtime;
+*/
+  fb_command.duration = dtime;
+///*
+  const Real MAX_DELTA_PHI = 0.00001;
+/*
+  if( fabs(fb_command.angle - steering_angle()) > MAX_DELTA_PHI ) 
+    fb_command.angle = sgn(fb_command.angle - steering_angle()) * MAX_DELTA_PHI + steering_angle();
+
+  fb_command.angle *= 0.1;
+*/
+
+
+/*
+
+  static Real total_dphi = 0.0;
+
+  const Real MAX_DELTA_PHI = 0.01;
+
+  if( fabs(fb_command.angle - total_dphi) > MAX_DELTA_PHI ) 
+    fb_command.angle = sgn(fb_command.angle - total_dphi) * MAX_DELTA_PHI + total_dphi;
+
+  if( fabs(fb_command.angle - total_dphi) > MAX_DELTA_PHI ) 
+    fb_command.angle = sgn(fb_command.angle) * MAX_DELTA_PHI;
+   
+  total_dphi = fb_command.angle + ff_command.angle;
+*/
+//*/
+  write_audit_datum( audit_file_ff_commands, ff_command );
+  write_audit_datum( audit_file_fb_commands, fb_command );
+  write_audit_datum( audit_file_interp_states, dqx );
+
+///*
+  car_command_c result = ff_command + fb_command;
+  result.duration = dtime;
+
+  if( fabs(result.angle - steering_angle()) > MAX_DELTA_PHI ) 
+    result.angle = sgn(result.angle - steering_angle()) * MAX_DELTA_PHI + steering_angle();
+
+  //fb_command.angle *= 0.1;
+
+  return result;
+//*/
+  //return ff_command + fb_command;
+  //fb_command.duration = dtime;
+  //return fb_command;
+  //return ff_command;
+}
+
+//-----------------------------------------------------------------------------
+void car_c::update_desired_state( void ) {
+  desired_state_0 = desired_states.front();
+  desired_state_duration = 0.0;
+  desired_states.erase( desired_states.begin() );
+  desired_state_1 = desired_states.front();
+  state_step = 0;
 }
 
 //-----------------------------------------------------------------------------
@@ -439,6 +545,11 @@ car_state_c car_c::state( void ) {
   Real theta = rot.GetYaw();
   return car_state_c( x, y, theta );
 }
+//-----------------------------------------------------------------------------
+car_state_c car_c::dstate( void ) {
+  return state() - prev_state;
+}
+
 
 //-----------------------------------------------------------------------------
 void car_c::state( const car_state_c& _state ) {
@@ -457,7 +568,12 @@ gazebo::math::Vector3 car_c::orientation( void ) {
 
 //-----------------------------------------------------------------------------
 Real car_c::steering_angle( void ) {
-  return steering_box->GetAngle( 0 ).Radian();
+  Real phi = steering_box->GetAngle( 0 ).Radian();
+  while( phi > PI )
+    phi -= 2.0 * PI;
+  while( phi <= -PI )
+    phi += 2.0 * PI;
+  return phi;
 }
 
 //-----------------------------------------------------------------------------
@@ -471,7 +587,7 @@ Real car_c::acceleration( void ) {
 }
 
 //-----------------------------------------------------------------------------
-void car_c::steer( const car_command_c& command ) {
+void car_c::steer( const car_command_c& u ) {
 
   if( STEERING == FOURBAR ) {
     steer_double_four_bar( steering_angle() );
@@ -481,7 +597,7 @@ void car_c::steer( const car_command_c& command ) {
     steer_direct( steering_angle() );
   }
 
-  Real desired_angle = command.angle;
+  Real desired_angle = u.angle;
   Real actual_angle = steering_angle();
 
   Real desired_velocity = MAX_STEERING_VELOCITY;
@@ -493,32 +609,21 @@ void car_c::steer( const car_command_c& command ) {
   steering_box->SetForce( 0, torque );
 
 }
-
 //-----------------------------------------------------------------------------
-void car_c::push( const car_command_c& command ) {
+void car_c::push( const car_command_c& u ) {
   // feedback
 /*
-  Real Ks = 0.5;
-  Real Kd = 0.0001;
-  Real DU_speed = 0.05;
-  Real DU_angle = 1.425;
-
-  car_state_c q = state();
-  car_state_c dq( dstate );
-  car_state_c q_desired( active_state );
-  car_state_c dq_desired = q_desired - q;
-  car_state_c delta_q = Ks * (q_desired - q) + Kd * (dq_desired - dq);
-  car_command_c u = inverse_ode( q.theta, delta_q );
-
-  u.speed *= DU_speed;
-  u.angle *= DU_angle;
-  u.duration = dtime ;
-
-  dq = ode( q.theta, u );
+qx = interp(q(t0), q(tf), \frac{\Delta t}{tf - t0})
+u = inverseode(q(t0), qx)
+[use this command and after the simulation steps then retrieve the car's state as q(t0 + \Delta t) and then do]
+qx = interp(q(t0), q(tf), \frac{2\Delta t}{tf - t0})
+u = inverseode(q(t0+\Delta t), qx)
+...
+qx = q(tf)
+u = inverseode(q(tf-\Delta t), qx)
 */
 
-  // feedforward
-  Real desired_speed = command.speed;
+  Real desired_speed = u.speed;
   Real actual_speed = speed();
 
   //Real desired_acceleration = MAX_ACCELERATION;
@@ -572,22 +677,27 @@ Real car_c::double_four_bar_kingpin_angle( const Real& _steering_angle ) {
 }
 
 //-----------------------------------------------------------------------------
-car_state_c car_c::ode( const Real& theta, const car_command_c& command ) {
-  Real dx = command.speed * cos( theta );
-  Real dy = command.speed * sin( theta );
-  Real dtheta = command.speed * tan( command.angle ) / WHEEL_BASE;
+car_state_c car_c::ode( const car_state_c& q, const car_command_c& u ) {
+  Real dx = u.speed * cos( q.theta );
+  Real dy = u.speed * sin( q.theta );
+  Real dtheta = u.speed * tan( u.angle ) / WHEEL_BASE;
 
   return car_state_c( dx, dy, dtheta );
 }
 
 
 //------------------------------------------------------------------------------
-Real car_c::lissajous_speed_optimization_function( const Real& u_s, const Real& dx, const Real& dy, const Real& costheta, const Real& sintheta ) {
+Real car_c::speed_optimization_function( const Real& u_s, const Real& dx, const Real& dy, const Real& costheta, const Real& sintheta ) {
   return u_s * u_s + dx * dx + dy * dy - 2.0 * u_s * ( dx * costheta + dy * sintheta );
 }
 
 //------------------------------------------------------------------------------
-car_command_c car_c::inverse_ode(const Real& theta, const car_state_c& dstate) {
+car_state_c car_c::interpolate_linear( const car_state_c& q0, const car_state_c& qf, const Real& dt, const Real& deltat, const int& step ) {
+  return ((qf - q0)) * (deltat * (Real)step) + q0;
+}
+
+//------------------------------------------------------------------------------
+car_command_c car_c::inverse_ode(const car_state_c& q, const car_state_c& dq ) {
 
   Real u_s, u_phi;
 
@@ -596,13 +706,13 @@ car_command_c car_c::inverse_ode(const Real& theta, const car_state_c& dstate) {
   // Note: optimization is necessary because the reality is that dx/cos rarely 
   // equals dy/sin and by switching between sin and cos which must be done else 
   // DIV0, discontinuities are introduced that can be substantial changes.
-  Real c = cos( theta );
-  Real s = sin( theta );
+  Real c = cos( q.theta );
+  Real s = sin( q.theta );
 
   if( fabs(c) > 0.5 )
-    u_s = dstate.x / c;
+    u_s = dq.x / c;
   else
-    u_s = dstate.y / s;
+    u_s = dq.y / s;
   
   Real du, f0, f, d1, t;
   const Real alpha = 0.01;
@@ -612,30 +722,66 @@ car_command_c car_c::inverse_ode(const Real& theta, const car_state_c& dstate) {
   const Real EPSILON = 1e-3;
   const Real EPSILON2 = 1e-3; 
 
-  if( PLANNER == LISSAJOUS ) {
-    do{
-      t = 1.0;
-      d1 = 2.0 * u_s - 2.0 * ( dstate.x * c + dstate.y * s );
-      du = -d1/2.0;
-      f0 = lissajous_speed_optimization_function(u_s, dstate.x, dstate.y, c, s );
-      f = lissajous_speed_optimization_function( u_s + t * du, dstate.x, dstate.y, c, s );
-      while( f > f0 + alpha * t * d1 * du ) {
-        t = beta * t;
-        f = lissajous_speed_optimization_function( u_s + t * du, dstate.x, dstate.y, c, s );
-      }
-      u_s = u_s + t * du;
+  do{
+    t = 1.0;
+    d1 = 2.0 * u_s - 2.0 * ( dq.x * c + dq.y * s );
+    du = -d1/2.0;
+    f0 = speed_optimization_function(u_s, dq.x, dq.y, c, s );
+    f = speed_optimization_function( u_s + t * du, dq.x, dq.y, c, s );
+    while( f > f0 + alpha * t * d1 * du ) {
+      t = beta * t;
+      f = speed_optimization_function( u_s + t * du, dq.x, dq.y, c, s );
+    }
+    u_s = u_s + t * du;
   
-    } while(its++ < MAX_ITS && f0 > EPSILON && fabs(du) > EPSILON2 );
-  }
+  } while(its++ < MAX_ITS && f > EPSILON && fabs(du) > EPSILON2 );
+//  } while(its++ < MAX_ITS && f0 > EPSILON && fabs(du) > EPSILON2 );
 
   // *Second Compute Steering Angle*
   // atan2 ill behaved for (0,0) so handle that case if it arises *brute force*
+/*
   const Real EPSILON3 = 1e-3;
-  if( fabs(dstate.theta) < EPSILON3 && fabs(u_s) < EPSILON3 )
+  if( fabs(dq.theta) < EPSILON3 && fabs(u_s) < EPSILON3 )
     u_phi = 0.0;
   else
     // otherwise, use the formulation
-    u_phi = atan2( dstate.theta * WHEEL_BASE, u_s );
+    u_phi = atan2( dq.theta * WHEEL_BASE, u_s );
+*/
+/*
+  const Real EPSILON3 = 3.5e-3;
+  if( fabs(u_s) < EPSILON3 )
+    u_phi = 0.0;
+  else
+    // otherwise, use the formulation
+    u_phi = atan2( dq.theta * WHEEL_BASE, u_s );
+*/
+
+/*
+  if( u_s > dq.theta * WHEEL_BASE ) {
+    u_phi = atan2( dq.theta * WHEEL_BASE, u_s );
+  } else {
+    u_phi = -atan2( u_s, dq.theta * WHEEL_BASE ) - PI/2.0; 
+  }
+*/  
+  u_phi = atan2( dq.theta * WHEEL_BASE, u_s );
+
+/*
+  while( u_phi > PI/2.0 )
+    u_phi -= PI;
+  while( u_phi <= -PI/2.0 )
+    u_phi += PI;
+*/
+/*
+  if( u_phi > PI/2.0 )
+    u_phi = PI - u_phi;
+  if( u_phi <= -PI/2.0 )
+    u_phi = PI + u_phi;
+*/
+
+/*
+  if( fabs(u_phi) > MAX_STEERING_ANGLE )
+    u_phi = u_phi / fabs(u_phi) * MAX_STEERING_ANGLE;
+*/
 
   return car_command_c( u_s, u_phi );
 }
@@ -646,8 +792,8 @@ void car_c::compensate_for_roll_pitch( void ) {
   // For tight turns, this ensures that the model sticks to the ground
   // and doesn't roll over.  It can lead to skidding
   gazebo::math::Quaternion rot = model->GetWorldPose().rot;
-  Real _roll = rot.GetRoll();
-  Real _pitch = rot.GetPitch();
+  //Real _roll = rot.GetRoll();
+  //Real _pitch = rot.GetPitch();
   Real _yaw = rot.GetYaw();
   gazebo::math::Vector3 pos = model->GetWorldPose().pos;
   gazebo::math::Quaternion rot_fixed( 0.0, 0.0, _yaw );
@@ -752,7 +898,7 @@ car_state_c car_c::lissajous( const Real& t, const Real& a, const Real& b, const
 }
 
 //-----------------------------------------------------------------------------
-void car_c::plan_lissajous( void ) {
+bool car_c::plan_lissajous( void ) {
   //Real dt = 0.025;  // Note: this is the highest possible step size before loss of stability
   Real dt = PLANNER_STEP_SIZE;
   Real Ks = LISSAJOUS_KS;
@@ -774,13 +920,13 @@ void car_c::plan_lissajous( void ) {
     q = state();
     car_state_c dq_desired = q_desired - q;
     car_state_c delta_q = Ks * (q_desired - q) + Kd * (dq_desired - dq);
-    car_command_c u = inverse_ode( q.theta, delta_q );
+    car_command_c u = inverse_ode( q, delta_q );
 
     u.speed *= DU_speed;
     u.angle *= DU_angle;
     u.duration = dt ;
 
-    dq = ode( q.theta, u );
+    dq = ode( q, u );
 
     q = q + dq * dt;
 
@@ -789,18 +935,21 @@ void car_c::plan_lissajous( void ) {
     commands.push_back( u );
     write_audit_datum( audit_file_planned_commands, u );
     states.push_back( q );
+    desired_states.push_back( q );
     write_audit_datum( audit_file_planned_states, q );
   }
+  update_desired_state( );
   state( initial );
-  dstate = car_state_c( 0.0, 0.0, 0.0 );
   prev_state = car_state_c( initial );
+
+  return true;
 }
 
 //-----------------------------------------------------------------------------
 // OMPL
 //-----------------------------------------------------------------------------
 
-void car_c::plan_via_ompl(void) {
+bool car_c::plan_via_ompl(void) {
   /// construct the state space we are planning in
   ompl::base::StateSpacePtr space(new ompl::base::SE2StateSpace());
 
@@ -837,8 +986,7 @@ void car_c::plan_via_ompl(void) {
   car_state_c initial( 0.0, 4.0, 0.0 );
   car_state_c final( 0.0, 0.0, 0.0 );
   state( initial );
-  active_state = car_state_c( initial );
-  dstate = car_state_c( 0.0, 0.0, 0.0 );
+  //active_state = car_state_c( initial );
   prev_state = car_state_c( initial );
 
   /// create a start state
@@ -899,6 +1047,7 @@ void car_c::plan_via_ompl(void) {
       desired_states.push_back( q );
       write_audit_datum( audit_file_planned_states, q );
     }
+    update_desired_state( );
 
     unsigned int control_count = ss.getSolutionPath().getControlCount();
     for( unsigned int i = 0; i < control_count; i++ ) {
@@ -911,9 +1060,10 @@ void car_c::plan_via_ompl(void) {
       commands.push_back( u );
       write_audit_datum( audit_file_planned_commands, u );
     }
-
+    return true;
   } else {
     std::cout << "No solution found" << std::endl;
+    return false;
   }
 }
 
