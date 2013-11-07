@@ -1,6 +1,17 @@
 #include <car.h>
 
 //-----------------------------------------------------------------------------
+Real sgn(Real x)
+{
+  if (x > 0.0)
+    return 1.0;
+  else if (x < 0.0)
+    return -1.0;
+  else
+    return 0.0;
+}
+
+//-----------------------------------------------------------------------------
 //-----------------------------------------------------------------------------
 GZ_REGISTER_MODEL_PLUGIN( car_c )
 
@@ -373,6 +384,9 @@ void car_c::init( void ) {
   audit_file_fb_commands = "car_fb_commands.txt";
   audit_file_ff_commands = "car_ff_commands.txt";
   audit_file_interp_states = "car_interp_states.txt";
+  audit_file_fb_error = "car_fb_error_states.txt";
+  audit_file_control_values = "car_control_values.txt";
+
   write_command_audit_header( audit_file_planned_commands );
   write_state_audit_header( audit_file_planned_states );
   write_command_audit_header( audit_file_actual_commands );
@@ -380,6 +394,8 @@ void car_c::init( void ) {
   write_command_audit_header( audit_file_ff_commands );
   write_command_audit_header( audit_file_fb_commands );
   write_state_audit_header( audit_file_interp_states );
+  write_state_audit_header( audit_file_fb_error );
+  write_command_audit_header( audit_file_control_values );
 
   std::cerr << "Car Controller Plugin Started" << std::endl;
 
@@ -402,128 +418,95 @@ bool car_c::plan( void ) {
     }
   }
 
-  if( active_command.duration <= 0.0 ) {
+  if( ff_command.duration <= 0.0 ) {
     //std::cout << "commands:" << commands.size() << std::endl;
     if( commands.size() == 0 ) return false;
 
-    active_command = commands.front();
+    ff_command = commands.front();
     commands.erase( commands.begin() );
+
+    write_audit_datum( audit_file_ff_commands, ff_command );
   }
 
   //if( desired_states.size() ) {
     //compute whether to transition to next state
   if( desired_state_duration >= PLANNER_STEP_SIZE ) {
     update_desired_state( );
+
   }
+
+  desired_state_duration += dtime;
   //}
   return true;
 }
 
-Real sgn(Real x)
-{
-  if (x > 0.0)
-    return 1.0;
-  else if (x < 0.0)
-    return -1.0;
-  else
-    return 0.0;
-}
 
 //-----------------------------------------------------------------------------
 void car_c::act( void ) {
-  
-  active_command.duration -= dtime;
 
-  car_command_c cmd = compute_kinematic_command( );
+  ff_command.duration -= dtime;
 
-  steer( cmd );
-  push( cmd );
+  fb_command = compute_feedback_command( ); 
+  write_audit_datum( audit_file_fb_commands, fb_command );
+
+  //car_command_c cmd = ff_command;
+  car_command_c cmd = ff_command + fb_command;
+  cmd.duration = dtime;
+
+  steer( cmd, STEERING_CONTROL_KP, STEERING_CONTROL_KD );
+  push( cmd, SPEED_CONTROL_KP );
 
   car_command_c actual_command( dtime, speed(), steering_angle() );
   car_state_c actual_state = state();
+  actual_state.time = time;
+
+  //write_audit_datum( audit_file_ff_commands, cmd );
+  //std::cout << cmd << std::endl;
+
+
   write_audit_datum( audit_file_actual_commands, cmd );
   write_audit_datum( audit_file_actual_states, actual_state );
+  write_audit_datum( audit_file_control_values, actual_command );
   //assert( actual_state.theta <= PI && actual_state.theta > -PI );
 }
 //-----------------------------------------------------------------------------
-car_command_c car_c::compute_kinematic_command( void ) {
-  car_command_c ff_command = active_command;
+car_command_c car_c::compute_feedback_command( void ) {
+
 //  std::cout << "interpolating [[" << desired_state_0 << "],[" << desired_state_1 << "]," << dtime << "," << PLANNER_STEP_SIZE << "," << state_step << "]" << std::endl;
   car_state_c qx = interpolate_linear(desired_state_0, desired_state_1, dtime, PLANNER_STEP_SIZE, ++state_step );
 
-  Real Ks = 0.0005;
-  Real Kd = 0.0000001;
-  Real DU_speed = 0.000005;
+  //Real Ks = 0.0005;
+  //Real Kd = 0.0000001;
+  Real Ks = 0.5;
+  Real Kd = 0.0001;
+  //Real DU_speed = 0.000005;
+  //Real DU_angle = 1.0;
+  Real DU_speed = 1.2;
   Real DU_angle = 1.0;
   car_state_c q = state();
   car_state_c dq = dstate();
   car_state_c dq_desired = qx - q;
   car_state_c dqx = Ks * (qx - q) + Kd * (dq_desired - dq);
-  car_command_c fb_command;
-  const Real EPSILON = 1e-3;
-/*
-  if( fabs(dq.x) < EPSILON && fabs(dq.x) < EPSILON && fabs(dq.x) < EPSILON)
-    // do not have any feedback when the car is starting from rest
-    // as it will cause a spike in commands
-    fb_command = car_command_c( 0.0, 0.0 );
-  else
-*/
-  fb_command = inverse_ode( q, dqx );
-/*
-  fb_command.speed *= DU_speed;
-  fb_command.angle *= DU_angle;
-  fb_command.duration = dtime;
-*/
-/*
-  fb_command.speed *= dtime;
-  fb_command.angle *= dtime;
-  fb_command.duration = dtime;
-*/
-  fb_command.duration = dtime;
+
+  car_command_c cmd = inverse_ode( q, dqx );
 ///*
-  const Real MAX_DELTA_PHI = 0.00001;
-/*
-  if( fabs(fb_command.angle - steering_angle()) > MAX_DELTA_PHI ) 
-    fb_command.angle = sgn(fb_command.angle - steering_angle()) * MAX_DELTA_PHI + steering_angle();
-
-  fb_command.angle *= 0.1;
-*/
-
-
-/*
-
-  static Real total_dphi = 0.0;
-
-  const Real MAX_DELTA_PHI = 0.01;
-
-  if( fabs(fb_command.angle - total_dphi) > MAX_DELTA_PHI ) 
-    fb_command.angle = sgn(fb_command.angle - total_dphi) * MAX_DELTA_PHI + total_dphi;
-
-  if( fabs(fb_command.angle - total_dphi) > MAX_DELTA_PHI ) 
-    fb_command.angle = sgn(fb_command.angle) * MAX_DELTA_PHI;
-   
-  total_dphi = fb_command.angle + ff_command.angle;
-*/
+  cmd.speed *= DU_speed;
+  cmd.angle *= DU_angle;
+  cmd.duration = dtime;
 //*/
-  write_audit_datum( audit_file_ff_commands, ff_command );
-  write_audit_datum( audit_file_fb_commands, fb_command );
-  write_audit_datum( audit_file_interp_states, dqx );
+  //cmd.duration = dtime;
 
-///*
-  car_command_c result = ff_command + fb_command;
-  result.duration = dtime;
+  dq_desired.time = time;
+  write_audit_datum( audit_file_fb_error, dq_desired );
+  write_audit_datum( audit_file_interp_states, qx );
 
-  if( fabs(result.angle - steering_angle()) > MAX_DELTA_PHI ) 
-    result.angle = sgn(result.angle - steering_angle()) * MAX_DELTA_PHI + steering_angle();
+  if( fabs(cmd.speed) > 0.2 )
+    cmd.speed = sgn(cmd.speed) * 0.2;
+  if( fabs(cmd.angle) > 0.1 )
+    cmd.angle = sgn(cmd.angle) * 0.1;
 
-  //fb_command.angle *= 0.1;
+  return cmd;
 
-  return result;
-//*/
-  //return ff_command + fb_command;
-  //fb_command.duration = dtime;
-  //return fb_command;
-  //return ff_command;
 }
 
 //-----------------------------------------------------------------------------
@@ -587,7 +570,7 @@ Real car_c::acceleration( void ) {
 }
 
 //-----------------------------------------------------------------------------
-void car_c::steer( const car_command_c& u ) {
+void car_c::steer( const car_command_c& u, const Real& Kp, const Real& Kd ) {
 
   if( STEERING == FOURBAR ) {
     steer_double_four_bar( steering_angle() );
@@ -603,14 +586,14 @@ void car_c::steer( const car_command_c& u ) {
   Real desired_velocity = MAX_STEERING_VELOCITY;
   Real actual_velocity = steering_box->GetVelocity( 0 );
 
-  Real torque = STEERING_CONTROL_KP * ( desired_angle - actual_angle ) + 
-                STEERING_CONTROL_KD * ( desired_velocity - actual_velocity );
+  Real torque = Kp * ( desired_angle - actual_angle ) + 
+                Kd * ( desired_velocity - actual_velocity );
 
   steering_box->SetForce( 0, torque );
 
 }
 //-----------------------------------------------------------------------------
-void car_c::push( const car_command_c& u ) {
+void car_c::push( const car_command_c& u, const Real& Kp ) {
   // feedback
 /*
 qx = interp(q(t0), q(tf), \frac{\Delta t}{tf - t0})
@@ -629,7 +612,7 @@ u = inverseode(q(tf-\Delta t), qx)
   //Real desired_acceleration = MAX_ACCELERATION;
   //Real actual_acceleration = acceleration();
 
-  Real f = SPEED_CONTROL_KP * ( desired_speed - actual_speed );
+  Real f = Kp * ( desired_speed - actual_speed );
 
   //Real f = SPEED_CONTROL_KP * ( desired_speed - actual_speed ) + 
   //         SPEED_CONTROL_KD * ( desired_acceleration - actual_acceleration );
@@ -864,8 +847,8 @@ void car_c::test_command_functions( void ) {
   //car_command_c command = car_command_c( 1.0, 0.2 );
   car_command_c command = car_command_c( 0.2, -0.5236 );
 
-  steer( command );
-  push( command );
+  steer( command, STEERING_CONTROL_KP, STEERING_CONTROL_KD );
+  push( command, SPEED_CONTROL_KP );
 }
 
 //-----------------------------------------------------------------------------
@@ -935,6 +918,7 @@ bool car_c::plan_lissajous( void ) {
     commands.push_back( u );
     write_audit_datum( audit_file_planned_commands, u );
     states.push_back( q );
+    q.time = t;
     desired_states.push_back( q );
     write_audit_datum( audit_file_planned_states, q );
   }

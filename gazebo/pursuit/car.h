@@ -41,12 +41,14 @@ public:
   car_state_c( void ) : 
     x(0.0), 
     y(0.0), 
-    theta(0.0) 
+    theta(0.0),
+    time(0.0) 
   {}
 
   car_state_c( const car_state_c& _state ) : 
     x(_state.x), 
-    y(_state.y) 
+    y(_state.y),
+    time(_state.time)
   {
     theta = _state.theta;
     while( theta > PI )
@@ -58,7 +60,8 @@ public:
 
   car_state_c( const Real& _x, const Real& _y, const Real& _theta ) : 
     x(_x), 
-    y(_y) 
+    y(_y),
+    time(0.0)
   {
     theta = _theta;
     while( theta > PI )
@@ -78,12 +81,13 @@ public:
   Real x;
   Real y;
   Real theta;
+  Real time;
 
   //---------------------------------------------------------------------------
   // Output
   //---------------------------------------------------------------------------
   static std::string header( void ) {
-    return "x, y, theta";
+    return "x, y, theta, time";
   }
 
   friend std::ostream& operator<<(std::ostream& ostr, const car_state_c& state);
@@ -137,7 +141,7 @@ car_state_c operator/( const car_state_c& a, const Real& c ) {
   return car_state_c( a.x / c, a.y / c, theta );
 }
 std::ostream& operator<<(std::ostream& ostr, const car_state_c& state) {
-  return ostr << state.x << "," << state.y << "," << state.theta;
+  return ostr << state.x << "," << state.y << "," << state.theta << "," << state.time;
 }
 
 //-----------------------------------------------------------------------------
@@ -317,7 +321,8 @@ private:
   Real LISSAJOUS_DU_SPEED;
   Real LISSAJOUS_DU_ANGLE;
 
-  car_command_c active_command;
+  car_command_c ff_command;
+  car_command_c fb_command;
 
   car_state_c desired_state_0;
   car_state_c desired_state_1;
@@ -367,8 +372,8 @@ protected:
   Real speed( void );
   Real acceleration( void );
 
-  void steer( const car_command_c& u );
-  void push( const car_command_c& u );
+  void steer( const car_command_c& u, const Real& Kp, const Real& Kd );
+  void push( const car_command_c& u, const Real& Kp );
 
   void steer_direct( const Real& _steering_angle );
   void steer_double_four_bar( const Real& _steering_angle );
@@ -376,7 +381,7 @@ protected:
 
   void compensate_for_roll_pitch( void );
 
-  car_command_c compute_kinematic_command( void );
+  car_command_c compute_feedback_command( void );
 
   //---------------------------------------------------------------------------
   // OMPL
@@ -408,6 +413,9 @@ protected:
   std::string audit_file_fb_commands;
   std::string audit_file_ff_commands;
   std::string audit_file_interp_states;
+  std::string audit_file_fb_error;
+  std::string audit_file_control_values;
+
   bool write_command_audit_header( const std::string& filename );
   bool write_state_audit_header( const std::string& filename );
   bool write_audit_datum(const std::string& filename, const car_command_c& cmd);
