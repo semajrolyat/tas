@@ -70,6 +70,18 @@ public:
       theta += 2.0 * PI;
   }
 
+  car_state_c( const Real& _time, const Real& _x, const Real& _y, const Real& _theta ) : 
+    x(_x), 
+    y(_y),
+    time(_time)
+  {
+    theta = _theta;
+    while( theta > PI )
+      theta -= 2.0 * PI;
+    while( theta <= -PI )
+      theta += 2.0 * PI;
+  }
+
   //---------------------------------------------------------------------------
   // Destructor
   //---------------------------------------------------------------------------
@@ -87,7 +99,7 @@ public:
   // Output
   //---------------------------------------------------------------------------
   static std::string header( void ) {
-    return "x, y, theta, time";
+    return "time, x, y, theta";
   }
 
   friend std::ostream& operator<<(std::ostream& ostr, const car_state_c& state);
@@ -99,7 +111,7 @@ car_state_c operator+( const car_state_c& a, const car_state_c& b ) {
   while( theta <= -PI )
     theta += 2.0 * PI;
 
-  return car_state_c( a.x + b.x, a.y + b.y, theta );
+  return car_state_c( a.time + b.time, a.x + b.x, a.y + b.y, theta );
 }
 car_state_c operator-( const car_state_c& a, const car_state_c& b ) {
   Real theta = a.theta - b.theta;
@@ -108,7 +120,7 @@ car_state_c operator-( const car_state_c& a, const car_state_c& b ) {
   while( theta <= -PI )
     theta += 2.0 * PI;
 
-  return car_state_c( a.x - b.x, a.y - b.y, theta );
+  return car_state_c( a.time - b.time, a.x - b.x, a.y - b.y, theta );
 }
 car_state_c operator*( const Real& c, const car_state_c& a ) {
   Real theta = c * a.theta;
@@ -117,7 +129,7 @@ car_state_c operator*( const Real& c, const car_state_c& a ) {
   while( theta <= -PI )
     theta += 2.0 * PI;
 
-  return car_state_c( c * a.x , c * a.y, theta );
+  return car_state_c( c * a.time, c * a.x , c * a.y, theta );
 }
 car_state_c operator*( const car_state_c& a, const Real& c ) {
   Real theta = c * a.theta;
@@ -126,7 +138,7 @@ car_state_c operator*( const car_state_c& a, const Real& c ) {
   while( theta <= -PI )
     theta += 2.0 * PI;
 
-  return car_state_c( c * a.x , c * a.y, theta );
+  return car_state_c( c * a.time, c * a.x , c * a.y, theta );
 }
 car_state_c operator/( const car_state_c& a, const Real& c ) {
   const Real EPSILON = 1e-16;
@@ -138,10 +150,10 @@ car_state_c operator/( const car_state_c& a, const Real& c ) {
   while( theta <= -PI )
     theta += 2.0 * PI;
 
-  return car_state_c( a.x / c, a.y / c, theta );
+  return car_state_c( a.time / c, a.x / c, a.y / c, theta );
 }
 std::ostream& operator<<(std::ostream& ostr, const car_state_c& state) {
-  return ostr << state.x << "," << state.y << "," << state.theta << "," << state.time;
+  return ostr << state.time << "," << state.x << "," << state.y << "," << state.theta;
 }
 
 //-----------------------------------------------------------------------------

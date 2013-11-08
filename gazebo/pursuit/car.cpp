@@ -428,15 +428,19 @@ bool car_c::plan( void ) {
     write_audit_datum( audit_file_ff_commands, ff_command );
   }
 
-  //if( desired_states.size() ) {
-    //compute whether to transition to next state
+
+///*
   if( desired_state_duration >= PLANNER_STEP_SIZE ) {
     update_desired_state( );
 
   }
-
   desired_state_duration += dtime;
-  //}
+//*/
+
+/*
+  if( time >= desired_state_1.time )
+    update_desired_state( );
+*/
   return true;
 }
 
@@ -458,7 +462,7 @@ void car_c::act( void ) {
 
   car_command_c actual_command( dtime, speed(), steering_angle() );
   car_state_c actual_state = state();
-  actual_state.time = time;
+  //actual_state.time = time;
 
   //write_audit_datum( audit_file_ff_commands, cmd );
   //std::cout << cmd << std::endl;
@@ -514,7 +518,10 @@ void car_c::update_desired_state( void ) {
   desired_state_0 = desired_states.front();
   desired_state_duration = 0.0;
   desired_states.erase( desired_states.begin() );
+  if( !desired_states.size() )
+    std::cout << "end of planned path\n";
   desired_state_1 = desired_states.front();
+  // if front == end path is done!  Candidate trigger for replanning
   state_step = 0;
 }
 
@@ -526,7 +533,8 @@ car_state_c car_c::state( void ) {
   Real x = pos.x;
   Real y = pos.y;
   Real theta = rot.GetYaw();
-  return car_state_c( x, y, theta );
+  Real t = time;
+  return car_state_c( t, x, y, theta );
 }
 //-----------------------------------------------------------------------------
 car_state_c car_c::dstate( void ) {
@@ -594,17 +602,6 @@ void car_c::steer( const car_command_c& u, const Real& Kp, const Real& Kd ) {
 }
 //-----------------------------------------------------------------------------
 void car_c::push( const car_command_c& u, const Real& Kp ) {
-  // feedback
-/*
-qx = interp(q(t0), q(tf), \frac{\Delta t}{tf - t0})
-u = inverseode(q(t0), qx)
-[use this command and after the simulation steps then retrieve the car's state as q(t0 + \Delta t) and then do]
-qx = interp(q(t0), q(tf), \frac{2\Delta t}{tf - t0})
-u = inverseode(q(t0+\Delta t), qx)
-...
-qx = q(tf)
-u = inverseode(q(tf-\Delta t), qx)
-*/
 
   Real desired_speed = u.speed;
   Real actual_speed = speed();
@@ -614,16 +611,9 @@ u = inverseode(q(tf-\Delta t), qx)
 
   Real f = Kp * ( desired_speed - actual_speed );
 
-  //Real f = SPEED_CONTROL_KP * ( desired_speed - actual_speed ) + 
-  //         SPEED_CONTROL_KD * ( desired_acceleration - actual_acceleration );
-
- 
-  //f += u.speed;
-
   gazebo::math::Vector3 d = orientation( );
   gazebo::math::Vector3 v = d * f;
   body->AddForce( v );
-
 } 
 
 //-----------------------------------------------------------------------------
@@ -721,50 +711,7 @@ car_command_c car_c::inverse_ode(const car_state_c& q, const car_state_c& dq ) {
 //  } while(its++ < MAX_ITS && f0 > EPSILON && fabs(du) > EPSILON2 );
 
   // *Second Compute Steering Angle*
-  // atan2 ill behaved for (0,0) so handle that case if it arises *brute force*
-/*
-  const Real EPSILON3 = 1e-3;
-  if( fabs(dq.theta) < EPSILON3 && fabs(u_s) < EPSILON3 )
-    u_phi = 0.0;
-  else
-    // otherwise, use the formulation
-    u_phi = atan2( dq.theta * WHEEL_BASE, u_s );
-*/
-/*
-  const Real EPSILON3 = 3.5e-3;
-  if( fabs(u_s) < EPSILON3 )
-    u_phi = 0.0;
-  else
-    // otherwise, use the formulation
-    u_phi = atan2( dq.theta * WHEEL_BASE, u_s );
-*/
-
-/*
-  if( u_s > dq.theta * WHEEL_BASE ) {
-    u_phi = atan2( dq.theta * WHEEL_BASE, u_s );
-  } else {
-    u_phi = -atan2( u_s, dq.theta * WHEEL_BASE ) - PI/2.0; 
-  }
-*/  
   u_phi = atan2( dq.theta * WHEEL_BASE, u_s );
-
-/*
-  while( u_phi > PI/2.0 )
-    u_phi -= PI;
-  while( u_phi <= -PI/2.0 )
-    u_phi += PI;
-*/
-/*
-  if( u_phi > PI/2.0 )
-    u_phi = PI - u_phi;
-  if( u_phi <= -PI/2.0 )
-    u_phi = PI + u_phi;
-*/
-
-/*
-  if( fabs(u_phi) > MAX_STEERING_ANGLE )
-    u_phi = u_phi / fabs(u_phi) * MAX_STEERING_ANGLE;
-*/
 
   return car_command_c( u_s, u_phi );
 }
@@ -1028,6 +975,7 @@ bool car_c::plan_via_ompl(void) {
 
       car_state_c q( x, y, theta );
       states.push_back( q );
+      q.time = (Real)i * PLANNER_STEP_SIZE;
       desired_states.push_back( q );
       write_audit_datum( audit_file_planned_states, q );
     }
