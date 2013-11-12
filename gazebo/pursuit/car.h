@@ -20,10 +20,12 @@
 #include <ompl/base/goals/GoalState.h>
 #include <ompl/base/spaces/SE2StateSpace.h>
 #include <ompl/control/spaces/RealVectorControlSpace.h>
-#include <ompl/control/planners/kpiece/KPIECE1.h>
+//#include <ompl/control/planners/kpiece/KPIECE1.h>
 #include <ompl/control/planners/rrt/RRT.h>
 #include <ompl/control/SimpleSetup.h>
 #include <ompl/config.h>
+
+#include <ompl/control/ODESolver.h>
 
 //-----------------------------------------------------------------------------
 
@@ -292,7 +294,13 @@ private:
   Real STEERING_CONTROL_KP;
   Real STEERING_CONTROL_KD;
   Real SPEED_CONTROL_KP;
-  Real SPEED_CONTROL_KD;
+
+  Real FEEDBACK_KS;
+  Real FEEDBACK_KD;
+  Real FEEDBACK_DU_SPEED;
+  Real FEEDBACK_DU_ANGLE;
+  Real FEEDBACK_MAX_SPEED;
+  Real FEEDBACK_MAX_ANGLE;
 
   Real WHEEL_BASE;
 
@@ -345,6 +353,8 @@ private:
 
   void update_desired_state( void );
 
+  bool stopped;
+
 public:
   //---------------------------------------------------------------------------
   // Constructors
@@ -386,12 +396,13 @@ protected:
 
   void steer( const car_command_c& u, const Real& Kp, const Real& Kd );
   void push( const car_command_c& u, const Real& Kp );
+  void stop( void );
 
   void steer_direct( const Real& _steering_angle );
   void steer_double_four_bar( const Real& _steering_angle );
   Real double_four_bar_kingpin_angle( const Real& _steering_angle );
 
-  void compensate_for_roll_pitch( void );
+  //void compensate_for_roll_pitch( void );
 
   car_command_c compute_feedback_command( void );
 

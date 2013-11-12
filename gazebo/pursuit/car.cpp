@@ -205,12 +205,42 @@ void car_c::Load(gazebo::physics::ModelPtr _model, sdf::ElementPtr _sdf) {
     } 
     SPEED_CONTROL_KP = _sdf->GetElement( "rrt_speed_control_kp" )->GetValueDouble();
 
-    if( !_sdf->HasElement("rrt_speed_control_kd") ) {
-      gzerr << "Unable to find parameter: rrt_speed_control_kd\n";
+    if( !_sdf->HasElement("rrt_fb_ks") ) {
+      gzerr << "Unable to find parameter: rrt_fb_ks\n";
       return;
     } 
-    SPEED_CONTROL_KD = _sdf->GetElement( "rrt_speed_control_kd" )->GetValueDouble();
-  
+    FEEDBACK_KS = _sdf->GetElement( "rrt_fb_ks" )->GetValueDouble();
+
+    if( !_sdf->HasElement("rrt_fb_kd") ) {
+      gzerr << "Unable to find parameter: rrt_fb_kd\n";
+      return;
+    } 
+    FEEDBACK_KD = _sdf->GetElement( "rrt_fb_kd" )->GetValueDouble();
+
+    if( !_sdf->HasElement("rrt_fb_du_speed") ) {
+      gzerr << "Unable to find parameter: rrt_fb_du_speed\n";
+      return;
+    } 
+    FEEDBACK_DU_SPEED = _sdf->GetElement( "rrt_fb_du_speed" )->GetValueDouble();
+
+    if( !_sdf->HasElement("rrt_fb_du_angle") ) {
+      gzerr << "Unable to find parameter: rrt_fb_du_angle\n";
+      return;
+    } 
+    FEEDBACK_DU_ANGLE = _sdf->GetElement( "rrt_fb_du_angle" )->GetValueDouble();
+
+    if( !_sdf->HasElement("rrt_fb_max_speed") ) {
+      gzerr << "Unable to find parameter: rrt_fb_max_speed\n";
+      return;
+    } 
+    FEEDBACK_MAX_SPEED = _sdf->GetElement( "rrt_fb_max_speed" )->GetValueDouble();
+
+    if( !_sdf->HasElement("rrt_fb_max_angle") ) {
+      gzerr << "Unable to find parameter: rrt_fb_max_angle\n";
+      return;
+    } 
+    FEEDBACK_MAX_ANGLE = _sdf->GetElement( "rrt_fb_max_angle" )->GetValueDouble();
+
   } else if( PLANNER == LISSAJOUS ) {
     if( !_sdf->HasElement("lissajous_planner_step_size") ) {
       gzerr << "Unable to find parameter: lissajous_planner_step_size\n";
@@ -236,11 +266,42 @@ void car_c::Load(gazebo::physics::ModelPtr _model, sdf::ElementPtr _sdf) {
     } 
     SPEED_CONTROL_KP = _sdf->GetElement( "lissajous_speed_control_kp" )->GetValueDouble();
   
-    if( !_sdf->HasElement("lissajous_speed_control_kd") ) {
-      gzerr << "Unable to find parameter: lissajous_speed_control_kd\n";
+    if( !_sdf->HasElement("lissajous_fb_ks") ) {
+      gzerr << "Unable to find parameter: lissajous_fb_ks\n";
       return;
     } 
-    SPEED_CONTROL_KD = _sdf->GetElement( "lissajous_speed_control_kd" )->GetValueDouble();
+    FEEDBACK_KS = _sdf->GetElement( "lissajous_fb_ks" )->GetValueDouble();
+
+    if( !_sdf->HasElement("lissajous_fb_kd") ) {
+      gzerr << "Unable to find parameter: lissajous_fb_kd\n";
+      return;
+    } 
+    FEEDBACK_KD = _sdf->GetElement( "lissajous_fb_kd" )->GetValueDouble();
+
+    if( !_sdf->HasElement("lissajous_fb_du_speed") ) {
+      gzerr << "Unable to find parameter: lissajous_fb_du_speed\n";
+      return;
+    } 
+    FEEDBACK_DU_SPEED = _sdf->GetElement( "lissajous_fb_du_speed" )->GetValueDouble();
+
+    if( !_sdf->HasElement("lissajous_fb_du_angle") ) {
+      gzerr << "Unable to find parameter: lissajous_fb_du_angle\n";
+      return;
+    } 
+    FEEDBACK_DU_ANGLE = _sdf->GetElement( "lissajous_fb_du_angle" )->GetValueDouble();
+
+    if( !_sdf->HasElement("lissajous_fb_max_speed") ) {
+      gzerr << "Unable to find parameter: lissajous_fb_max_speed\n";
+      return;
+    } 
+    FEEDBACK_MAX_SPEED = _sdf->GetElement( "lissajous_fb_max_speed" )->GetValueDouble();
+
+    if( !_sdf->HasElement("lissajous_fb_max_angle") ) {
+      gzerr << "Unable to find parameter: lissajous_fb_max_angle\n";
+      return;
+    } 
+    FEEDBACK_MAX_ANGLE = _sdf->GetElement( "lissajous_fb_max_angle" )->GetValueDouble();
+
   }
 
   // Steering Parameters
@@ -311,32 +372,31 @@ void car_c::Load(gazebo::physics::ModelPtr _model, sdf::ElementPtr _sdf) {
   SPINDLE_LEVER_BASE_ANGLE = PI - rho;
 
 
-  //---------------------------------------------------------------------------
-  // Testing Parameters
-  //---------------------------------------------------------------------------
-  if( !_sdf->HasElement("lissajous_ks") ) {
-    gzerr << "Unable to find parameter: lissajous_ks\n";
+  if( !_sdf->HasElement("lissajous_planner_ks") ) {
+    gzerr << "Unable to find parameter: lissajous_planner_ks\n";
     return;
   } 
-  LISSAJOUS_KS = _sdf->GetElement( "lissajous_ks" )->GetValueDouble();
+  LISSAJOUS_KS = _sdf->GetElement( "lissajous_planner_ks" )->GetValueDouble();
 
-  if( !_sdf->HasElement("lissajous_kd") ) {
-    gzerr << "Unable to find parameter: lissajous_kd\n";
+  if( !_sdf->HasElement("lissajous_planner_kd") ) {
+    gzerr << "Unable to find parameter: lissajous_planner_kd\n";
     return;
   } 
-  LISSAJOUS_KD = _sdf->GetElement( "lissajous_kd" )->GetValueDouble();
+  LISSAJOUS_KD = _sdf->GetElement( "lissajous_planner_kd" )->GetValueDouble();
 
-  if( !_sdf->HasElement("lissajous_du_speed") ) {
-    gzerr << "Unable to find parameter: lissajous_du_speed\n";
+  if( !_sdf->HasElement("lissajous_planner_du_speed") ) {
+    gzerr << "Unable to find parameter: lissajous_planner_du_speed\n";
     return;
   } 
-  LISSAJOUS_DU_SPEED = _sdf->GetElement( "lissajous_du_speed" )->GetValueDouble();
+  LISSAJOUS_DU_SPEED = _sdf->GetElement( "lissajous_planner_du_speed" )->GetValueDouble();
 
-  if( !_sdf->HasElement("lissajous_du_angle") ) {
-    gzerr << "Unable to find parameter: lissajous_du_angle\n";
+  if( !_sdf->HasElement("lissajous_planner_du_angle") ) {
+    gzerr << "Unable to find parameter: lissajous_planner_du_angle\n";
     return;
   } 
-  LISSAJOUS_DU_ANGLE = _sdf->GetElement( "lissajous_du_angle" )->GetValueDouble();
+  LISSAJOUS_DU_ANGLE = _sdf->GetElement( "lissajous_planner_du_angle" )->GetValueDouble();
+
+  stopped = false;
 
   //---------------------------------------------------------------------------
   // Call Init Function (Note: target function subject to inheritance)
@@ -354,12 +414,14 @@ void car_c::Update( ) {
 
   sense( );
   if( !plan( ) ) {
-    std::cout << "planning failed\n";
+    //std::cout << "planning failed\n";
     time_last = time;
-    return;
   }
-  //std::cout << "acting\n";
-  act( );
+
+  if( stopped ) 
+    stop();
+  else
+    act( );
 
   time_last = time;
 }
@@ -432,9 +494,11 @@ bool car_c::plan( void ) {
 ///*
   if( desired_state_duration >= PLANNER_STEP_SIZE ) {
     update_desired_state( );
-
   }
   desired_state_duration += dtime;
+ 
+
+  if( stopped ) return false;
 //*/
 
 /*
@@ -462,64 +526,51 @@ void car_c::act( void ) {
 
   car_command_c actual_command( dtime, speed(), steering_angle() );
   car_state_c actual_state = state();
-  //actual_state.time = time;
-
-  //write_audit_datum( audit_file_ff_commands, cmd );
-  //std::cout << cmd << std::endl;
-
 
   write_audit_datum( audit_file_actual_commands, cmd );
   write_audit_datum( audit_file_actual_states, actual_state );
   write_audit_datum( audit_file_control_values, actual_command );
-  //assert( actual_state.theta <= PI && actual_state.theta > -PI );
 }
 //-----------------------------------------------------------------------------
 car_command_c car_c::compute_feedback_command( void ) {
 
-//  std::cout << "interpolating [[" << desired_state_0 << "],[" << desired_state_1 << "]," << dtime << "," << PLANNER_STEP_SIZE << "," << state_step << "]" << std::endl;
   car_state_c qx = interpolate_linear(desired_state_0, desired_state_1, dtime, PLANNER_STEP_SIZE, ++state_step );
-
-  //Real Ks = 0.0005;
-  //Real Kd = 0.0000001;
-  Real Ks = 0.5;
-  Real Kd = 0.0001;
-  //Real DU_speed = 0.000005;
-  //Real DU_angle = 1.0;
-  Real DU_speed = 1.2;
-  Real DU_angle = 1.0;
   car_state_c q = state();
   car_state_c dq = dstate();
   car_state_c dq_desired = qx - q;
-  car_state_c dqx = Ks * (qx - q) + Kd * (dq_desired - dq);
+
+  car_state_c dqx = FEEDBACK_KS * (qx - q) + FEEDBACK_KD * (dq_desired - dq);
 
   car_command_c cmd = inverse_ode( q, dqx );
-///*
-  cmd.speed *= DU_speed;
-  cmd.angle *= DU_angle;
+
+  cmd.speed *= FEEDBACK_DU_SPEED;
+  cmd.angle *= FEEDBACK_DU_ANGLE;
   cmd.duration = dtime;
-//*/
-  //cmd.duration = dtime;
 
   dq_desired.time = time;
   write_audit_datum( audit_file_fb_error, dq_desired );
   write_audit_datum( audit_file_interp_states, qx );
 
-  if( fabs(cmd.speed) > 0.2 )
-    cmd.speed = sgn(cmd.speed) * 0.2;
-  if( fabs(cmd.angle) > 0.1 )
-    cmd.angle = sgn(cmd.angle) * 0.1;
+  if( fabs(cmd.speed) > FEEDBACK_MAX_SPEED )
+    cmd.speed = sgn(cmd.speed) * FEEDBACK_MAX_SPEED;
+  if( fabs(cmd.angle) > FEEDBACK_MAX_ANGLE )
+    cmd.angle = sgn(cmd.angle) * FEEDBACK_MAX_ANGLE;
 
   return cmd;
-
 }
 
 //-----------------------------------------------------------------------------
 void car_c::update_desired_state( void ) {
+  if( stopped ) return;
+
   desired_state_0 = desired_states.front();
   desired_state_duration = 0.0;
   desired_states.erase( desired_states.begin() );
-  if( !desired_states.size() )
+  if( !desired_states.size() ) {
     std::cout << "end of planned path\n";
+    std::cout << "stopping car\n";
+    stopped = true;
+  }
   desired_state_1 = desired_states.front();
   // if front == end path is done!  Candidate trigger for replanning
   state_step = 0;
@@ -606,15 +657,21 @@ void car_c::push( const car_command_c& u, const Real& Kp ) {
   Real desired_speed = u.speed;
   Real actual_speed = speed();
 
-  //Real desired_acceleration = MAX_ACCELERATION;
-  //Real actual_acceleration = acceleration();
-
   Real f = Kp * ( desired_speed - actual_speed );
 
   gazebo::math::Vector3 d = orientation( );
   gazebo::math::Vector3 v = d * f;
   body->AddForce( v );
 } 
+
+//-----------------------------------------------------------------------------
+void car_c::stop( void ) {
+  //bearing_rear_left->SetForce( 0, 0.0 );
+  //bearing_rear_right->SetForce( 0, 0.0 );
+  car_command_c cmd( 0.0, 0.0 );
+  steer( cmd, STEERING_CONTROL_KP, STEERING_CONTROL_KD );
+  push( cmd, SPEED_CONTROL_KP );
+}
 
 //-----------------------------------------------------------------------------
 void car_c::steer_direct( const Real& _steering_angle ) {
@@ -708,7 +765,7 @@ car_command_c car_c::inverse_ode(const car_state_c& q, const car_state_c& dq ) {
     u_s = u_s + t * du;
   
   } while(its++ < MAX_ITS && f > EPSILON && fabs(du) > EPSILON2 );
-//  } while(its++ < MAX_ITS && f0 > EPSILON && fabs(du) > EPSILON2 );
+  //} while(its++ < MAX_ITS && f0 > EPSILON && fabs(du) > EPSILON2 );
 
   // *Second Compute Steering Angle*
   u_phi = atan2( dq.theta * WHEEL_BASE, u_s );
@@ -717,7 +774,7 @@ car_command_c car_c::inverse_ode(const car_state_c& q, const car_state_c& dq ) {
 }
 
 //------------------------------------------------------------------------------
-
+/*
 void car_c::compensate_for_roll_pitch( void ) {
   // For tight turns, this ensures that the model sticks to the ground
   // and doesn't roll over.  It can lead to skidding
@@ -729,7 +786,7 @@ void car_c::compensate_for_roll_pitch( void ) {
   gazebo::math::Quaternion rot_fixed( 0.0, 0.0, _yaw );
   model->SetWorldPose( gazebo::math::Pose( pos, rot_fixed ) );
 }
-
+*/
 //------------------------------------------------------------------------------
 // Auditing 
 //------------------------------------------------------------------------------
