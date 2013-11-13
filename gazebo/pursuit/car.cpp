@@ -360,6 +360,8 @@ void car_c::Load(gazebo::physics::ModelPtr _model, sdf::ElementPtr _sdf) {
  
   WHEEL_BASE = (steering_link->GetWorldPose().pos - rear_driveshaft->GetWorldPose().pos).GetLength();
 
+  std::cout << WHEEL_BASE << std::endl;
+
   // Derive Four Bar Steering Linkage Variables
   Real theta = STEERING_LEVER_BASE_ANGLE;
   Real h_sq = BASE_LINK_LENGTH_SQ + STEERING_LEVER_LENGTH_SQ - 
@@ -534,7 +536,7 @@ void car_c::act( void ) {
 //-----------------------------------------------------------------------------
 car_command_c car_c::compute_feedback_command( void ) {
 
-  car_state_c qx = interpolate_linear(desired_state_0, desired_state_1, dtime, PLANNER_STEP_SIZE, ++state_step );
+  car_state_c qx = interpolate_linear(desired_state_0, desired_state_1, PLANNER_STEP_SIZE, ++state_step );
   car_state_c q = state();
   car_state_c dq = dstate();
   car_state_c dq_desired = qx - q;
@@ -722,7 +724,7 @@ Real car_c::speed_optimization_function( const Real& u_s, const Real& dx, const 
 }
 
 //------------------------------------------------------------------------------
-car_state_c car_c::interpolate_linear( const car_state_c& q0, const car_state_c& qf, const Real& dt, const Real& deltat, const int& step ) {
+car_state_c car_c::interpolate_linear( const car_state_c& q0, const car_state_c& qf, const Real& deltat, const int& step ) {
   return ((qf - q0)) * (deltat * (Real)step) + q0;
 }
 
@@ -943,21 +945,27 @@ bool car_c::plan_via_ompl(void) {
 
   /// set the bounds for the R^2 part of SE(2)
   ompl::base::RealVectorBounds bounds(2);
-  bounds.setLow(-25.0);
-  bounds.setHigh(25.0);
+  bounds.setLow( 0, -25.0 );  // min x
+  bounds.setHigh( 0, 25.0 );  // max x
+  bounds.setLow( 1, -25.0 );  // min y
+  bounds.setHigh( 1, 25.0 );  // max y
 
   space->as<ompl::base::SE2StateSpace>()->setBounds(bounds);
 
   // create a control space
-  ompl::control::ControlSpacePtr cspace(new DemoControlSpace(space));
+  ompl::control::ControlSpacePtr cspace(new demo_control_space_c(space));
+
+  const Real MAX_SPEED = 0.5;
 
   // set the bounds for the control space
   ompl::base::RealVectorBounds cbounds(2);
   //const Real max_steering_angle = PI/5.0;
-  cbounds.setLow( -MAX_STEERING_ANGLE );
-  cbounds.setHigh( MAX_STEERING_ANGLE );
+  cbounds.setLow( 0, -MAX_SPEED );
+  cbounds.setHigh( 0, MAX_SPEED );
+  cbounds.setLow( 1, -MAX_STEERING_ANGLE );
+  cbounds.setHigh( 1, MAX_STEERING_ANGLE );
 
-  cspace->as<DemoControlSpace>()->setBounds(cbounds);
+  cspace->as<demo_control_space_c>()->setBounds(cbounds);
 
   // define a simple setup class
   ompl::control::SimpleSetup ss(cspace);
@@ -966,10 +974,10 @@ bool car_c::plan_via_ompl(void) {
   ompl::base::ProblemDefinition pdef(si);
 
   /// set state validity checking for this space
-  ss.setStateValidityChecker(boost::bind(&isStateValid, ss.getSpaceInformation().get(), _1));
+  ss.setStateValidityChecker(boost::bind(&is_state_valid, ss.getSpaceInformation().get(), _1));
 
   /// set the propagation routine for this space
-  ss.setStatePropagator(ompl::control::StatePropagatorPtr(new DemoStatePropagator(ss.getSpaceInformation())));
+  ss.setStatePropagator( ompl::control::StatePropagatorPtr( new demo_state_propagator_c( ss.getSpaceInformation(), MAX_STEERING_ANGLE, WHEEL_BASE ) ) );
 
   car_state_c initial( 0.0, 4.0, 0.0 );
   car_state_c final( 0.0, 0.0, 0.0 );
@@ -989,11 +997,19 @@ bool car_c::plan_via_ompl(void) {
   goal->setY( final.y );
   goal->setYaw( final.theta );
 
-  /// set the start and goal states
-  ss.setStartAndGoalStates(start, goal, 0.05);
+  const Real INTEGRATOR_STEP_SIZE = 0.05;
+  const Real MAX_PLANNING_TIME = 10.0;
 
-  ompl::base::PlannerPtr planner( new ompl::control::RRT(si) );
-  //planner->setProblemDefinition( pdef );
+  /// set the start and goal states
+  ss.setStartAndGoalStates(start, goal, INTEGRATOR_STEP_SIZE);
+
+  //ompl::base::PlannerPtr planner( new ompl::control::RRT(si) );
+  ompl::control::RRT* rrt = new ompl::control::RRT(si);
+  // rrt->setGoalBias( dbl );
+  // rrt->setIntermediateStates( true );
+  ompl::base::PlannerPtr planner( rrt );
+
+
   ss.setPlanner( planner );
 
   ss.getSpaceInformation()->setPropagationStepSize( PLANNER_STEP_SIZE );
@@ -1001,29 +1017,46 @@ bool car_c::plan_via_ompl(void) {
   //ss.getSpaceInformation()->setPropagationStepSize( 0.025 );
   /// we want to have a reasonable value for the propagation step size
   ss.setup();
-  static_cast<DemoStatePropagator*>(ss.getStatePropagator().get())->setIntegrationTimeStep(ss.getSpaceInformation()->getPropagationStepSize());
+  static_cast<demo_state_propagator_c*>(ss.getStatePropagator().get())->setIntegrationTimeStep(ss.getSpaceInformation()->getPropagationStepSize());
 
-  /// attempt to solve the problem within one second of planning time
-  ompl::base::PlannerStatus solved = ss.solve(10.0);
+  /// attempt to solve the problem
+  ompl::base::PlannerStatus solved = ss.solve(MAX_PLANNING_TIME);
 
   if (solved) {
+
+    //ss.haveExactSolutionPath();  // maybe true
+    //ss.haveSolutionPath();       // true
+
     std::cout << "Found solution:" << std::endl;
     /// print the path to screen
 
     //ss.getSolutionPath().asGeometric().print(std::cout);
 
     ompl::geometric::PathGeometric path = ss.getSolutionPath().asGeometric();
-/*
-    Real l = path.length();
-    unsigned int c = path.getStateCount(); 
-    Real dt = dtime;
-    Real t = l / dt;
-    unsigned int it = (unsigned int) t;
-    unsigned int a = it - c;
-    std::cout << "length:" << l << " dt:" << dtime << " t:" << t << " c:" << c << " a:" << a << std::endl;
-    path.interpolate( a );
-*/
     unsigned int state_count = path.getStateCount();
+
+    const Real EPSILON = 0.5;
+    // check that final state is very close to goal state
+    ompl::base::State* state = path.getState( state_count - 1 );
+    Real x = state->as<ompl::base::SE2StateSpace::StateType>()->getX();
+    Real y = state->as<ompl::base::SE2StateSpace::StateType>()->getY();
+    Real theta = state->as<ompl::base::SE2StateSpace::StateType>()->getYaw();
+    if( fabs( x - final.x ) > EPSILON || fabs( y - final.y ) > EPSILON || fabs( theta - final.theta ) > EPSILON ) {
+      std::cout << "Planning Failed: final state diverged significantly from goal state\n";
+      if( fabs( x - final.x ) > EPSILON ) {
+        std::cout << "x diff: " << x - final.x << std::endl;
+      }
+      if( fabs( y - final.y ) > EPSILON ) {
+        std::cout << "y diff: " << y - final.y << std::endl;
+      }
+      if( fabs( theta - final.theta ) > EPSILON ) {
+        std::cout << "theta diff: " << theta - final.theta << std::endl;
+      }
+      
+      return false;
+    }
+    
+
     for( unsigned int i = 0; i < state_count; i++ ) {
       ompl::base::State* state = path.getState( i );
       Real x = state->as<ompl::base::SE2StateSpace::StateType>()->getX();
@@ -1049,6 +1082,7 @@ bool car_c::plan_via_ompl(void) {
       commands.push_back( u );
       write_audit_datum( audit_file_planned_commands, u );
     }
+
     return true;
   } else {
     std::cout << "No solution found" << std::endl;
@@ -1058,25 +1092,25 @@ bool car_c::plan_via_ompl(void) {
 
 //-----------------------------------------------------------------------------
 
-    /// implement the function describing the robot motion: qdot = f(q, u)
-void car_c::operator()(const ompl::base::State *state, const ompl::control::Control *control, std::valarray<double> &dstate) const {
-        const double *u = control->as<ompl::control::RealVectorControlSpace::ControlType>()->values;
-        const double theta = state->as<ompl::base::SE2StateSpace::StateType>()->getYaw();
+/// implement the function describing the robot motion: qdot = f(q, u)
+void car_c::operator()(const ompl::base::State *state, const ompl::control::Control *control, std::valarray<double> &dstate, const double& wheel_base ) const {
+  const double *u = control->as<ompl::control::RealVectorControlSpace::ControlType>()->values;
+  const double theta = state->as<ompl::base::SE2StateSpace::StateType>()->getYaw();
 
-        dstate.resize(3);
-        dstate[0] = u[0] * cos(theta);
-        dstate[1] = u[0] * sin(theta);
-        dstate[2] = u[0] * tan(u[1]) / WHEEL_BASE;
-    }
+  dstate.resize(3);
+  dstate[0] = u[0] * cos(theta);
+  dstate[1] = u[0] * sin(theta);
+  dstate[2] = u[0] * tan(u[1]) / wheel_base;
+}
 //-----------------------------------------------------------------------------
 
-    /// implement y(n+1) = y(n) + d
+/// implement y(n+1) = y(n) + d
 void car_c::update(ompl::base::State *state, const std::valarray<double> &dstate) const {
-        ompl::base::SE2StateSpace::StateType &s = *state->as<ompl::base::SE2StateSpace::StateType>();
-        s.setX(s.getX() + dstate[0]);
-        s.setY(s.getY() + dstate[1]);
-        s.setYaw(s.getYaw() + dstate[2]);
-        space_->enforceBounds(state);
-    }
+  ompl::base::SE2StateSpace::StateType &s = *state->as<ompl::base::SE2StateSpace::StateType>();
+  s.setX(s.getX() + dstate[0]);
+  s.setY(s.getY() + dstate[1]);
+  s.setYaw(s.getYaw() + dstate[2]);
+  space_->enforceBounds(state);
+}
 //-----------------------------------------------------------------------------
 

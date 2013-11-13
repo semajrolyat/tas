@@ -302,8 +302,9 @@ private:
   Real FEEDBACK_MAX_SPEED;
   Real FEEDBACK_MAX_ANGLE;
 
+public:
   Real WHEEL_BASE;
-
+private:
   enum planner_type_e {
     LISSAJOUS,
     RRT
@@ -411,7 +412,7 @@ protected:
   //---------------------------------------------------------------------------
   bool plan_via_ompl( void );
 public:
-  void operator()( const ompl::base::State *state, const ompl::control::Control *control, std::valarray<double> &dstate) const;
+  void operator()( const ompl::base::State *state, const ompl::control::Control *control, std::valarray<double> &dstate, const double& wheel_base ) const;
   void update(ompl::base::State *state, const std::valarray<double> &dstate) const;
 
 protected:
@@ -424,7 +425,7 @@ protected:
   car_command_c inverse_ode( const car_state_c& q, const car_state_c& dq );
 
   Real speed_optimization_function( const Real& u_s, const Real& x_dot, const Real& y_dot, const Real& costheta, const Real& sintheta );
-  car_state_c interpolate_linear( const car_state_c& q0, const car_state_c& qf, const Real& dt, const Real& deltat, const int& step );
+  car_state_c interpolate_linear( const car_state_c& q0, const car_state_c& qf, const Real& deltat, const int& step );
 
   //---------------------------------------------------------------------------
   // Auditing 
@@ -467,50 +468,13 @@ private:
 };
 
 //-----------------------------------------------------------------------------
-
-/// Simple integrator: Euclidean method
-template<typename F>
-class EulerIntegrator {
-public:
-
-  EulerIntegrator(const ompl::base::StateSpace *space, double timeStep) : 
-    space_(space), 
-    timeStep_(timeStep), 
-    ode_(space) 
-  { }
-
-  void propagate(const ompl::base::State *start, const ompl::control::Control *control, const double duration, ompl::base::State *result) const {
-    double t = timeStep_;
-    std::valarray<double> dstate;
-    space_->copyState(result, start);
-    while( t < duration + std::numeric_limits<double>::epsilon() ) {
-      ode_( result, control, dstate );
-      ode_.update( result, timeStep_ * dstate );
-      t += timeStep_;
-    }
-    if( t + std::numeric_limits<double>::epsilon() > duration ) {
-      ode_(result, control, dstate);
-      ode_.update(result, (t - duration) * dstate);
-    }
-  }
-
-  double getTimeStep(void) const {
-    return timeStep_;
-  }
-
-  void setTimeStep(double timeStep) {
-    timeStep_ = timeStep;
-  }
-
-private:
-  const ompl::base::StateSpace *space_;
-  double timeStep_;
-  F      ode_;
-};
-
+// OMPL
+//-----------------------------------------------------------------------------
+// Following mostly borrowed wholesale from OMPL demo 
+// RigidBodyPlanningWithIntegrationAndControls.cpp with refactoring to code style
 //-----------------------------------------------------------------------------
 
-bool isStateValid(const ompl::control::SpaceInformation *si, const ompl::base::State *state) {
+bool is_state_valid(const ompl::control::SpaceInformation *si, const ompl::base::State *state) {
   //    ompl::base::ScopedState<ompl::base::SE2StateSpace>
   /// cast the abstract state type to the type we expect
   const ompl::base::SE2StateSpace::StateType *se2state = state->as<ompl::base::SE2StateSpace::StateType>();
@@ -532,39 +496,97 @@ bool isStateValid(const ompl::control::SpaceInformation *si, const ompl::base::S
 
 //-----------------------------------------------------------------------------
 
-/// @cond IGNORE
-class DemoControlSpace : public ompl::control::RealVectorControlSpace
+class demo_control_space_c : public ompl::control::RealVectorControlSpace
 {
 public:
 
-  DemoControlSpace(const ompl::base::StateSpacePtr &stateSpace) : 
+  demo_control_space_c(const ompl::base::StateSpacePtr &stateSpace) : 
     ompl::control::RealVectorControlSpace(stateSpace, 2)
   { }
 };
 
+
 //-----------------------------------------------------------------------------
 
-class DemoStatePropagator : public ompl::control::StatePropagator
+/// Note: due to basing this on ompl demo, the typical integrator abstraction 
+/// is broken because the ode has to at least know the wheel base which is a 
+/// member of the instance and the steering angle is validated against the 
+/// max_steering_angle for safety.
+template<typename F>
+class euler_integrator_c {
+public:
+
+  euler_integrator_c( const ompl::base::StateSpace *_space, const double& _time_step, const Real& _max_steering_angle, const Real& _wheel_base ) : 
+    max_steering_angle( _max_steering_angle ),
+    wheel_base( _wheel_base ),
+    space( _space ), 
+    time_step( _time_step), 
+    ode( _space )
+  { }
+
+  void propagate( const ompl::base::State *start, const ompl::control::Control *control, const double duration, ompl::base::State *result ) const {
+    double t = time_step;
+    std::valarray<double> dstate;
+    space->copyState( result, start );
+    const double *u = control->as<ompl::control::RealVectorControlSpace::ControlType>()->values;
+    if( fabs(u[1]) > max_steering_angle ) {
+      // Note: state should already by copied from start to result so exiting means result is start state
+      std::cout << "Control exceeds maximum steering angle [value:" << u[1] << "]\n";
+      return;
+    }
+    while( t < duration + std::numeric_limits<double>::epsilon() ) {
+      ode( result, control, dstate, wheel_base );
+      ode.update( result, time_step * dstate );
+      t += time_step;
+    }
+    if( t + std::numeric_limits<double>::epsilon() > duration ) {
+      ode( result, control, dstate, wheel_base );
+      ode.update( result, (t - duration) * dstate );
+    }
+  }
+
+  double get_time_step( void ) const {
+    return time_step;
+  }
+
+  void set_time_step( const double& _time_step ) {
+    time_step = _time_step;
+  }
+
+protected:
+  Real max_steering_angle;
+  Real wheel_base;
+
+private:
+  const ompl::base::StateSpace *space;
+  double time_step;
+  F      ode;
+};
+
+//-----------------------------------------------------------------------------
+
+class demo_state_propagator_c : public ompl::control::StatePropagator
 {
 public:
 
-  DemoStatePropagator(const ompl::control::SpaceInformationPtr &si) : 
-    ompl::control::StatePropagator(si), integrator_(si->getStateSpace().get(), 0.0)
+  demo_state_propagator_c( const ompl::control::SpaceInformationPtr &si, const Real& max_steering_angle, const double wheel_base ) : 
+    ompl::control::StatePropagator(si),
+    integrator( si->getStateSpace().get(), 0.0, max_steering_angle, wheel_base )
   { }
 
-  virtual void propagate(const ompl::base::State *state, const ompl::control::Control* control, const double duration, ompl::base::State *result) const {
-    integrator_.propagate(state, control, duration, result);
+  virtual void propagate( const ompl::base::State *state, const ompl::control::Control* control, const double duration, ompl::base::State *result ) const {
+    integrator.propagate( state, control, duration, result );
   }
 
-  void setIntegrationTimeStep(double timeStep) {
-    integrator_.setTimeStep(timeStep);
+  void setIntegrationTimeStep( const double& time_step ) {
+    integrator.set_time_step( time_step );
   }
 
-  double getIntegrationTimeStep(void) const {
-    return integrator_.getTimeStep();
+  double getIntegrationTimeStep( void ) const {
+    return integrator.get_time_step();
   }
 
-  EulerIntegrator< car_c > integrator_;
+  euler_integrator_c< car_c > integrator;
 };
 
 //-----------------------------------------------------------------------------
