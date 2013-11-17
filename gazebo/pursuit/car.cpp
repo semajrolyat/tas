@@ -1005,6 +1005,7 @@ bool car_c::plan_via_ompl(void) {
 
   //ompl::base::PlannerPtr planner( new ompl::control::RRT(si) );
   ompl::control::RRT* rrt = new ompl::control::RRT(si);
+  //rrt_c* rrt = rrt_c(si);
   // rrt->setGoalBias( dbl );
   // rrt->setIntermediateStates( true );
   ompl::base::PlannerPtr planner( rrt );

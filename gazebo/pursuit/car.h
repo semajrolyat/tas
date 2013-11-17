@@ -590,6 +590,17 @@ public:
 };
 
 //-----------------------------------------------------------------------------
+/*
+class rrt_c : public ompl::control::RRT {
+public:
+  rrt_c( const ompl::base::SpaceInformationPtr &si ) {
+    ompl::control::RRT( si );
+  }
+
+  virtual ~rrt_c( void ) { }
+
+};
+*/
 
 #endif // _GAZEBO_CAR_H_
 
