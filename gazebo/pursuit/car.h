@@ -27,6 +27,14 @@
 
 #include <ompl/control/ODESolver.h>
 
+//#include <stdlib.h>
+//#include <stdio.h>
+#include <gsl/gsl_rng.h>
+#include <gsl/gsl_randist.h>
+#include <gsl/gsl_vector.h>
+#include <gsl/gsl_blas.h>
+#include <gsl/gsl_multifit_nlin.h>
+
 //-----------------------------------------------------------------------------
 
 typedef double Real;
@@ -226,6 +234,11 @@ std::ostream& operator<<(std::ostream& ostr, const car_command_c& cmd) {
 }
 
 //-----------------------------------------------------------------------------
+
+typedef std::vector<car_state_c> car_state_list_t;
+typedef std::vector<car_command_c> car_command_list_t;
+
+//-----------------------------------------------------------------------------
 class car_plan_c {
 public:
   car_plan_c( void ) {}
@@ -302,11 +315,16 @@ private:
   Real FEEDBACK_MAX_SPEED;
   Real FEEDBACK_MAX_ANGLE;
 
+  Real GAUSSIAN_MEAN;
+  Real GAUSSIAN_VARIANCE;
+  Real GAUSSIAN_STDDEV;
+
 public:
   Real WHEEL_BASE;
 private:
   enum planner_type_e {
     LISSAJOUS,
+    WALK,
     RRT
   };
 
@@ -407,25 +425,41 @@ protected:
 
   car_command_c compute_feedback_command( void );
 
+  bool init_lissajous_planner( void );
+  bool init_random_walk_planner( void );
+  bool init_rrt_planner( void );
+
+  car_command_c get_random_walk_command( void );
+
+  bool plan_lissajous( car_command_list_t& command_list, car_state_list_t& state_list, car_state_list_t& desired_state_list );
+  bool plan_random_walk( car_command_list_t& command_list, car_state_list_t& state_list, car_state_list_t& desired_state_list, const unsigned int& steps );
+  bool plan_rrt( car_command_list_t& command_list, car_state_list_t& state_list, car_state_list_t& desired_state_list );
+
   //---------------------------------------------------------------------------
   // OMPL
   //---------------------------------------------------------------------------
-  bool plan_via_ompl( void );
 public:
-  void operator()( const ompl::base::State *state, const ompl::control::Control *control, std::valarray<double> &dstate, const double& wheel_base ) const;
+  void operator()( const ompl::base::State *state, const ompl::control::Control *control, std::valarray<double> &dstate, const double& wheel_base, const double& step_size ) const;
   void update(ompl::base::State *state, const std::valarray<double> &dstate) const;
 
 protected:
   const ompl::base::StateSpace *space_;
 
+
+  //---------------------------------------------------------------------------
+  // GSL
+  //---------------------------------------------------------------------------
+  gsl_rng* gslrng;
+
+
   //---------------------------------------------------------------------------
   // ODE 
   //---------------------------------------------------------------------------
   car_state_c ode( const car_state_c& q, const car_command_c& u );
-  car_command_c inverse_ode( const car_state_c& q, const car_state_c& dq );
+  car_command_c inverse_ode( const car_state_c& q, const car_state_c& dq ) const;
 
-  Real speed_optimization_function( const Real& u_s, const Real& x_dot, const Real& y_dot, const Real& costheta, const Real& sintheta );
-  car_state_c interpolate_linear( const car_state_c& q0, const car_state_c& qf, const Real& deltat, const int& step );
+  Real speed_optimization_function( const Real& u_s, const Real& x_dot, const Real& y_dot, const Real& costheta, const Real& sintheta ) const;
+  car_state_c interpolate_linear( const car_state_c& q0, const car_state_c& qf, const Real& deltat, const int& step ) const;
 
   //---------------------------------------------------------------------------
   // Auditing 
@@ -454,17 +488,18 @@ protected:
   //---------------------------------------------------------------------------
   // Planning
   //---------------------------------------------------------------------------
-  std::vector<car_state_c> states;
-  std::vector<car_state_c> desired_states;
-  std::vector<car_command_c> commands;
+  car_state_list_t states;
+  car_state_list_t desired_states;
+  car_command_list_t commands;
 
   Real signed_angle( const Real& ux, const Real& uy, const Real& vx, const Real& vy ); 
   car_state_c lissajous( const Real& t, const Real& a, const Real& b, const Real& A, const Real& B, const Real& delta );
-  bool plan_lissajous( void );
 
   //---------------------------------------------------------------------------
 
-private:
+public:
+  void to_state(const std::vector<double>& values, ompl::base::State* state) const;
+  void from_state(const ompl::base::State* state, std::vector<double>& values) const;
 };
 
 //-----------------------------------------------------------------------------
@@ -474,27 +509,6 @@ private:
 // RigidBodyPlanningWithIntegrationAndControls.cpp with refactoring to code style
 //-----------------------------------------------------------------------------
 
-bool is_state_valid(const ompl::control::SpaceInformation *si, const ompl::base::State *state) {
-  //    ompl::base::ScopedState<ompl::base::SE2StateSpace>
-  /// cast the abstract state type to the type we expect
-  const ompl::base::SE2StateSpace::StateType *se2state = state->as<ompl::base::SE2StateSpace::StateType>();
-
-  /// extract the first component of the state and cast it to what we expect
-  const ompl::base::RealVectorStateSpace::StateType *pos = se2state->as<ompl::base::RealVectorStateSpace::StateType>(0);
-
-  /// extract the second component of the state and cast it to what we expect
-  const ompl::base::SO2StateSpace::StateType *rot = se2state->as<ompl::base::SO2StateSpace::StateType>(1);
-
-  /// check validity of state defined by pos & rot
-  // These constants are based on the size of the pen.
-  if( fabs(pos->values[0]) >= 25.0 || fabs(pos->values[1]) >= 25.0 )
-    return false;
-
-  // return a value that is always true but uses the two variables we define, so we avoid compiler warnings
-  return si->satisfiesBounds(state) && (const void*)rot != (const void*)pos;
-}
-
-//-----------------------------------------------------------------------------
 
 class demo_control_space_c : public ompl::control::RealVectorControlSpace
 {
@@ -505,6 +519,9 @@ public:
   { }
 };
 
+//-----------------------------------------------------------------------------
+
+bool is_state_valid(const ompl::control::SpaceInformation *si, const ompl::base::State *state);
 
 //-----------------------------------------------------------------------------
 
@@ -516,7 +533,8 @@ template<typename F>
 class euler_integrator_c {
 public:
 
-  euler_integrator_c( const ompl::base::StateSpace *_space, const double& _time_step, const Real& _max_steering_angle, const Real& _wheel_base ) : 
+  euler_integrator_c( const ompl::base::StateSpace *_space, const double& _time_step, const Real& _max_steering_angle, const Real& _wheel_base, const Real& _planner_step_size ) : 
+    planner_step_size( _planner_step_size ),
     max_steering_angle( _max_steering_angle ),
     wheel_base( _wheel_base ),
     space( _space ), 
@@ -535,12 +553,12 @@ public:
       return;
     }
     while( t < duration + std::numeric_limits<double>::epsilon() ) {
-      ode( result, control, dstate, wheel_base );
+      ode( result, control, dstate, wheel_base, planner_step_size );
       ode.update( result, time_step * dstate );
       t += time_step;
     }
     if( t + std::numeric_limits<double>::epsilon() > duration ) {
-      ode( result, control, dstate, wheel_base );
+      ode( result, control, dstate, wheel_base, planner_step_size );
       ode.update( result, (t - duration) * dstate );
     }
   }
@@ -556,6 +574,7 @@ public:
 protected:
   Real max_steering_angle;
   Real wheel_base;
+  Real planner_step_size;
 
 private:
   const ompl::base::StateSpace *space;
@@ -569,9 +588,9 @@ class demo_state_propagator_c : public ompl::control::StatePropagator
 {
 public:
 
-  demo_state_propagator_c( const ompl::control::SpaceInformationPtr &si, const Real& max_steering_angle, const double wheel_base ) : 
+  demo_state_propagator_c( const ompl::control::SpaceInformationPtr &si, const Real& max_steering_angle, const double wheel_base, const double planner_step_size ) : 
     ompl::control::StatePropagator(si),
-    integrator( si->getStateSpace().get(), 0.0, max_steering_angle, wheel_base )
+    integrator( si->getStateSpace().get(), 0.0, max_steering_angle, wheel_base, planner_step_size )
   { }
 
   virtual void propagate( const ompl::base::State *state, const ompl::control::Control* control, const double duration, ompl::base::State *result ) const {
@@ -593,8 +612,8 @@ public:
 /*
 class rrt_c : public ompl::control::RRT {
 public:
-  rrt_c( const ompl::base::SpaceInformationPtr &si ) {
-    ompl::control::RRT( si );
+  rrt_c( const ompl::base::SpaceInformationPtr &si ) : ompl::control::RRT( si ) {
+
   }
 
   virtual ~rrt_c( void ) { }

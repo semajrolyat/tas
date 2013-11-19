@@ -1,6 +1,8 @@
 #include <car.h>
 
 //-----------------------------------------------------------------------------
+car_c* car;
+//-----------------------------------------------------------------------------
 Real sgn(Real x)
 {
   if (x > 0.0)
@@ -175,6 +177,8 @@ void car_c::Load(gazebo::physics::ModelPtr _model, sdf::ElementPtr _sdf) {
   std::string planner = _sdf->GetElement( "planner" )->GetValueString();
   if( planner.compare("rrt") == 0 ) {
     PLANNER = RRT;
+  } else if( planner.compare("walk") == 0 ) {
+    PLANNER = WALK;
   } else if( planner.compare("lissajous") == 0 ) {
     PLANNER = LISSAJOUS;
   } else {
@@ -182,6 +186,7 @@ void car_c::Load(gazebo::physics::ModelPtr _model, sdf::ElementPtr _sdf) {
   }
 
   if( PLANNER == RRT ) {
+    // get rrt variables
     if( !_sdf->HasElement("rrt_planner_step_size") ) {
       gzerr << "Unable to find parameter: rrt_planner_step_size\n";
       return;
@@ -241,7 +246,47 @@ void car_c::Load(gazebo::physics::ModelPtr _model, sdf::ElementPtr _sdf) {
     } 
     FEEDBACK_MAX_ANGLE = _sdf->GetElement( "rrt_fb_max_angle" )->GetValueDouble();
 
+  } else if( PLANNER == WALK ) {
+    // Get random walk variables
+    if( !_sdf->HasElement("walk_planner_step_size") ) {
+      gzerr << "Unable to find parameter: walk_planner_step_size\n";
+      return;
+    } 
+    PLANNER_STEP_SIZE = _sdf->GetElement( "walk_planner_step_size" )->GetValueDouble();
+    if( !_sdf->HasElement("walk_steering_control_kp") ) {
+      gzerr << "Unable to find parameter: walk_steering_control_kp\n";
+      return;
+    } 
+    STEERING_CONTROL_KP = _sdf->GetElement( "walk_steering_control_kp" )->GetValueDouble();
+
+    if( !_sdf->HasElement("walk_steering_control_kd") ) {
+      gzerr << "Unable to find parameter: walk_steering_control_kd\n";
+      return;
+    } 
+    STEERING_CONTROL_KD = _sdf->GetElement( "walk_steering_control_kd" )->GetValueDouble();
+
+    if( !_sdf->HasElement("walk_speed_control_kp") ) {
+      gzerr << "Unable to find parameter: walk_speed_control_kp\n";
+      return;
+    } 
+    SPEED_CONTROL_KP = _sdf->GetElement( "walk_speed_control_kp" )->GetValueDouble();
+
+    if( !_sdf->HasElement("walk_plan_mean") ) {
+      gzerr << "Unable to find parameter: walk_plan_mean\n";
+      return;
+    } 
+    GAUSSIAN_MEAN = _sdf->GetElement( "walk_plan_mean" )->GetValueDouble();
+
+    if( !_sdf->HasElement("walk_plan_variance") ) {
+      gzerr << "Unable to find parameter: walk_plan_variance\n";
+      return;
+    } 
+    GAUSSIAN_VARIANCE = _sdf->GetElement( "walk_plan_variance" )->GetValueDouble();
+
+    GAUSSIAN_STDDEV = sqrt( fabs(GAUSSIAN_VARIANCE) );
+
   } else if( PLANNER == LISSAJOUS ) {
+    // Get lissajous variables
     if( !_sdf->HasElement("lissajous_planner_step_size") ) {
       gzerr << "Unable to find parameter: lissajous_planner_step_size\n";
       return;
@@ -360,8 +405,6 @@ void car_c::Load(gazebo::physics::ModelPtr _model, sdf::ElementPtr _sdf) {
  
   WHEEL_BASE = (steering_link->GetWorldPose().pos - rear_driveshaft->GetWorldPose().pos).GetLength();
 
-  std::cout << WHEEL_BASE << std::endl;
-
   // Derive Four Bar Steering Linkage Variables
   Real theta = STEERING_LEVER_BASE_ANGLE;
   Real h_sq = BASE_LINK_LENGTH_SQ + STEERING_LEVER_LENGTH_SQ - 
@@ -399,6 +442,11 @@ void car_c::Load(gazebo::physics::ModelPtr _model, sdf::ElementPtr _sdf) {
   LISSAJOUS_DU_ANGLE = _sdf->GetElement( "lissajous_planner_du_angle" )->GetValueDouble();
 
   stopped = false;
+
+  car = this;
+
+  //GAUSSIAN_STDDEV = sqrt( fabs(35.0) );
+  //init_random_walk_planner();
 
   //---------------------------------------------------------------------------
   // Call Init Function (Note: target function subject to inheritance)
@@ -465,6 +513,14 @@ void car_c::init( void ) {
 
   time_start = world->GetSimTime().Double();
   time_last = time_start;
+
+  if( PLANNER == LISSAJOUS ) {
+    init_lissajous_planner( );
+  } else if( PLANNER == RRT ) {
+    init_rrt_planner( );
+  } else if( PLANNER == WALK ) {
+    init_random_walk_planner( );
+  }
 }
 
 //-----------------------------------------------------------------------------
@@ -476,10 +532,18 @@ void car_c::sense( void ) {
 bool car_c::plan( void ) {
   if( states.size() == 0 ) {
     if( PLANNER == LISSAJOUS ) {
-      if( !plan_lissajous() ) return false;
+      if( !plan_lissajous( commands, states, desired_states ) ) return false;
     } else if( PLANNER == RRT ) {
-      if( plan_via_ompl() ) return false;
+      if( !plan_rrt( commands, states, desired_states ) ) return false;
+    } else if( PLANNER == WALK ) {
+      if( !plan_random_walk( commands, states, desired_states, 100 ) ) return false;
     }
+
+    // audit commands
+    for( unsigned int i = 0; i < commands.size(); i++ )
+      write_audit_datum( audit_file_planned_commands, commands[i] );
+    for( unsigned int i = 0; i < desired_states.size(); i++ )
+      write_audit_datum( audit_file_planned_states, desired_states[i] );
   }
 
   if( ff_command.duration <= 0.0 ) {
@@ -533,6 +597,45 @@ void car_c::act( void ) {
   write_audit_datum( audit_file_actual_states, actual_state );
   write_audit_datum( audit_file_control_values, actual_command );
 }
+//-----------------------------------------------------------------------------
+bool car_c::init_lissajous_planner( void ) {
+  car_state_c initial( 4.0, 0.0, PI/2.0 );
+  state( initial );
+
+  return true;
+}
+
+//-----------------------------------------------------------------------------
+bool car_c::init_random_walk_planner( void ) {
+  gsl_rng_env_setup();
+
+  gslrng = gsl_rng_alloc( gsl_rng_default );
+
+  plan_random_walk( commands, states, desired_states, 100 );
+
+  for( unsigned int i = 0; i < commands.size(); i++) {
+    car_command_c cmd = commands[i];
+    std::cout << cmd << std::endl;
+  }
+  gsl_rng_free( gslrng );
+
+  return true;
+}
+
+//-----------------------------------------------------------------------------
+bool car_c::init_rrt_planner( void ) {
+  return true;
+}
+
+//-----------------------------------------------------------------------------
+car_command_c car_c::get_random_walk_command( void ) {
+    double theta = gsl_ran_gaussian( gslrng, GAUSSIAN_STDDEV ) * PI / 180.0;
+    double speed = 0.5;
+    double duration = 0.1;
+
+    return car_command_c( duration, speed, theta );
+}
+
 //-----------------------------------------------------------------------------
 car_command_c car_c::compute_feedback_command( void ) {
 
@@ -719,17 +822,17 @@ car_state_c car_c::ode( const car_state_c& q, const car_command_c& u ) {
 
 
 //------------------------------------------------------------------------------
-Real car_c::speed_optimization_function( const Real& u_s, const Real& dx, const Real& dy, const Real& costheta, const Real& sintheta ) {
+Real car_c::speed_optimization_function( const Real& u_s, const Real& dx, const Real& dy, const Real& costheta, const Real& sintheta ) const {
   return u_s * u_s + dx * dx + dy * dy - 2.0 * u_s * ( dx * costheta + dy * sintheta );
 }
 
 //------------------------------------------------------------------------------
-car_state_c car_c::interpolate_linear( const car_state_c& q0, const car_state_c& qf, const Real& deltat, const int& step ) {
+car_state_c car_c::interpolate_linear( const car_state_c& q0, const car_state_c& qf, const Real& deltat, const int& step ) const {
   return ((qf - q0)) * (deltat * (Real)step) + q0;
 }
 
 //------------------------------------------------------------------------------
-car_command_c car_c::inverse_ode(const car_state_c& q, const car_state_c& dq ) {
+car_command_c car_c::inverse_ode(const car_state_c& q, const car_state_c& dq ) const {
 
   Real u_s, u_phi;
 
@@ -887,7 +990,24 @@ car_state_c car_c::lissajous( const Real& t, const Real& a, const Real& b, const
 }
 
 //-----------------------------------------------------------------------------
-bool car_c::plan_lissajous( void ) {
+bool car_c::plan_random_walk( car_command_list_t& command_list, car_state_list_t& state_list, car_state_list_t& desired_state_list, const unsigned int& steps ) {
+  for( unsigned int i = 0; i < steps; i++) {
+    car_command_c u = get_random_walk_command( );
+    command_list.push_back( u );
+    //write_audit_datum( audit_file_planned_commands, u );
+
+/*
+    states.push_back( q );
+    q.time = t;
+    desired_states.push_back( q );
+    write_audit_datum( audit_file_planned_states, q );
+*/  
+  }
+  return true;
+}
+
+//-----------------------------------------------------------------------------
+bool car_c::plan_lissajous( car_command_list_t& command_list, car_state_list_t& state_list, car_state_list_t& desired_state_list ) {
   //Real dt = 0.025;  // Note: this is the highest possible step size before loss of stability
   Real dt = PLANNER_STEP_SIZE;
   Real Ks = LISSAJOUS_KS;
@@ -895,14 +1015,12 @@ bool car_c::plan_lissajous( void ) {
   Real DU_speed = LISSAJOUS_DU_SPEED;
   Real DU_angle = LISSAJOUS_DU_ANGLE;
   Real period = 2 * PI;
-  car_state_c initial( 4.0, 0.0, PI/2.0 );
-  state( initial );
-  car_state_c dq( 0.0, 0.0, 0.0 );
-  car_state_c q = state();
-  states.push_back( q );
-  
-  write_audit_datum( audit_file_planned_states, q );
 
+  car_state_c initial = state();
+  car_state_c dq( 0.0, 0.0, 0.0 );
+  car_state_c q = initial;
+  state_list.push_back( q );
+  
   Real alpha = 10.0;
   for( Real t = dt; t <= period * alpha + dt; t += dt ) {
     car_state_c q_desired = lissajous( t / alpha, 1.0, 2.0, 4.0, 4.0, PI/2.0 );
@@ -921,13 +1039,12 @@ bool car_c::plan_lissajous( void ) {
 
     state( q );
 
-    commands.push_back( u );
-    write_audit_datum( audit_file_planned_commands, u );
-    states.push_back( q );
+    command_list.push_back( u );
+    state_list.push_back( q );
     q.time = t;
-    desired_states.push_back( q );
-    write_audit_datum( audit_file_planned_states, q );
+    desired_state_list.push_back( q );
   }
+
   update_desired_state( );
   state( initial );
   prev_state = car_state_c( initial );
@@ -939,18 +1056,24 @@ bool car_c::plan_lissajous( void ) {
 // OMPL
 //-----------------------------------------------------------------------------
 
-bool car_c::plan_via_ompl(void) {
+bool car_c::plan_rrt( car_command_list_t& command_list, car_state_list_t& state_list, car_state_list_t& desired_state_list ) {
   /// construct the state space we are planning in
-  ompl::base::StateSpacePtr space(new ompl::base::SE2StateSpace());
+  ompl::base::StateSpacePtr space(new ompl::base::RealVectorStateSpace(6));
+  space_ = space.get();
 
   /// set the bounds for the R^2 part of SE(2)
-  ompl::base::RealVectorBounds bounds(2);
+  ompl::base::RealVectorBounds bounds(6);
   bounds.setLow( 0, -25.0 );  // min x
   bounds.setHigh( 0, 25.0 );  // max x
   bounds.setLow( 1, -25.0 );  // min y
   bounds.setHigh( 1, 25.0 );  // max y
+  for (unsigned i=2; i< 6; i++)
+  {
+    bounds.setLow(i, -1e30);
+    bounds.setHigh(i, 1e30);
+  }
 
-  space->as<ompl::base::SE2StateSpace>()->setBounds(bounds);
+  space->as<ompl::base::RealVectorStateSpace>()->setBounds(bounds);
 
   // create a control space
   ompl::control::ControlSpacePtr cspace(new demo_control_space_c(space));
@@ -977,25 +1100,37 @@ bool car_c::plan_via_ompl(void) {
   ss.setStateValidityChecker(boost::bind(&is_state_valid, ss.getSpaceInformation().get(), _1));
 
   /// set the propagation routine for this space
-  ss.setStatePropagator( ompl::control::StatePropagatorPtr( new demo_state_propagator_c( ss.getSpaceInformation(), MAX_STEERING_ANGLE, WHEEL_BASE ) ) );
+  ss.setStatePropagator( ompl::control::StatePropagatorPtr( new demo_state_propagator_c( ss.getSpaceInformation(), MAX_STEERING_ANGLE, WHEEL_BASE, PLANNER_STEP_SIZE ) ) );
 
+  // create initial and goal states
+  std::vector<double> d_initial(6), d_goal(6);
+  d_initial[0] = 0.0; d_goal[0] = 0.0;      // x value 
+  d_initial[1] = 4.0; d_goal[1] = 0.0;      // y value
+  d_initial[2] = 0.0; d_goal[2] = 0.0;      // theta
+  d_initial[3] = 0.0; d_goal[3] = 0.0;      // \dot{x}
+  d_initial[4] = 0.0; d_goal[4] = 0.0;      // \dot{y}
+  d_initial[5] = 0.0; d_goal[5] = 0.0;      // \dot{\theta}
+
+
+  state_list.clear();
+  desired_state_list.clear();
+  command_list.clear();
+
+  // relocate to initialization
   car_state_c initial( 0.0, 4.0, 0.0 );
   car_state_c final( 0.0, 0.0, 0.0 );
   state( initial );
-  //active_state = car_state_c( initial );
   prev_state = car_state_c( initial );
+  state_list.push_back( initial );
+  desired_state_list.push_back( initial );
 
   /// create a start state
-  ompl::base::ScopedState<ompl::base::SE2StateSpace> start(space);
-  start->setX( initial.x );
-  start->setY( initial.y );
-  start->setYaw( initial.theta );
+  ompl::base::ScopedState<ompl::base::RealVectorStateSpace> start(space);
+  to_state(d_initial, start.get());
 
   /// create a  goal state; use the hard way to set the elements
-  ompl::base::ScopedState<ompl::base::SE2StateSpace> goal(space);
-  goal->setX( final.x );
-  goal->setY( final.y );
-  goal->setYaw( final.theta );
+  ompl::base::ScopedState<ompl::base::RealVectorStateSpace> goal(space);
+  to_state(d_goal, goal.get());
 
   const Real INTEGRATOR_STEP_SIZE = 0.05;
   const Real MAX_PLANNING_TIME = 10.0;
@@ -1010,10 +1145,10 @@ bool car_c::plan_via_ompl(void) {
   // rrt->setIntermediateStates( true );
   ompl::base::PlannerPtr planner( rrt );
 
-
   ss.setPlanner( planner );
 
   ss.getSpaceInformation()->setPropagationStepSize( PLANNER_STEP_SIZE );
+  ss.getSpaceInformation()->setMinMaxControlDuration(1, 10);
   //ss.getSpaceInformation()->setPropagationStepSize( 0.001 );
   //ss.getSpaceInformation()->setPropagationStepSize( 0.025 );
   /// we want to have a reasonable value for the propagation step size
@@ -1039,9 +1174,11 @@ bool car_c::plan_via_ompl(void) {
     const Real EPSILON = 0.5;
     // check that final state is very close to goal state
     ompl::base::State* state = path.getState( state_count - 1 );
-    Real x = state->as<ompl::base::SE2StateSpace::StateType>()->getX();
-    Real y = state->as<ompl::base::SE2StateSpace::StateType>()->getY();
-    Real theta = state->as<ompl::base::SE2StateSpace::StateType>()->getYaw();
+    std::vector<double> d_state(6);
+    from_state(state, d_state);
+    Real x = d_state[0]; 
+    Real y = d_state[1]; 
+    Real theta = d_state[2]; 
     if( fabs( x - final.x ) > EPSILON || fabs( y - final.y ) > EPSILON || fabs( theta - final.theta ) > EPSILON ) {
       std::cout << "Planning Failed: final state diverged significantly from goal state\n";
       if( fabs( x - final.x ) > EPSILON ) {
@@ -1057,18 +1194,17 @@ bool car_c::plan_via_ompl(void) {
       return false;
     }
     
-
     for( unsigned int i = 0; i < state_count; i++ ) {
       ompl::base::State* state = path.getState( i );
-      Real x = state->as<ompl::base::SE2StateSpace::StateType>()->getX();
-      Real y = state->as<ompl::base::SE2StateSpace::StateType>()->getY();
-      Real theta = state->as<ompl::base::SE2StateSpace::StateType>()->getYaw();
+      from_state(state, d_state);
+      Real x = d_state[0]; 
+      Real y = d_state[1]; 
+      Real theta = d_state[2]; 
 
       car_state_c q( x, y, theta );
-      states.push_back( q );
+      state_list.push_back( q );
       q.time = (Real)i * PLANNER_STEP_SIZE;
-      desired_states.push_back( q );
-      write_audit_datum( audit_file_planned_states, q );
+      desired_state_list.push_back( q );
     }
     update_desired_state( );
 
@@ -1078,10 +1214,43 @@ bool car_c::plan_via_ompl(void) {
       double duration = ss.getSolutionPath().getControlDuration( i );
       Real speed = control->as<ompl::control::RealVectorControlSpace::ControlType>()->values[0];
       Real phi = control->as<ompl::control::RealVectorControlSpace::ControlType>()->values[1];
- 
-      car_command_c u( duration, speed, phi );
-      commands.push_back( u );
-      write_audit_datum( audit_file_planned_commands, u );
+
+      double last_us;
+      double last_uphi;  
+      if( i == 0 ) {
+        last_us = 0.0;
+        last_uphi = 0.0;
+      } else {
+        last_us = commands.at(i-1).speed;
+        last_uphi = commands.at(i-1).angle;
+      }
+
+      const double DT = PLANNER_STEP_SIZE;
+      const double MAX_SPEED_DIFF = DT*2.5;
+      const double MAX_PHI_DIFF = DT*1.0;
+  
+      // now get us and uphi out and "clip" them if they are 
+      double us = speed;
+      double uphi = phi;
+      if (fabs(us - last_us) > MAX_SPEED_DIFF)
+      {
+        // since this is true, we want either us = last_us + MAX_SPEED_DIFF or us = last_us - MAX_SPEED_DIFF
+        if (us - last_us > 0.0)
+          us = last_us + MAX_SPEED_DIFF;
+        else
+          us = last_us - MAX_SPEED_DIFF;
+      }
+      if (fabs(uphi - last_uphi) > MAX_PHI_DIFF)
+      {
+        // since this is true, we want either uphi = last_uphi + MAX_PHI_DIFF or uphi = last_uphi - MAX_PHI_DIFF
+        if (uphi - last_uphi > 0.0)
+          uphi = last_uphi + MAX_PHI_DIFF;
+        else
+          uphi = last_uphi - MAX_PHI_DIFF;
+      }
+
+      car_command_c u( duration, us, uphi );
+      command_list.push_back( u );
     }
 
     return true;
@@ -1092,25 +1261,96 @@ bool car_c::plan_via_ompl(void) {
 }
 
 //-----------------------------------------------------------------------------
+void car_c::to_state(const std::vector<double>& values, ompl::base::State* state) const
+{
+  for (unsigned i=0; i< values.size(); i++)
+    *space_->getValueAddressAtIndex(state, i) = values[i];
+}
+
+
+//-----------------------------------------------------------------------------
+void car_c::from_state(const ompl::base::State* state, std::vector<double>& values) const
+{
+//  space_->copyToReals(d_state, state);
+  for (unsigned i=0; i< values.size(); i++)
+    values[i] = *space_->getValueAddressAtIndex(state, i);
+}
+
+//-----------------------------------------------------------------------------
+bool is_state_valid(const ompl::control::SpaceInformation *si, const ompl::base::State *state) {
+
+  std::vector<double> values(6);
+  car->from_state( state, values );
+  
+  /// check validity of state defined by pos & rot
+  // These constants are based on the size of the pen.
+  if( fabs(values[0]) >= 25.0 || fabs(values[1]) >= 25.0 )
+    return false;
+
+  return true;
+}
+
+//-----------------------------------------------------------------------------
 
 /// implement the function describing the robot motion: qdot = f(q, u)
-void car_c::operator()(const ompl::base::State *state, const ompl::control::Control *control, std::valarray<double> &dstate, const double& wheel_base ) const {
+void car_c::operator()(const ompl::base::State *state, const ompl::control::Control *control, std::valarray<double> &dstate, const double& wheel_base, const double& step_size ) const {
+  static std::vector<double> d_state;
+  d_state.resize(6);
   const double *u = control->as<ompl::control::RealVectorControlSpace::ControlType>()->values;
-  const double theta = state->as<ompl::base::SE2StateSpace::StateType>()->getYaw();
+  from_state(state, d_state);
 
-  dstate.resize(3);
-  dstate[0] = u[0] * cos(theta);
-  dstate[1] = u[0] * sin(theta);
-  dstate[2] = u[0] * tan(u[1]) / wheel_base;
+  // get useful variables out
+  const double theta = d_state[2];
+
+  // first, get the last us and uphi out
+  car_state_c current_q(d_state[0], d_state[1], d_state[2]);
+  car_state_c current_dq(d_state[3], d_state[4], d_state[5]);
+  car_command_c last_u = inverse_ode(current_q, current_dq);
+  double last_us = last_u.speed;
+  double last_uphi = last_u.angle;  
+
+  const double DT = step_size;
+  const double MAX_SPEED_DIFF = DT*2.5;
+  const double MAX_PHI_DIFF = DT*1.0;
+  
+  // now get us and uphi out and "clip" them if they are 
+  double us = u[0];
+  double uphi = u[1];
+  if (fabs(us - last_us) > MAX_SPEED_DIFF)
+  {
+    // since this is true, we want either us = last_us + MAX_SPEED_DIFF or us = last_us - MAX_SPEED_DIFF
+    if (us - last_us > 0.0)
+      us = last_us + MAX_SPEED_DIFF;
+    else
+      us = last_us - MAX_SPEED_DIFF;
+  }
+  if (fabs(uphi - last_uphi) > MAX_PHI_DIFF)
+  {
+    // since this is true, we want either uphi = last_uphi + MAX_PHI_DIFF or uphi = last_uphi - MAX_PHI_DIFF
+    if (uphi - last_uphi > 0.0)
+      uphi = last_uphi + MAX_PHI_DIFF;
+    else
+      uphi = last_uphi - MAX_PHI_DIFF;
+  }
+
+  dstate.resize(6);
+  dstate[0] = us * cos(theta);
+  dstate[1] = us * sin(theta);
+  dstate[2] = us * tan(uphi) / wheel_base;
+  dstate[3] = -us * sin(theta)*dstate[2];
+  dstate[4] = us * cos(theta)*dstate[2];
+  dstate[5] = 0.0;
 }
 //-----------------------------------------------------------------------------
 
 /// implement y(n+1) = y(n) + d
 void car_c::update(ompl::base::State *state, const std::valarray<double> &dstate) const {
-  ompl::base::SE2StateSpace::StateType &s = *state->as<ompl::base::SE2StateSpace::StateType>();
-  s.setX(s.getX() + dstate[0]);
-  s.setY(s.getY() + dstate[1]);
-  s.setYaw(s.getYaw() + dstate[2]);
+  static std::vector<double> d_state;
+  d_state.resize(6);
+  from_state(state, d_state);
+  for (unsigned i=0; i< 6; i++)
+    d_state[i] += dstate[i];
+  to_state(d_state, state);
   space_->enforceBounds(state);
 }
 //-----------------------------------------------------------------------------

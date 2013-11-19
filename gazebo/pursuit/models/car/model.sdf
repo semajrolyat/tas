@@ -201,6 +201,13 @@
             <length>0.04</length>
           </cylinder>
         </geometry>
+        <surface>
+          <friction>
+            <ode>
+              <mu>1.2</mu>
+            </ode>
+          </friction>
+        </surface>
       </collision>
       <visual name="wheel_front_left_vis">
         <pose>0 0 0 0 0 0</pose>
@@ -240,6 +247,13 @@
             <length>0.04</length>
           </cylinder>
         </geometry>
+        <surface>
+          <friction>
+            <ode>
+              <mu>1.2</mu>
+            </ode>
+          </friction>
+        </surface>
       </collision>
       <visual name="wheel_front_right_vis">
         <pose>0 0 0 0 0 0</pose>
@@ -279,6 +293,13 @@
             <length>0.04</length>
           </cylinder>
         </geometry>
+        <surface>
+          <friction>
+            <ode>
+              <mu>1.2</mu>
+            </ode>
+          </friction>
+        </surface>
       </collision>
       <visual name="wheel_rear_left_vis">
         <pose>0 0 0 0 0 0</pose>
@@ -318,6 +339,13 @@
             <length>0.04</length>
           </cylinder>
         </geometry>
+        <surface>
+          <friction>
+            <ode>
+              <mu>1.2</mu>
+            </ode>
+          </friction>
+        </surface>
       </collision>
       <visual name="wheel_rear_right_vis">
         <pose>0 0 0 0 0 0</pose>
@@ -453,19 +481,26 @@
     </joint>
 
     <plugin name='car_controller' filename='libcar_controller.so'>
-      <planner>rrt</planner>     <!--lissajous|rrt-->
+      <planner>rrt</planner>     <!--lissajous|rrt|walk-->
       <steering>fourbar</steering>      <!--direct|fourbar-->
       <max_speed>1.0</max_speed>
       <max_acceleration>1.0</max_acceleration>
       <max_steering_velocity>0.31416</max_steering_velocity>
+      <!-- Random Walk -->
+      <walk_planner_step_size>0.25</walk_planner_step_size>
+      <walk_steering_control_kp>120.0</walk_steering_control_kp>
+      <walk_steering_control_kd>0.16</walk_steering_control_kd>
+      <walk_speed_control_kp>250.0</walk_speed_control_kp>
+      <walk_mean>0.0</walk_mean>
+      <walk_variance>35.0</walk_variance>
       <!-- RRT -->
       <rrt_planner_step_size>0.25</rrt_planner_step_size>
       <rrt_steering_control_kp>120.0</rrt_steering_control_kp>
       <rrt_steering_control_kd>0.16</rrt_steering_control_kd>
-      <rrt_speed_control_kp>500.0</rrt_speed_control_kp>
+      <rrt_speed_control_kp>1000.0</rrt_speed_control_kp>
       <rrt_fb_ks>0.5</rrt_fb_ks>
       <rrt_fb_kd>0.0001</rrt_fb_kd>
-      <rrt_fb_du_speed>1.5</rrt_fb_du_speed>
+      <rrt_fb_du_speed>1.2</rrt_fb_du_speed>
       <rrt_fb_du_angle>1.0</rrt_fb_du_angle>
       <rrt_fb_max_speed>0.1</rrt_fb_max_speed>
       <rrt_fb_max_angle>0.05</rrt_fb_max_angle>
@@ -484,7 +519,7 @@
       <lissajous_planner_kd>0.0001</lissajous_planner_kd>
       <lissajous_planner_du_speed>48.00</lissajous_planner_du_speed>
       <lissajous_planner_du_angle>1.425</lissajous_planner_du_angle>
-      <!-- Steering Linkage - Tune at own risk - Deactive -->
+      <!-- Double 4 Bar Steering Linkage - Tune at own risk -->
       <max_steering_angle_deg>30.0</max_steering_angle_deg>
       <steering_lever_base_angle_deg>75.0</steering_lever_base_angle_deg>
       <steering_lever_length>0.056102</steering_lever_length>
