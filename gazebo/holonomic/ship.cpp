@@ -102,6 +102,7 @@ void ship_c::Load(gazebo::physics::ModelPtr _model, sdf::ElementPtr _sdf) {
     GAUSSIAN_STDDEV = sqrt( fabs(GAUSSIAN_VARIANCE) );
   */
 
+
   //---------------------------------------------------------------------------
   // Call Init Function (Note: target function subject to inheritance)
   //---------------------------------------------------------------------------
@@ -111,7 +112,61 @@ void ship_c::Load(gazebo::physics::ModelPtr _model, sdf::ElementPtr _sdf) {
 //-----------------------------------------------------------------------------
 void ship_c::Update( ) {
 
-  //compensate_for_roll_pitch( );
+  static bool first_update = true;
+
+  if( first_update ) {
+
+    // Note: following may not be tight fit if the ship begins unaligned to world
+    // and error may propagate through future collision queries
+    ship_frame_bb = aabb();    
+
+    // get the reference to the spatial bound
+    gazebo::physics::ModelPtr space = world->GetModel("pen");
+    if( !space ) 
+      gzerr << "Unable to find model: pen\n";
+    // compute & cache the spatial bound aabb
+
+    // Space is empty inside the boundary, but the boundary is made up of thin walls not just a cube.
+    gazebo::physics::Link_V space_links = space->GetLinks();
+    gazebo::math::Vector3 c( 0.0, 0.0, 0.0 );
+    gazebo::math::Vector3 e( 0.0, 0.0, 0.0 );
+    for( unsigned i = 0; i < space_links.size(); i++ ) {
+      gazebo::physics::LinkPtr link = space_links[i];
+      gazebo::math::Box gzbb = link->GetBoundingBox();
+      c += gzbb.GetCenter();
+      // Note:: following assumes centered at (0,0,0) and symmetric.  Dirty but works.
+      e = gazebo::math::Vector3( std::max(gzbb.GetCenter().x, e.x), std::max(gzbb.GetCenter().y, e.y),std::max(gzbb.GetCenter().z, e.z) );
+    }
+    spatial_bound = aabb_c( c, e );
+
+    std::cout << "space: " << spatial_bound << std::endl;
+
+    // get the reference to the obstacles    
+    gazebo::physics::ModelPtr maze = world->GetModel("maze");
+    if( !maze ) 
+      gzerr << "Unable to find model: maze\n";
+    
+    // compute and cache the static world aabb's
+    gazebo::physics::Link_V maze_links = maze->GetLinks();
+    for( unsigned i = 0; i < maze_links.size(); i++ ) {
+      gazebo::physics::LinkPtr link = maze_links[i];
+      // Note: following may need to query GetCollisionBox instead
+      gazebo::math::Box gzbb = link->GetBoundingBox();
+      gazebo::math::Vector3 c = gzbb.GetCenter();
+      gazebo::math::Vector3 e = gzbb.GetSize() / 2;
+
+      aabb_c obstacle( c, e );
+      obstacles.push_back( obstacle );
+    }
+
+/*
+    std::cout << "obstacles:" << obstacles.size() << std::endl;
+    for( unsigned i = 0; i < obstacles.size(); i++ ) {
+      std::cout << obstacles[i] << std::endl;
+    }
+*/
+    first_update = false;
+  }
 
   time = world->GetSimTime().Double() - time_start;
   dtime = time - time_last;
@@ -127,6 +182,8 @@ void ship_c::Update( ) {
     stop( );
   else
     act( );
+
+  //test_intersection_detection(); 
 
   time_last = time;
 }
@@ -254,6 +311,58 @@ void ship_c::act( void ) {
   std::pair<double,ship_state_c> actual_state = std::make_pair( time, state() );
   write_audit_datum( audit_file_actual_states, actual_state );
 }
+
+//-----------------------------------------------------------------------------
+/// Build an axis aligned bounding box of the ship based on state vector
+/// TODO : Evan please verify.  Computation of extens doesn't sound right
+aabb_c ship_c::aabb( const std::vector<double>& q ) {
+
+  //pull the center of the ship from the state vector
+  Origin3d c( q[0], q[1], q[2] );
+  //rotate the ship frame aabb
+  Quatd e( q[3], q[4], q[5], q[6] );
+  e.normalize();  // Just in case
+
+  //recompute the extens
+  // extract the ship frame extens
+  Origin3d sfext( ship_frame_bb.extens.x, ship_frame_bb.extens.y, ship_frame_bb.extens.z );
+  // compute extens in rotation frame
+  Origin3d rfext = e * sfext;
+  
+  return aabb_c ( c, rfext );
+  //return aabb_c ( gazebo::math::Vector3(c.x(),c.y(),c.z()), gazebo::math::Vector3(rfext.x(),rfext.y(),rfext.z()) );
+
+}
+
+//-----------------------------------------------------------------------------
+/// Query the current axis aligned bounding box of the ship
+aabb_c ship_c::aabb( void ) {
+  // Note: following may need to query GetCollisionBox instead
+  gazebo::math::Box gzbb = model->GetBoundingBox();
+  gazebo::math::Vector3 c = gzbb.GetCenter();
+  gazebo::math::Vector3 e = gzbb.GetSize() / 2;
+  return aabb_c ( c, e );
+}
+
+//-----------------------------------------------------------------------------
+/// Queries whether the ship intersects any obstacle in the world
+bool ship_c::intersects_any_obstacle( const aabb_c& mybb, aabb_c& obstacle ) {
+  bool intersection = false;
+  for( unsigned i = 0; i < obstacles.size(); i++ ) {
+    if( aabb_c::intersects( mybb, obstacles[i] ) ) {
+      obstacle = obstacles[i];
+      return true;
+    }
+  }
+  return false;
+}
+
+//-----------------------------------------------------------------------------
+/// Queries whether the ship remains inside the world boundary
+bool ship_c::intersects_world_bounds( const aabb_c& mybb ) {
+  return !aabb_c::intersects( mybb, spatial_bound );
+}
+
 //-----------------------------------------------------------------------------
 void ship_c::update_desired_state( void ) {
   if( stopped ) return;
@@ -784,11 +893,14 @@ bool is_state_valid(const ompl::control::SpaceInformation *si, const ompl::base:
 
   std::vector<double> values( ship_state_c::size() );
   from_state( ship->space_, state, values );
+ 
+  aabb_c bb = ship->aabb( values );
+  aabb_c obstacle;
   
-  /// check validity of state defined by pos & rot
-  // These constants are based on the size of the pen.
-  //if( fabs(values[0]) >= 25.0 || fabs(values[1]) >= 25.0 )
-  //  return false;
+  if( ship->intersects_world_bounds( bb ) )
+    return false;
+  if( ship->intersects_any_obstacle( bb, obstacle ) )
+    return false;
 
   return true;
 }
@@ -898,6 +1010,10 @@ void ship_c::inv_dyn( const std::vector<double>& q, const std::vector<double>& q
       u.resize(6);
       Vector3d f(qdot_des[0] , qdot_des[1], qdot_des[2] );
       Vector3d tau( 0.0, 0.0, 0.0 );
+  if( intersects_any_obstacle( obstacle ) )
+    std::cout << "obstacle intersection" << std::endl;
+  if( intersects_world_bounds( ) )
+    std::cout << "world intersection" << std::endl;
       f.normalize();
       u[0] = f[0];
       u[1] = f[1];
@@ -1044,6 +1160,18 @@ bool ship_c::write_audit_data( const std::string& filename, const ship_command_l
   for( unsigned i = 0; i < list.size(); i++ )
     if( !write_audit_datum( filename, list[i] ) ) return false;
   return true;
+}
+
+//------------------------------------------------------------------------------
+// Testing 
+//------------------------------------------------------------------------------
+void ship_c::test_intersection_detection( void ) {
+  aabb_c mybb = aabb();
+  aabb_c obstacle;
+  if( intersects_any_obstacle( mybb, obstacle ) )
+    std::cout << "obstacle intersection" << std::endl;
+  if( intersects_world_bounds( mybb ) )
+    std::cout << "world intersection" << std::endl;
 }
 
 //------------------------------------------------------------------------------

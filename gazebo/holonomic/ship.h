@@ -478,9 +478,52 @@ public:
 };
 */
 //-----------------------------------------------------------------------------
+class aabb_c {
+public:
+  aabb_c( void ) : center( 0.0, 0.0, 0.0 ), extens( 0.0, 0.0, 0.0 ) {
+    
+  }
+
+  aabb_c( const gazebo::math::Vector3& _center, const gazebo::math::Vector3& _extens ) : 
+    center( _center ), 
+    extens( _extens ) 
+  {
+    
+  }
+
+  aabb_c( const Ravelin::Origin3d& _center, const Ravelin::Origin3d& _extens ) {
+    center = gazebo::math::Vector3( (double)_center.x(), (double)_center.y(), (double)_center.z() );
+    extens = gazebo::math::Vector3( (double)_extens.x(), (double)_extens.y(), (double)_extens.z() );
+  }
+ 
+  virtual ~aabb_c( void ) { }
+
+  gazebo::math::Vector3 center;
+  gazebo::math::Vector3 extens;
+
+  static bool intersects( const aabb_c& a, const aabb_c& b ) {
+    gazebo::math::Vector3 p = a.center - b.center;
+
+    return fabs( p.x ) <= ( a.extens.x + b.extens.x) &&
+           fabs( p.y ) <= ( a.extens.y + b.extens.y) &&
+           fabs( p.z ) <= ( a.extens.z + b.extens.z);
+  }
+
+  friend std::ostream& operator<<(std::ostream& ostr, const aabb_c& bb);
+
+};
+//-----------------------------------------------------------------------------
+std::ostream& operator<<(std::ostream& ostr, const aabb_c& bb) {
+  return ostr << "center[" << bb.center.x << "," << bb.center.y << "," << bb.center.z << "]," 
+              << "extens[" << bb.extens.x << "," << bb.extens.y << "," << bb.extens.z << "]";
+}
+
+//-----------------------------------------------------------------------------
+typedef std::vector<aabb_c> aabb_list_t;
+//-----------------------------------------------------------------------------
 
 class ship_c : public gazebo::ModelPlugin {
-protected:
+public:
 
   gazebo::event::ConnectionPtr updateConnection;
 
@@ -497,6 +540,10 @@ protected:
   double GAUSSIAN_STDDEV;
 
   bool stopped;
+
+  aabb_c ship_frame_bb;
+  aabb_c spatial_bound;
+  aabb_list_t obstacles;
 
 protected:
   enum planner_type_e {
@@ -567,6 +614,13 @@ protected:
   ship_state_c interpolate_linear( const ship_state_c& q0, const ship_state_c& qf, const Real& deltat, const int& step ) const; 
   ship_state_c desired_state_0, desired_state_1;
   double desired_state_duration;
+
+public:
+  aabb_c aabb( const std::vector<double>& q );
+  aabb_c aabb( void );
+  bool intersects_any_obstacle( const aabb_c& mybb, aabb_c& obstacle );
+  bool intersects_world_bounds( const aabb_c& mybb );
+
 /*
   ship_state_c dstate( void );
 
@@ -615,13 +669,12 @@ public:
 
   bool write_audit_data( const std::string& filename, const ship_state_list_t& list );
   bool write_audit_data( const std::string& filename, const ship_command_list_t& list );
-/*
+
   //---------------------------------------------------------------------------
   // Testing 
   //---------------------------------------------------------------------------
-  void test_state_functions( void );
-  void test_command_functions( void );
-*/
+  void test_intersection_detection( void );
+
   //---------------------------------------------------------------------------
   // Planning
   //---------------------------------------------------------------------------
@@ -961,55 +1014,6 @@ public:
 
     // return 1
     return (unsigned) NUM_STEPS;
-
-
-/*
-    // Sample the first control
-    if (previous)
-      cs_->sampleNext(control, previous, source);
-    else
-      cs_->sample(control, source);
-
-    const unsigned int minDuration = si_->getMinControlDuration();
-    const unsigned int maxDuration = si_->getMaxControlDuration();
-
-    unsigned int steps = cs_->sampleStepCount(minDuration, maxDuration);
-    // Propagate the first control, and find how far it is from the target state
-    ompl::base::State *bestState   = si_->allocState();
-    steps = si_->propagateWhileValid(source, control, steps, bestState);
-
-    if (numControlSamples_ > 1) {
-      ompl::control::Control     *tempControl = si_->allocControl();
-      ompl::base::State *tempState   = si_->allocState();
-      double bestDistance      = si_->distance(tempState, dest);
-
-      // Sample k-1 more controls, and save the control that gets closest to target
-      for (unsigned int i = 1; i < numControlSamples_; ++i) {
-        unsigned int sampleSteps = cs_->sampleStepCount(minDuration, maxDuration);
-        if (previous)
-          cs_->sampleNext(tempControl, previous, source);
-        else
-          cs_->sample(tempControl, source);
-
-        sampleSteps = si_->propagateWhileValid(source, tempControl, sampleSteps, tempState);
-        double tempDistance = si_->distance(tempState, dest);
-        if (tempDistance < bestDistance) {
-          si_->copyState(bestState, tempState);
-          si_->copyControl(control, tempControl);
-          bestDistance = tempDistance;
-          steps = sampleSteps;
-        }
-      }
-
-      si_->freeState(tempState);
-      si_->freeControl(tempControl);
-    }
-
-    si_->copyState(dest, bestState);
-    si_->freeState(bestState);
-
-    return steps;
-*/
   }
 
 };
