@@ -1,6 +1,11 @@
 #ifndef _GAZEBO_SHIP_H_
 #define _GAZEBO_SHIP_H_
 
+#include "aabb.h"
+#include "command.h"
+#include "state.h"
+#include "utilities.h"
+
 //-----------------------------------------------------------------------------
 #include <ostream>
 #include <fstream>
@@ -49,479 +54,15 @@ typedef double Real;
 #define PI 3.14159265359
 
 //-----------------------------------------------------------------------------
-std::ostream& operator<<(std::ostream& ostr, const std::vector<double>& v) {
-  for( unsigned i = 0; i < v.size(); i++ ) {
-    if( i > 0 )
-      ostr << ",";
-    ostr << v[i];
-  }
-  return ostr;
-}
-
-
-//-----------------------------------------------------------------------------
-class ship_c;
-ship_c* ship;
-
+// Globals
 //-----------------------------------------------------------------------------
 
-class ship_state_c {
-  //---------------------------------------------------------------------------
-  // Constructors
-  //---------------------------------------------------------------------------
-public:
-  //---------------------------------------------------------------------------
-  ship_state_c( void ) {
-
-    _values.resize( size() );
-    for( unsigned i = 0; i < size(); i++ )
-      _values[i] = 0.0;
-    _values[6] = 1.0; // Normalize w coordinate
-  }
-
-  //---------------------------------------------------------------------------
-  ship_state_c( const ship_state_c& state ) { 
-
-    _values.resize( size() );
-    for( unsigned i = 0; i < size(); i++ )
-      _values[i] = state._values[i];
-  }
-
-  //---------------------------------------------------------------------------
-  ship_state_c( std::vector<double>& x ) { 
-    assert( x.size() == size() );
-
-    _values.resize( size() );
-    for( unsigned i = 0; i < size(); i++ )
-      _values[i] = x[i];
-  }
-
-  //---------------------------------------------------------------------------
-  ship_state_c( std::valarray<double>& x ) { 
-    assert( x.size() == size() );
-
-    _values.resize( size() );
-    for( unsigned i = 0; i < size(); i++ )
-      _values[i] = x[i];
-  }
-
-  //---------------------------------------------------------------------------
-  ship_state_c( gazebo::math::Vector3 x, gazebo::math::Quaternion theta, gazebo::math::Vector3 dx, gazebo::math::Vector3 dtheta ) { 
-    _values.resize( size() );
-    position( x );
-    rotation( theta );
-    dposition( dx );
-    drotation( dtheta );
-  }
-
-  //---------------------------------------------------------------------------
-  ship_state_c( const ompl::base::StateSpace* space, const ompl::base::State* x ) { 
-    //assert( x.size() == size() );
-
-    _values.resize( size() );
-    for( unsigned i = 0; i < size(); i++ )
-      _values[i] = *space->getValueAddressAtIndex(x, i);
-  }
-
-  //---------------------------------------------------------------------------
-  // Destructor
-  //---------------------------------------------------------------------------
-  virtual ~ship_state_c( void ) {}
-
-  //---------------------------------------------------------------------------
-  //
-  //---------------------------------------------------------------------------
-  void position( const gazebo::math::Vector3& v ) {
-    _values[0] = v.x;
-    _values[1] = v.y;
-    _values[2] = v.z;
-  }
-
-  //---------------------------------------------------------------------------
-  gazebo::math::Vector3 position( void ) const {
-    return gazebo::math::Vector3( _values[0], _values[1], _values[2] );
-  }
-
-  //---------------------------------------------------------------------------
-  void rotation( const gazebo::math::Quaternion& q ) {
-    _values[3] = q.x;
-    _values[4] = q.y;
-    _values[5] = q.z;
-    _values[6] = q.w;
-  }
-
-  //---------------------------------------------------------------------------
-  gazebo::math::Quaternion rotation( void ) const {
-    return gazebo::math::Quaternion( _values[6], _values[3], _values[4], _values[5] );
-  }
-
-  //---------------------------------------------------------------------------
-  void dposition( const gazebo::math::Vector3& v ) {
-    _values[7] = v.x;
-    _values[8] = v.y;
-    _values[9] = v.z;
-  }
-
-  //---------------------------------------------------------------------------
-  gazebo::math::Vector3 dposition( void ) const {
-    return gazebo::math::Vector3( _values[7], _values[8], _values[9] );
-  }
-
-  //---------------------------------------------------------------------------
-  void drotation( const gazebo::math::Vector3& v ) {
-    _values[10] = v.x;
-    _values[11] = v.y;
-    _values[12] = v.z;
-  }
-
-  //---------------------------------------------------------------------------
-  gazebo::math::Vector3 drotation( void ) const {
-    return gazebo::math::Vector3( _values[10], _values[11], _values[12] );
-  }
-
-  //---------------------------------------------------------------------------
-  double& operator()( const unsigned& i ) {
-    assert( i < size() );
-    return _values[i];
-  }
-
-  //---------------------------------------------------------------------------
-  double value( const unsigned& i ) const {
-    assert( i < size() );
-    return _values[i];
-  }
-
-  //---------------------------------------------------------------------------
-  static unsigned size( void ) {
-    return 13;
-  }
-
-  //---------------------------------------------------------------------------
-  // Member Variables
-  //---------------------------------------------------------------------------
-private:
-  std::vector<double> _values;
- 
-  //---------------------------------------------------------------------------
-  // Output
-  //---------------------------------------------------------------------------
-public:
-  static std::string header( void ) {
-    return "t, pos[x, y, z], rot[x, y, z, w], dpos[x, y, z], drot[x, y, z]";
-  }
-
-  friend std::ostream& operator<<(std::ostream& ostr, const ship_state_c& state);
-  friend std::ostream& operator<<(std::ostream& ostr, const std::pair<double,ship_state_c>& state);
-};
+class ship_c;           // forward declaration
+ship_c* ship;           // a pointer to the ship
 
 //-----------------------------------------------------------------------------
-std::ostream& operator<<(std::ostream& ostr, const ship_state_c& state) {
-  return ostr << state.value(0) << "," << state.value(1) << "," << state.value(2) << "," 
-              << state.value(3) << "," << state.value(4) << "," << state.value(5) << "," << state.value(6) << "," 
-              << state.value(7) << "," << state.value(8) << "," << state.value(9) << "," 
-              << state.value(10) << "," << state.value(11) << "," << state.value(12);
-}
-
 //-----------------------------------------------------------------------------
-std::ostream& operator<<(std::ostream& ostr, const std::pair<double,ship_state_c>& state) {
-  return ostr << state.first << ","
-              << state.second.value(0) << "," << state.second.value(1) << "," << state.second.value(2) << "," 
-              << state.second.value(3) << "," << state.second.value(4) << "," << state.second.value(5) << "," << state.second.value(6) << "," 
-              << state.second.value(7) << "," << state.second.value(8) << "," << state.second.value(9) << "," 
-              << state.second.value(10) << "," << state.second.value(11) << "," << state.second.value(12);
-}
-
-//-----------------------------------------------------------------------------
-// Note for the below arithmetic operations, need to normalize the quaternion after the computation
-ship_state_c operator+( ship_state_c& a, ship_state_c& b ) {
-
-  ship_state_c state( a );
-  for( unsigned i = 0; i < state.size(); i++ )
-    state(i) += b(i);
-  return state;
-}
-
-//-----------------------------------------------------------------------------
-ship_state_c operator-( ship_state_c& a, ship_state_c& b ) {
-
-  ship_state_c state( a );
-  for( unsigned i = 0; i < state.size(); i++ )
-    state(i) -= b(i);
-  return state;
-}
-
-//-----------------------------------------------------------------------------
-ship_state_c operator*( const double& c, ship_state_c& a ) {
-  ship_state_c state( a );
-  for( unsigned i = 0; i < state.size(); i++ )
-    state(i) *= c;
-  return state;
-}
-
-//-----------------------------------------------------------------------------
-ship_state_c operator*( ship_state_c& a, const double& c ) {
-  ship_state_c state( a );
-  for( unsigned i = 0; i < state.size(); i++ )
-    state(i) *= c;
-  return state;
-}
-
-//-----------------------------------------------------------------------------
-ship_state_c operator/( ship_state_c& a, const double& c ) {
-  const Real EPSILON = 1e-16;
-  assert( fabs(c) > EPSILON );
-
-  ship_state_c state( a );
-  for( unsigned i = 0; i < state.size(); i++ )
-    state(i) /= c;
-  return state;
-}
-
-//-----------------------------------------------------------------------------
-
-class ship_command_c {
-
-  //---------------------------------------------------------------------------
-  // Constructors
-  //---------------------------------------------------------------------------
-public:
-  //---------------------------------------------------------------------------
-  ship_command_c( void ) {
-    _values.resize( size() );
-
-    for( unsigned i = 0; i < size(); i++ )
-      _values[i] = 0.0;
-  }
-
-  //---------------------------------------------------------------------------
-  ship_command_c( const ship_command_c& command ) {
-    _values.resize( size() );
-
-    for( unsigned i = 0; i < size(); i++ )
-      _values[i] = command._values[i];
-  }
-
-  //---------------------------------------------------------------------------
-  ship_command_c( std::vector<double>& x ) { 
-    assert( x.size() == size() );
-
-    _values.resize( size() );
-    for( unsigned i = 0; i < size(); i++ )
-      _values[i] = x[i];
-  }
-
-  //---------------------------------------------------------------------------
-  ship_command_c( std::valarray<double>& x ) { 
-    assert( x.size() == size() );
-
-    _values.resize( size() );
-    for( unsigned i = 0; i < size(); i++ )
-      _values[i] = x[i];
-  }
-
-  //---------------------------------------------------------------------------
-  ship_command_c( const double* x ) { 
-
-    // Note there are pointer safety issues here
-    _values.resize( size() );
-    for( unsigned i = 0; i < size(); i++ )
-      _values[i] = x[i];
-  }
-
-  //---------------------------------------------------------------------------
-  ship_command_c( gazebo::math::Vector3 F, gazebo::math::Vector3 tau ) { 
-    _values.resize( size() );
-    force( F );
-    torque( tau );
-  }
-
-  //---------------------------------------------------------------------------
-  ship_command_c( const ompl::control::Control* u ) { 
-    //assert( x.size() == size() );
-
-    _values.resize( size() );
-    for( unsigned i = 0; i < size(); i++ )
-      _values[i] = u->as<ompl::control::RealVectorControlSpace::ControlType>()->values[i];
-  }
-
-  //---------------------------------------------------------------------------
-  // Destructor
-  //---------------------------------------------------------------------------
-  virtual ~ship_command_c( void ) {}
-
-  //---------------------------------------------------------------------------
-  //
-  //---------------------------------------------------------------------------
-  void force( const gazebo::math::Vector3& v ) {
-    _values[0] = v.x;
-    _values[1] = v.y;
-    _values[2] = v.z;
-  }
-
-  void force( const Ravelin::Vector3d& v ) {
-    _values[0] = v[0];
-    _values[1] = v[1];
-    _values[2] = v[2];
-  }
-
-  //---------------------------------------------------------------------------
-  gazebo::math::Vector3 force( void ) const {
-    return gazebo::math::Vector3( _values[0], _values[1], _values[2] );
-  }
-
-  //---------------------------------------------------------------------------
-  void torque( const gazebo::math::Vector3& v ) {
-    _values[3] = v.x;
-    _values[4] = v.y;
-    _values[5] = v.z;
-  }
-
-  void torque( const Ravelin::Vector3d& v ) {
-    _values[3] = v[0];
-    _values[4] = v[1];
-    _values[5] = v[2];
-  }
-
-
-  //---------------------------------------------------------------------------
-  gazebo::math::Vector3 torque( void ) const {
-    return gazebo::math::Vector3( _values[3], _values[4], _values[5] );
-  }
-
-  //---------------------------------------------------------------------------
-  double& operator()( const unsigned& i ) {
-    assert( i < size() );
-    return _values[i];
-  }
-
-  //---------------------------------------------------------------------------
-  double value( const unsigned& i ) const {
-    assert( i < size() );
-    return _values[i];
-  }
-
-  //---------------------------------------------------------------------------
-  static unsigned size( void ) {
-    return 6;
-  }
-
-  //---------------------------------------------------------------------------
-  // Member Variables
-  //---------------------------------------------------------------------------
-private:
-  std::vector<double> _values;
-  double duration; 
-
-  //---------------------------------------------------------------------------
-  // Output
-  //---------------------------------------------------------------------------
-public: 
-  static std::string header( void ) {
-    return "t,force[x, y, z], torque[x, y, z]";
-  }
-
-  friend std::ostream& operator<<(std::ostream& ostr, const std::pair<double,ship_command_c>& cmd);
-  friend std::ostream& operator<<(std::ostream& ostr, const ship_command_c& cmd);
-};
-
-//-----------------------------------------------------------------------------
-ship_command_c operator+( ship_command_c& a, ship_command_c& b ) {
-  ship_command_c command( a );
-  for( unsigned i = 0; i < command.size(); i++ )
-    command(i) += b(i);
-  return command;
-}
-
-//-----------------------------------------------------------------------------
-std::ostream& operator<<(std::ostream& ostr, const ship_command_c& cmd) {
-  return ostr << cmd.value(0) << "," << cmd.value(1) << "," << cmd.value(2) << "," 
-              << cmd.value(3) << "," << cmd.value(4) << "," << cmd.value(5);
-}
-
-//-----------------------------------------------------------------------------
-std::ostream& operator<<(std::ostream& ostr, const std::pair<double,ship_command_c>& cmd) {
-  return ostr << cmd.first << ","
-              << cmd.second.value(0) << "," << cmd.second.value(1) << "," << cmd.second.value(2) << "," 
-              << cmd.second.value(3) << "," << cmd.second.value(4) << "," << cmd.second.value(5);
-}
-
-//-----------------------------------------------------------------------------
-
-typedef std::vector< std::pair<double,ship_state_c> > ship_state_list_t;
-typedef std::vector< std::pair<double,ship_command_c> > ship_command_list_t;
-
-/*
-//-----------------------------------------------------------------------------
-class ship_plan_c {
-public:
-  ship_plan_c( void ) {}
-  virtual ~ship_plan_c( void ) {}
-
-  std::vector<ship_state_c> states;
-  std::vector<ship_command_c> commands;
- 
-};
-
-//-----------------------------------------------------------------------------
-
-class ship_planner_c {
-public:
-  ship_planner_c( void ) {}
-  virtual ~ship_planner_c( void ) {}
-
-  enum ship_planner_type_e {
-    LISSAJOUS,
-    RANDOM,
-    OMPL
-  };
-
-};
-*/
-//-----------------------------------------------------------------------------
-class aabb_c {
-public:
-  aabb_c( void ) : center( 0.0, 0.0, 0.0 ), extens( 0.0, 0.0, 0.0 ) {
-    
-  }
-
-  aabb_c( const gazebo::math::Vector3& _center, const gazebo::math::Vector3& _extens ) : 
-    center( _center ), 
-    extens( _extens ) 
-  {
-    
-  }
-
-  aabb_c( const Ravelin::Origin3d& _center, const Ravelin::Origin3d& _extens ) {
-    center = gazebo::math::Vector3( (double)_center.x(), (double)_center.y(), (double)_center.z() );
-    extens = gazebo::math::Vector3( (double)_extens.x(), (double)_extens.y(), (double)_extens.z() );
-  }
- 
-  virtual ~aabb_c( void ) { }
-
-  gazebo::math::Vector3 center;
-  gazebo::math::Vector3 extens;
-
-  static bool intersects( const aabb_c& a, const aabb_c& b ) {
-    gazebo::math::Vector3 p = a.center - b.center;
-
-    return fabs( p.x ) <= ( a.extens.x + b.extens.x) &&
-           fabs( p.y ) <= ( a.extens.y + b.extens.y) &&
-           fabs( p.z ) <= ( a.extens.z + b.extens.z);
-  }
-
-  friend std::ostream& operator<<(std::ostream& ostr, const aabb_c& bb);
-
-};
-//-----------------------------------------------------------------------------
-std::ostream& operator<<(std::ostream& ostr, const aabb_c& bb) {
-  return ostr << "center[" << bb.center.x << "," << bb.center.y << "," << bb.center.z << "]," 
-              << "extens[" << bb.extens.x << "," << bb.extens.y << "," << bb.extens.z << "]";
-}
-
-//-----------------------------------------------------------------------------
-typedef std::vector<aabb_c> aabb_list_t;
-//-----------------------------------------------------------------------------
-
+/// Class encapsulating the ship itself.  A Gazebo plugin
 class ship_c : public gazebo::ModelPlugin {
 public:
 
@@ -580,7 +121,6 @@ protected:
   virtual void Load( gazebo::physics::ModelPtr _model, sdf::ElementPtr _sdf );
   virtual void Update( );
   //virtual void Reset( );
-  static double unit_rand( );
 
   //---------------------------------------------------------------------------
   // Robot Interface
@@ -602,8 +142,6 @@ protected:
   //---------------------------------------------------------------------------
   // Ship Interface
   //---------------------------------------------------------------------------
-  ship_state_c ode( ship_state_c& q, ship_command_c& u ) const;
-  ship_command_c inverse_ode( ship_state_c& q, ship_state_c& dq ) const;
 
   ship_state_c state( void );
 
@@ -621,14 +159,6 @@ public:
   bool intersects_any_obstacle( const aabb_c& mybb, aabb_c& obstacle );
   bool intersects_world_bounds( const aabb_c& mybb );
 
-/*
-  ship_state_c dstate( void );
-
-  void state( const ship_state_c& state_ );
-
-  void steer( const car_command_c& u, const Real& Kp, const Real& Kd );
-  void push( const car_command_c& u, const Real& Kp );
-*/
   void stop( void );
   //---------------------------------------------------------------------------
   // OMPL
@@ -636,7 +166,11 @@ public:
 public:
 
   void inv_dyn(const std::vector<double>& q, const std::vector<double>& qdot_des, std::vector<double>& u) const;
+
+  // ode -- see below in eular_integrator_c for how called
   void operator()( const ompl::base::State* state, const ompl::control::Control* control, std::valarray<double>& dstate, ship_c* ship ) const;
+
+  // update post integration
   void update( ompl::base::State* state, const std::valarray<double>& dstate ) const;
 
   //DirectedControlSamplePtr allocateDirectedControlSampler( const SpaceInformation* si );
@@ -686,233 +220,31 @@ public:
   ship_command_c command_current;
   double command_current_duration;
 
+  bool is_state_valid(const ompl::control::SpaceInformation *si, const ompl::base::State *state);
 };
 
 //-----------------------------------------------------------------------------
-// OMPL
 //-----------------------------------------------------------------------------
-// Following mostly borrowed wholesale from OMPL demo 
-// RigidBodyPlanningWithIntegrationAndControls.cpp with refactoring to code style
-//-----------------------------------------------------------------------------
-void to_state( const ompl::base::StateSpace* space, const std::vector<double>& values, ompl::base::State* state );
-void from_state( const ompl::base::StateSpace* space, const ompl::base::State* state, std::vector<double>& values );
-
-ompl::control::DirectedControlSamplerPtr allocateDirectedControlSampler( const ompl::control::SpaceInformation* si );
-
-class demo_control_space_c : public ompl::control::RealVectorControlSpace
-{
+class directed_control_sampler_c : public ompl::control::SimpleDirectedControlSampler {
 public:
-
-  demo_control_space_c(const ompl::base::StateSpacePtr &stateSpace) : 
-    ompl::control::RealVectorControlSpace(stateSpace, 6)
-  { }
-};
-
-//-----------------------------------------------------------------------------
-
-bool is_state_valid(const ompl::control::SpaceInformation *si, const ompl::base::State *state);
-
-//-----------------------------------------------------------------------------
-
-template<typename F>
-class euler_integrator_c {
-public:
-
-  euler_integrator_c( const ompl::base::StateSpace *_space, const double& _time_step ) : 
-    space( _space ), 
-    time_step( _time_step), 
-    ode( _space )
-  { }
-/*
-  void propagate( const ompl::base::State *start, const ompl::control::Control *control, const double duration, ompl::base::State *result ) const {
-    double t = time_step;
-    std::valarray<double> dstate;
-    space->copyState( result, start );
-    while( t < duration + std::numeric_limits<double>::epsilon() ) {
-      ode( result, control, dstate );
-      ode.update( result, time_step * dstate );
-      t += time_step;
-    }
-    if( t + std::numeric_limits<double>::epsilon() > duration ) {
-      ode( result, control, dstate );
-      ode.update( result, (t - duration) * dstate );
-    }
-  }
-*/
-//-----------------------------------------------------------------------------
-  void propagate( const ompl::base::State *start, const ompl::control::Control *control, const double duration, ompl::base::State *result, ship_c* ship ) const {
-    std::valarray<double> dstate;
-    space->copyState( result, start );  // safety copy => if we need to get out early then initial state retained
-/*
-    const double *pu = control->as<ompl::control::RealVectorControlSpace::ControlType>()->values;
-    std::vector<double> vq( ship_state_c::size() );
-    std::vector<double> vdq( ship_state_c::size() );
-    from_state( space, result, vq );
-    ship_state_c q( vq );
-    ship_command_c u( pu );
-*/
-    ship_state_c q( space, start );
-    ship_command_c u( control );
-    
-    //std::cout << "prop_in: q[" << q << "], u[" << u << "]\n";
-
-    ode( result, control, dstate, ship );
-    ode.update( result, time_step * dstate );
-    //std::cout << time_step << std::endl;
-
-    //ode.update( result, dstate );
-/*
-    from_state( space, result, vq );
-    q = ship_state_c( vq );
-    from_state( space, result, vdq );
-    ship_state_c dq( vdq );
-  */  
-    //std::cout << "prop_out: q[" << q << "], dq[" << dq << "]\n";
-  }
-
-  double get_time_step( void ) const {
-    return time_step;
-  }
-
-  void set_time_step( const double& _time_step ) {
-    time_step = _time_step;
-  }
-
-private:
-  const ompl::base::StateSpace *space;
-  double time_step;
-  F      ode;
-};
-
-//-----------------------------------------------------------------------------
-
-class demo_state_propagator_c : public ompl::control::StatePropagator
-{
-public:
-
-  demo_state_propagator_c( const ompl::control::SpaceInformationPtr &si, ship_c* _ship) : 
-    ship(_ship),
-    ompl::control::StatePropagator(si),
-    space( si->getStateSpace().get() ),
-    integrator( si->getStateSpace().get(), 0.0 )
-  { }
-
-  virtual void propagate( const ompl::base::State* state, const ompl::control::Control* control, const double duration, ompl::base::State* result ) const {
-    integrator.propagate( state, control, duration, result, ship );
-  }
-/*
-  bool steer( const ompl::base::State* from, const ompl::base::State* to, const ompl::control::Control* u, double& duration ) const {
-    //std::valarray<double> dstate;
-    ship_state_c q0( space, from );
-    ship_state_c q1( space, to );
-    ship_state_c dq = q1 - q0;
-    double dt = integrator.get_time_step();
-
-    std::cout << "steer(...) ran\n";
-    u->as<ompl::control::RealVectorControlSpace::ControlType>()->values[0] = dq(7);
-    u->as<ompl::control::RealVectorControlSpace::ControlType>()->values[1] = dq(8);
-    u->as<ompl::control::RealVectorControlSpace::ControlType>()->values[2] = dq(9);
-    u->as<ompl::control::RealVectorControlSpace::ControlType>()->values[3] = dq(10);
-    u->as<ompl::control::RealVectorControlSpace::ControlType>()->values[4] = dq(11);
-    u->as<ompl::control::RealVectorControlSpace::ControlType>()->values[5] = dq(12);
-
-    duration = dt;
-
-    return true;
-  }
-*/
-  void setIntegrationTimeStep( const double& time_step ) {
-    integrator.set_time_step( time_step );
-  }
-
-  double getIntegrationTimeStep( void ) const {
-    return integrator.get_time_step();
-  }
-
-  euler_integrator_c< ship_c > integrator;
-  const ompl::base::StateSpace *space;
+  const ompl::base::StateSpace *space_;
   ship_c* ship;
 
-};
-
-//-----------------------------------------------------------------------------
-class rrt_c : public ompl::control::RRT {
-public:
-  
-  rrt_c( const ompl::control::SpaceInformationPtr& si ) : ompl::control::RRT( si ) { }
-
-  virtual ~rrt_c( void ) { }
-
-};
-
-//-----------------------------------------------------------------------------
-
-class ship_goal_c : public ompl::base::GoalState {
-public:
-  double SATISFACTION_THRESHOLD;
-
-  ship_goal_c( const ompl::base::SpaceInformationPtr& si ) : 
-    ompl::base::GoalState(si),
-    space( si->getStateSpace().get() )
-  {
-    SATISFACTION_THRESHOLD = 1e-4;
-
-  }
-
-  virtual bool isSatisfied( const ompl::base::State* state ) const {
-    ship_state_c q( space, state );
-    if( distanceGoal( state ) < SATISFACTION_THRESHOLD ) return true;
-    return false;
-  }
-
-  virtual bool isSatisfied( const ompl::base::State* state, double *distance ) const {
-    ship_state_c q( space, state );
-
-    *distance = distanceGoal( state );
-    if( *distance < SATISFACTION_THRESHOLD ) return true;
-    return false;
-  }
-
-  virtual double distanceGoal( const ompl::base::State* state ) const {
-    std::vector<double> g( ship_state_c::size() );
-    for( unsigned i=0; i< ship_state_c::size(); i++ )
-      g[i] = value(i);
-    ship_state_c q( space, state );
-    std::vector<double> d( ship_state_c::size() );
-    for( unsigned i = 0; i < d.size(); i++ ) 
-      d[i] = q.value(i) - g[i];
-
-    return sqrt( d[0] * d[0] + d[1] * d[1] + d[2] * d[2] );
-  }
-
-  double value( const unsigned int i ) const {
-    assert( i < ship_state_c::size() );
-
-    return *space->getValueAddressAtIndex(state_, i);
-  }
-
-  const ompl::base::StateSpace *space;
-};
-
-//-----------------------------------------------------------------------------
-
-class ship_directed_control_sampler_c : public ompl::control::SimpleDirectedControlSampler {
-public:
-  ship_directed_control_sampler_c( const ompl::control::SpaceInformation *si, const ompl::base::StateSpace* space, ship_c* _ship, unsigned int k = 1 ) :
+  //---------------------------------------------------------------------------
+  directed_control_sampler_c( const ompl::control::SpaceInformation *si, const ompl::base::StateSpace* space, ship_c* _ship, unsigned int k = 1 ) :
     SimpleDirectedControlSampler(si, k) //, cs_(si->allocControlSampler()), numControlSamples_(k)
   {
     ship = _ship;
     space_ = space;
   }
 
-  virtual ~ship_directed_control_sampler_c( void ) {
+  //---------------------------------------------------------------------------
+  virtual ~directed_control_sampler_c( void ) {
 
   }
 
-  const ompl::base::StateSpace *space_;
-  ship_c* ship;
-
-
+  //---------------------------------------------------------------------------
+  //---------------------------------------------------------------------------
   virtual unsigned int getBestControl( ompl::control::Control *control, const ompl::base::State *source, ompl::base::State *dest, const ompl::control::Control *previous ) {
 
     const double DT = ship->PLANNER_STEP_SIZE;
@@ -1017,6 +349,152 @@ public:
   }
 
 };
+
+//-----------------------------------------------------------------------------
+//-----------------------------------------------------------------------------
+ompl::control::DirectedControlSamplerPtr allocate_directed_control_sampler( const ompl::control::SpaceInformation* si ) {
+  int k = 1;
+  return ompl::control::DirectedControlSamplerPtr( new directed_control_sampler_c(si, ship->space_, ship,k) );
+}
+
+//-----------------------------------------------------------------------------
+//-----------------------------------------------------------------------------
+template<typename F>
+class euler_integrator_c {
+private:
+  const ompl::base::StateSpace *space;
+  double time_step;
+  F      ode;
+
+  //---------------------------------------------------------------------------
+public:
+  euler_integrator_c( const ompl::base::StateSpace *_space, const double& _time_step ) : 
+    space( _space ), 
+    time_step( _time_step), 
+    ode( _space )
+  { }
+
+  //---------------------------------------------------------------------------
+  void propagate( const ompl::base::State *start, const ompl::control::Control *control, const double duration, ompl::base::State *result, ship_c* ship ) const {
+    std::valarray<double> dstate;
+    space->copyState( result, start );
+
+    ship_state_c q( space, start );
+    ship_command_c u( control );
+
+    ode( result, control, dstate, ship );
+    ode.update( result, time_step * dstate );
+  }
+
+  //---------------------------------------------------------------------------
+  double get_time_step( void ) const {
+    return time_step;
+  }
+
+  //---------------------------------------------------------------------------
+  void set_time_step( const double& _time_step ) {
+    time_step = _time_step;
+  }
+};
+
+//-----------------------------------------------------------------------------
+//-----------------------------------------------------------------------------
+class state_propagator_c : public ompl::control::StatePropagator {
+public:
+  euler_integrator_c< ship_c > integrator;
+  const ompl::base::StateSpace *space;
+  ship_c* ship;
+
+  //---------------------------------------------------------------------------
+  state_propagator_c( const ompl::control::SpaceInformationPtr &si, ship_c* _ship) : 
+    ship(_ship),
+    ompl::control::StatePropagator(si),
+    space( si->getStateSpace().get() ),
+    integrator( si->getStateSpace().get(), 0.0 )
+  { }
+
+  //---------------------------------------------------------------------------
+  virtual void propagate( const ompl::base::State* state, const ompl::control::Control* control, const double duration, ompl::base::State* result ) const {
+    integrator.propagate( state, control, duration, result, ship );
+  }
+
+  //---------------------------------------------------------------------------
+  void setIntegrationTimeStep( const double& time_step ) {
+    integrator.set_time_step( time_step );
+  }
+
+  //---------------------------------------------------------------------------
+  double getIntegrationTimeStep( void ) const {
+    return integrator.get_time_step();
+  }
+};
+
+//-----------------------------------------------------------------------------
+//-----------------------------------------------------------------------------
+
+class ship_goal_c : public ompl::base::GoalState {
+public:
+  const ompl::base::StateSpace *space;
+  double SATISFACTION_THRESHOLD;
+
+  //---------------------------------------------------------------------------
+  ship_goal_c( const ompl::base::SpaceInformationPtr& si ) : 
+    ompl::base::GoalState(si),
+    space( si->getStateSpace().get() )
+  {
+    SATISFACTION_THRESHOLD = 1e-4;
+
+  }
+
+  //---------------------------------------------------------------------------
+  virtual bool isSatisfied( const ompl::base::State* state ) const {
+    ship_state_c q( space, state );
+    if( distanceGoal( state ) < SATISFACTION_THRESHOLD ) return true;
+    return false;
+  }
+
+  //---------------------------------------------------------------------------
+  virtual bool isSatisfied( const ompl::base::State* state, double *distance ) const {
+    ship_state_c q( space, state );
+
+    *distance = distanceGoal( state );
+    if( *distance < SATISFACTION_THRESHOLD ) return true;
+    return false;
+  }
+
+  //---------------------------------------------------------------------------
+  virtual double distanceGoal( const ompl::base::State* state ) const {
+    std::vector<double> g( ship_state_c::size() );
+    for( unsigned i=0; i< ship_state_c::size(); i++ )
+      g[i] = value(i);
+    ship_state_c q( space, state );
+    std::vector<double> d( ship_state_c::size() );
+    for( unsigned i = 0; i < d.size(); i++ ) 
+      d[i] = q.value(i) - g[i];
+
+    return sqrt( d[0] * d[0] + d[1] * d[1] + d[2] * d[2] );
+  }
+
+  //---------------------------------------------------------------------------
+  double value( const unsigned int i ) const {
+    assert( i < ship_state_c::size() );
+
+    return *space->getValueAddressAtIndex(state_, i);
+  }
+};
+
+//-----------------------------------------------------------------------------
+//-----------------------------------------------------------------------------
+
+class control_space_c : public ompl::control::RealVectorControlSpace {
+public:
+  control_space_c(const ompl::base::StateSpacePtr &stateSpace) : 
+    ompl::control::RealVectorControlSpace(stateSpace, 6)
+  { }
+};
+
+//-----------------------------------------------------------------------------
+//-----------------------------------------------------------------------------
 
 #endif // _GAZEBO_SHIP_H_
 
