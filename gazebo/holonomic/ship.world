@@ -30,5 +30,11 @@
       <uri>file://models/ship</uri>
       <pose>0 0 0 0 0 0</pose>
     </include>
+<!--
+    <include>
+      <uri>file://models/maze</uri>
+      <pose>0 0 0 0 0 0</pose>
+    </include>
+-->
   </world>
 </sdf>

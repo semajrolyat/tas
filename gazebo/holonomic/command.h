@@ -145,6 +145,14 @@ public:
     return 6;
   }
 
+  std::vector<double> as_vector( void ) {
+    std::vector<double> v( size() );
+    for( unsigned i = 0; i < size(); i++ ) {
+      v[i] = _values[i];
+    }
+    return v;
+  }
+
   //---------------------------------------------------------------------------
   // Member Variables
   //---------------------------------------------------------------------------
@@ -186,6 +194,38 @@ std::ostream& operator<<(std::ostream& ostr, const std::pair<double,ship_command
 }
 
 //-----------------------------------------------------------------------------
+// Auditing
+//------------------------------------------------------------------------------
+/// Create the audit file and write header line for command data
+bool write_command_audit_header( const std::string& filename ) {
+  std::fstream fs;
+  fs.open( filename.c_str(), std::fstream::out );
+  if( !fs.is_open() ) return false;
+  fs << ship_command_c::header() << std::endl;
+  fs.close();
+  return true;
+}
+
+//------------------------------------------------------------------------------
+/// Write a single command data element to an audit file (includes time)
+bool write_audit_datum( const std::string& filename, const std::pair<double,ship_command_c>& cmd ) {
+  std::fstream fs;
+  fs.open( filename.c_str(), std::fstream::out | std::fstream::app );
+  if( !fs.is_open() ) return false;
+  fs << cmd << std::endl;
+  fs.close();
+  return true;
+}
+
+//------------------------------------------------------------------------------
+/// Write an entire command data set to an audit file
+bool write_audit_data( const std::string& filename, const ship_command_list_t& list ) {
+  for( unsigned i = 0; i < list.size(); i++ )
+    if( !write_audit_datum( filename, list[i] ) ) return false;
+  return true;
+}
+
+//------------------------------------------------------------------------------
 
 #endif // _GAZEBO_SHIP_COMMAND_H_
 

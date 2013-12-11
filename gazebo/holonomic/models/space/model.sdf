@@ -164,7 +164,9 @@
       </visual>
 -->
     </link>
+<!--
     <plugin name='space_controller' filename='libspace_controller.so'>
     </plugin>
+-->
   </model>
 </sdf>

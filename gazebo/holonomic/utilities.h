@@ -3,6 +3,8 @@
 
 //-----------------------------------------------------------------------------
 
+#include "constants.h"
+
 #include <vector>
 #include <iostream>
 #include <string>
@@ -15,6 +17,16 @@
 //-----------------------------------------------------------------------------
 /// Write a vector of doubles to a stream
 std::ostream& operator<<(std::ostream& ostr, const std::vector<double>& v) {
+  for( unsigned i = 0; i < v.size(); i++ ) {
+    if( i > 0 )
+      ostr << ",";
+    ostr << v[i];
+  }
+  return ostr;
+}
+
+//-----------------------------------------------------------------------------
+std::ostream& operator<<(std::ostream& ostr, const std::vector<unsigned>& v) {
   for( unsigned i = 0; i < v.size(); i++ ) {
     if( i > 0 )
       ostr << ",";

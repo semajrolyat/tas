@@ -230,6 +230,38 @@ ship_state_c operator/( ship_state_c& a, const double& c ) {
   return state;
 }
 
+//------------------------------------------------------------------------------
+// Auditing 
+//------------------------------------------------------------------------------
+/// Create an audit file and write header line for state data
+bool write_state_audit_header( const std::string& filename ) {
+  std::fstream fs;
+  fs.open( filename.c_str(), std::fstream::out );
+  if( !fs.is_open() ) return false;
+  fs << ship_state_c::header() << std::endl;
+  fs.close();
+  return true;
+}
+
+//------------------------------------------------------------------------------
+/// Write a single state data element to an audit file (includes time)
+bool write_audit_datum( const std::string& filename, const std::pair<double,ship_state_c>& state ) {
+  std::fstream fs;
+  fs.open( filename.c_str(), std::fstream::out | std::fstream::app );
+  if( !fs.is_open() ) return false;
+  fs << state << std::endl;
+  fs.close();
+  return true;
+}
+
+//------------------------------------------------------------------------------
+/// Write an entire state data set to an audit file
+bool write_audit_data( const std::string& filename, const ship_state_list_t& list ) {
+  for( unsigned i = 0; i < list.size(); i++ )
+    if( !write_audit_datum( filename, list[i] ) ) return false;
+  return true;
+}
+
 //-----------------------------------------------------------------------------
 
 #endif // _GAZEBO_SHIP_STATE_H_

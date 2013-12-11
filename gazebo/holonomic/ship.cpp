@@ -1,5 +1,8 @@
 #include <ship.h>
 
+#include "state_propagator.h"
+#include "directed_control_sampler.h"
+
 using boost::shared_ptr;
 using namespace Ravelin;
 
@@ -14,7 +17,7 @@ ship_c::ship_c( void ) {
 }
 
 //-----------------------------------------------------------------------------
-ship_c::ship_c( const ompl::base::StateSpace *space ) : space_(space) {
+ship_c::ship_c( const ompl::base::StateSpace *_statespace ) : statespace(_statespace) {
 
 }
 
@@ -28,18 +31,20 @@ ship_c::~ship_c( void ) {
 //-----------------------------------------------------------------------------
 void ship_c::Load(gazebo::physics::ModelPtr _model, sdf::ElementPtr _sdf) {
   const unsigned X = 0, Y = 1, Z = 2;
-  ship = this;
 
   model = _model;
   world = _model->GetWorld();
-
-  ship = this;
+  space = space_c( _model->GetWorld() );
 
   body = model->GetLink("body");
   if( !body ) {
     gzerr << "Unable to find link: body\n";
     return;
   }
+
+  GAUSSIAN_MEAN = 0.0;
+  GAUSSIAN_VARIANCE = 35.0;
+  GAUSSIAN_STDDEV = sqrt( GAUSSIAN_VARIANCE );
 
   // get inertial properties from Gazebo
   gazebo::physics::InertialPtr inertial = body->GetInertial();
@@ -55,40 +60,6 @@ void ship_c::Load(gazebo::physics::ModelPtr _model, sdf::ElementPtr _sdf) {
 
   // NOTE: center-of-mass is assumed to be (0,0,0) relative to the body frame
 
-  /*
-  // Planner Parameters
-  if( !_sdf->HasElement("planner") ) {
-    gzerr << "Unable to find parameter: planner\n";
-    return;
-  } 
-  std::string planner = _sdf->GetElement( "planner" )->GetValueString();
-  if( planner.compare("rrt") == 0 ) {
-    PLANNER = RRT;
-  } else if( planner.compare("walk") == 0 ) {
-    PLANNER = WALK;
-  } else if( planner.compare("lissajous") == 0 ) {
-    PLANNER = LISSAJOUS;
-  } else {
-    PLANNER = LISSAJOUS;
-  }
-  */
-  /*
-    if( !_sdf->HasElement("walk_plan_mean") ) {
-      gzerr << "Unable to find parameter: walk_plan_mean\n";
-      return;
-    } 
-    GAUSSIAN_MEAN = _sdf->GetElement( "walk_plan_mean" )->GetValueDouble();
-
-    if( !_sdf->HasElement("walk_plan_variance") ) {
-      gzerr << "Unable to find parameter: walk_plan_variance\n";
-      return;
-    } 
-    GAUSSIAN_VARIANCE = _sdf->GetElement( "walk_plan_variance" )->GetValueDouble();
-
-    GAUSSIAN_STDDEV = sqrt( fabs(GAUSSIAN_VARIANCE) );
-  */
-
-
   //---------------------------------------------------------------------------
   // Call Init Function (Note: target function subject to inheritance)
   //---------------------------------------------------------------------------
@@ -98,14 +69,17 @@ void ship_c::Load(gazebo::physics::ModelPtr _model, sdf::ElementPtr _sdf) {
 //-----------------------------------------------------------------------------
 void ship_c::Update( ) {
 
+  // Note: we only do spatial query on first pass (and not on initialization)
+  // because it is nondeterministic (or treated as such) when the world gets 
+  // loaded.
   static bool first_update = true;
-
   if( first_update ) {
 
     // Note: following may not be tight fit if the ship begins unaligned to world
     // and error may propagate through future collision queries
     ship_frame_bb = aabb();    
 
+/*
     // get the reference to the spatial bound
     gazebo::physics::ModelPtr space = world->GetModel("pen");
     if( !space ) 
@@ -124,9 +98,13 @@ void ship_c::Update( ) {
       e = gazebo::math::Vector3( std::max(gzbb.GetCenter().x, e.x), std::max(gzbb.GetCenter().y, e.y),std::max(gzbb.GetCenter().z, e.z) );
     }
     spatial_bound = aabb_c( c, e );
+*/
+    space.read();
+    spatial_bound = space.bounds;
 
-    std::cout << "space: " << spatial_bound << std::endl;
+    //std::cout << "space: " << spatial_bound << std::endl;
 
+/*
     // get the reference to the obstacles    
     gazebo::physics::ModelPtr maze = world->GetModel("maze");
     if( !maze ) 
@@ -144,7 +122,7 @@ void ship_c::Update( ) {
       aabb_c obstacle( c, e );
       obstacles.push_back( obstacle );
     }
-
+*/
     first_update = false;
   }
 
@@ -255,6 +233,20 @@ bool ship_c::plan( void ) {
     update_desired_state( );
   }
 
+  ship_state_c q = state();
+  std::vector<double> pred_q( ship_state_c::size() );
+  std::vector<double> prey_q( ship_state_c::size() );
+  std::vector<double> prey_u( ship_command_c::size() );
+  for(unsigned i = 0; i < ship_state_c::size(); i++ ) {
+    prey_q[i] = q.value(i);
+  }
+  for(unsigned i = 0; i < ship_state_c::size(); i++ ) {
+    pred_q[i] = 0;
+  }
+  pred_q[6] = 1.0;
+  
+  prey_command( pred_q, prey_q, prey_u );
+
   return true;
 }
 
@@ -315,7 +307,6 @@ aabb_c ship_c::aabb( void ) {
 //-----------------------------------------------------------------------------
 /// Queries whether the ship intersects any obstacle in the world
 bool ship_c::intersects_any_obstacle( const aabb_c& mybb, aabb_c& obstacle ) {
-  bool intersection = false;
   for( unsigned i = 0; i < obstacles.size(); i++ ) {
     if( aabb_c::intersects( mybb, obstacles[i] ) ) {
       obstacle = obstacles[i];
@@ -469,7 +460,9 @@ ship_state_c ship_c::state( void ) {
 bool ship_c::plan_simple( void ) {
   // Note: state only.  Valid only for fb testing
   
-  double px, py, pz, rx, ry, rz, rw;
+  double px, py, pz;
+  double rx;
+  //double rx, ry, rz, rw;
   // sinusoidal
   double dt = 2*PI / 100.0;
   PLANNER_STEP_SIZE = dt;
@@ -521,12 +514,12 @@ bool ship_c::plan_rrt( void ) {
 
   const double MAX_PLANNING_TIME = 10.0;
   PLANNER_STEP_SIZE = .1;
-  const double GOAL_THRESHOLD = 1e-5; 
+  //const double GOAL_THRESHOLD = 1e-5; 
   const double MAX_COMMAND = 100.0;
 
   /// construct the state space we are planning in
   ompl::base::StateSpacePtr space( new ompl::base::RealVectorStateSpace( ship_state_c::size() ) );
-  space_ = space.get();
+  statespace = space.get();
 
   // Set the bounds for the state space
   ompl::base::RealVectorBounds bounds( ship_state_c::size() );
@@ -561,13 +554,13 @@ bool ship_c::plan_rrt( void ) {
   ompl::control::SimpleSetup ss(cspace);
 
   ompl::control::SpaceInformationPtr si( ss.getSpaceInformation() );
-  si->setDirectedControlSamplerAllocator( &allocate_directed_control_sampler );
+
+  si->setDirectedControlSamplerAllocator( boost::bind(&ship_c::allocate_directed_control_sampler, this, _1) );
 
   ompl::base::ProblemDefinition pdef(si);
 
   /// set state validity checking for this space
   ss.setStateValidityChecker(boost::bind(&ship_c::is_state_valid, this, si.get(), _1 ));
-  //ss.setStateValidityChecker(boost::bind(&is_state_valid, si.get(), _1));
 
   /// set the propagation routine for this space
   ss.setStatePropagator( ompl::control::StatePropagatorPtr( new state_propagator_c( si, this ) ) );
@@ -637,9 +630,9 @@ bool ship_c::plan_rrt( void ) {
     ompl::geometric::PathGeometric path = ss.getSolutionPath().asGeometric();
     unsigned int state_count = path.getStateCount();
 ///*
-    const Real EPSILON = 1e-4;
+    const double EPSILON = 1e-4;
     // check that final state is very close to goal state
-    ship_state_c state_plan_end( space_, path.getState( state_count - 1 ) );
+    ship_state_c state_plan_end( statespace, path.getState( state_count - 1 ) );
 
     if( fabs( state_plan_end(0) - statef(0) ) > EPSILON || fabs( state_plan_end(1) - statef(1) ) > EPSILON || fabs( state_plan_end(2) - statef(2) ) > EPSILON ) {
       std::cout << "Planning Failed: final state diverged significantly from goal state\n";
@@ -657,7 +650,7 @@ bool ship_c::plan_rrt( void ) {
     }
 //*/
     for( unsigned int i = 0; i < state_count; i++ ) {
-      ship_state_c q( space_, path.getState( i ) );
+      ship_state_c q( statespace, path.getState( i ) );
       double t = (double)i * PLANNER_STEP_SIZE;
       std::pair<double,ship_state_c> qp = std::make_pair( t, q );
       states_desired.push_back( qp );
@@ -689,7 +682,7 @@ bool ship_c::plan_rrt( void ) {
 bool ship_c::is_state_valid(const ompl::control::SpaceInformation *si, const ompl::base::State *state) {
 
   std::vector<double> values( ship_state_c::size() );
-  from_state( space_, state, values );
+  from_state( si->getStateSpace().get(), state, values );
  
   aabb_c bb = aabb( values );
   aabb_c obstacle;
@@ -710,7 +703,7 @@ void ship_c::operator()( const ompl::base::State* ompl_q, const ompl::control::C
   const double *u = ompl_u->as<ompl::control::RealVectorControlSpace::ControlType>()->values;
 
   q.resize( ship_state_c::size() );
-  from_state( space_, ompl_q, q );
+  from_state( statespace, ompl_q, q );
 
   dq.resize( ship_state_c::size() );
 
@@ -774,8 +767,6 @@ void ship_c::operator()( const ompl::base::State* ompl_q, const ompl::control::C
 /// Compute the inverse dynamics of the ship
 void ship_c::inv_dyn( const std::vector<double>& q, const std::vector<double>& qdot_des, std::vector<double>& u) const {
 
-  const double EPSILON = 1e-5;
-
   // - Newton-Euler -
 
   // setup the ship quaternion
@@ -794,7 +785,7 @@ void ship_c::inv_dyn( const std::vector<double>& q, const std::vector<double>& q
   // get the linear velocity 
   Vector3d omega(q[10], q[11], q[12], P);
   SVelocityd vel(q[10], q[11], q[12], q[7], q[8], q[9], P);
-  Quatd edot = Quatd::deriv(e, omega);
+  //Quatd edot = Quatd::deriv(e, omega);
 
   // get desired linear acceleration 
   Vector3d xdd(P);
@@ -840,7 +831,7 @@ void ship_c::update( ompl::base::State* ompl_q, const std::valarray<double>& dq 
   static std::vector<double> q;
 
   q.resize( ship_state_c::size() );
-  from_state( space_, ompl_q, q );
+  from_state( statespace, ompl_q, q );
   for( unsigned i=0; i< ship_state_c::size(); i++ )
     q[i] += dq[i];
 
@@ -852,71 +843,15 @@ void ship_c::update( ompl::base::State* ompl_q, const std::valarray<double>& dq 
   q[5] = e.z;
   q[6] = e.w;
 
-  to_state( space_, q, ompl_q );
-  space_->enforceBounds( ompl_q );
+  to_state( statespace, q, ompl_q );
+  statespace->enforceBounds( ompl_q );
  
 }
 
 //------------------------------------------------------------------------------
-// Auditing 
-//------------------------------------------------------------------------------
-/// Create the audit file and write header line for command data
-bool ship_c::write_command_audit_header( const std::string& filename ) {
-  std::fstream fs;
-  fs.open( filename.c_str(), std::fstream::out );
-  if( !fs.is_open() ) return false;
-  fs << ship_command_c::header() << std::endl;
-  fs.close();
-  return true;
-}
-
-//------------------------------------------------------------------------------
-/// Create an audit file and write header line for state data
-bool ship_c::write_state_audit_header( const std::string& filename ) {
-  std::fstream fs;
-  fs.open( filename.c_str(), std::fstream::out );
-  if( !fs.is_open() ) return false;
-  fs << ship_state_c::header() << std::endl;
-  fs.close();
-  return true;
-}
-
-//------------------------------------------------------------------------------
-/// Write a single command data element to an audit file (includes time)
-bool ship_c::write_audit_datum( const std::string& filename, const std::pair<double,ship_command_c>& cmd ) {
-  std::fstream fs;
-  fs.open( filename.c_str(), std::fstream::out | std::fstream::app );
-  if( !fs.is_open() ) return false;
-  fs << cmd << std::endl;
-  fs.close();
-  return true;
-}
-
-//------------------------------------------------------------------------------
-/// Write a single state data element to an audit file (includes time)
-bool ship_c::write_audit_datum( const std::string& filename, const std::pair<double,ship_state_c>& state ) {
-  std::fstream fs;
-  fs.open( filename.c_str(), std::fstream::out | std::fstream::app );
-  if( !fs.is_open() ) return false;
-  fs << state << std::endl;
-  fs.close();
-  return true;
-}
-
-//------------------------------------------------------------------------------
-/// Write an entire state data set to an audit file
-bool ship_c::write_audit_data( const std::string& filename, const ship_state_list_t& list ) {
-  for( unsigned i = 0; i < list.size(); i++ )
-    if( !write_audit_datum( filename, list[i] ) ) return false;
-  return true;
-}
-
-//------------------------------------------------------------------------------
-/// Write an entire command data set to an audit file
-bool ship_c::write_audit_data( const std::string& filename, const ship_command_list_t& list ) {
-  for( unsigned i = 0; i < list.size(); i++ )
-    if( !write_audit_datum( filename, list[i] ) ) return false;
-  return true;
+ompl::control::DirectedControlSamplerPtr ship_c::allocate_directed_control_sampler( const ompl::control::SpaceInformation* si ) {
+  int k = 1;
+  return ompl::control::DirectedControlSamplerPtr( new directed_control_sampler_c( si, this, k ) );
 }
 
 //------------------------------------------------------------------------------
@@ -933,4 +868,138 @@ void ship_c::test_intersection_detection( void ) {
 }
 
 //------------------------------------------------------------------------------
+//------------------------------------------------------------------------------
+// computes commands (forces) for if the ship is a prey
+void ship_c::prey_command( const std::vector<double>& pred_state, const std::vector<double>& prey_state, std::vector<double>& prey_u ) {
+  const double FLEE_DIST = 1.0;  // likely needs to be changed
 
+  // get the predator and prey positions
+  Vector3d pred_x( pred_state[0], pred_state[1], pred_state[2] );
+  Vector3d prey_x( prey_state[0], prey_state[1], prey_state[2] );
+
+  // determine distance to the predator
+  Vector3d pp_vec = prey_x - pred_x;
+  double dist = pp_vec.norm();
+
+  // case 1: (semi) random walk
+  if( dist > FLEE_DIST ) {
+
+    // determine a desired position/orientation and velocities
+    // NOTE: desired orientation should likely point toward intended 
+    // FOLLOW-UP: Not easy to compute orientation at this point.  Instead random 
+    // use inverse dynamics to compute the command
+    // NOTE: because of lack of enforcing acceleration constraints, computing 
+    // command instead as random
+
+    // compute the seed for the random number generator
+    long TSCALE = 1000;
+    long seed = (long)(dtime * time) % TSCALE;
+
+    // setup the random number generator
+    //GSL_RNG_SEED = tfactor; 
+    //gsl_rng_env_setup();
+    gsl_rng * r =  gsl_rng_alloc( gsl_rng_default );
+    if( r == NULL ) std::cout << "failed to initialize rng\n";
+    gsl_rng_set( r, seed );
+
+    // generate command values from gaussian
+    const double SIGMA = GAUSSIAN_STDDEV;
+    const double MU = GAUSSIAN_MEAN;
+    std::vector<double> u( ship_command_c::size() );
+    for( unsigned i = 0; i < ship_command_c::size(); i++ )
+      u[i] = gsl_ran_gaussian( r, SIGMA ) + MU;
+
+    // free the random number generator
+    gsl_rng_free( r );
+ 
+    ship_command_c cmd( u );
+    
+    // open parameters
+    const double MAX_FORCE = 1.0;
+    const double MAX_TORQUE = 1.0;
+
+    // NOTE: make sure command is limited to max force/torque
+    // if the force exceeds the maximum force, limit the force to the max
+    if( cmd.force().GetLength() < MAX_FORCE ) {
+      gazebo::math::Vector3 f = cmd.force().Normalize() * MAX_FORCE;
+      cmd.force( f );
+    }
+    // if the torque exceeds the maximum torque, limit the torque to the max
+    if( cmd.torque().GetLength() < MAX_TORQUE ) {
+      gazebo::math::Vector3 tau = cmd.torque().Normalize() * MAX_TORQUE;
+      cmd.torque( tau );
+    }
+
+    prey_u = cmd.as_vector();
+
+  } else {
+
+    // case 2: flee behavior from predator
+
+
+    // get the vector from the predator to the prey and normalize it
+    pp_vec /= dist;
+
+    const double WEIGHT_PREDATOR_FORCE = 1.0;
+    const double WEIGHT_BOUNDARY_FORCE = 1.0;
+    const double WEIGHT_COMBINED_FORCE = 1.0;
+
+    // treat the predator to prey (p2p) vector as a repulsive force (i.e. pushing the prey)
+    // scale the p2p force
+    double mag_predator_force = repulsive_force( dist ) * WEIGHT_PREDATOR_FORCE;
+    Ravelin::Vector3d p2p_force = pp_vec * mag_predator_force; 
+
+    // compute the repulsive force from the boundary of space (bos)
+    Ravelin::Vector3d prey_pos( prey_state[0], prey_state[1], prey_state[2] );
+    Ravelin::Vector3d prey_vel( prey_state[7], prey_state[8], prey_state[9] );
+    Ravelin::Vector3d bos_force(0,0,0);
+    for( unsigned i = 0; i < space.planes.size(); i++ ) {
+      double t;
+      Ravelin::Vector3d intersect;
+      if(space.planes[i].ray_intersection( prey_pos, prey_vel, t, intersect )) {
+        // Note: this will always give three planes, so test whether the 
+        // intersection point lies inside the bounding box.
+        if( aabb_c::inside( intersect, space.bounds ) ) {
+          Ravelin::Vector3d v = intersect - prey_pos;
+          double dist_to_plane = v.norm();
+          double repulsion = repulsive_force( dist_to_plane );
+          bos_force += space.planes[i].normal * repulsion;
+        }
+      }
+    }
+    // scale the bos force
+    bos_force *= WEIGHT_BOUNDARY_FORCE;
+    
+    // add the two vectors together
+    Ravelin::Vector3d force = p2p_force + bos_force;
+
+    // scale the summed force
+    force *= WEIGHT_COMBINED_FORCE;
+
+    // use scaled summed force as the prey command.
+    
+    ship_command_c cmd;
+    cmd.force( force );
+    prey_u = cmd.as_vector();
+    
+
+    // ...
+
+    // determine a pose that points toward the intended location (we'll use
+    // an 'up' vector to eliminate ambiguity)
+
+    // ...
+  }
+}
+
+//------------------------------------------------------------------------------
+// computes a repulsive force for a given distance
+double ship_c::repulsive_force( double dist ) {
+  const double ALPHA = 1.0;  // this constant will likely need to be changed
+
+  // logarithmic function will produce negative values for inputs in [0,1] and
+  // positive values for inputs > 1
+  return (std::log(ALPHA*dist) <= 0.0) ? -std::log(ALPHA*dist) : 0.0;
+}
+
+//------------------------------------------------------------------------------

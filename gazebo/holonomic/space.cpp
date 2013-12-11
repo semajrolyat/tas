@@ -1,26 +1,67 @@
 #include <space.h>
 
-//-----------------------------------------------------------------------------
-//-----------------------------------------------------------------------------
-GZ_REGISTER_MODEL_PLUGIN( space_c )
 
 //-----------------------------------------------------------------------------
+// Constructors
 //-----------------------------------------------------------------------------
 space_c::space_c( void ) { 
 
 }
 
 //-----------------------------------------------------------------------------
-//-----------------------------------------------------------------------------
-space_c::~space_c( void ) {
-    //gazebo::event::Events::DisconnectWorldUpdateBegin( this->updateConnection );
+space_c::space_c( gazebo::physics::WorldPtr _world ) { 
+  world = _world;
 }
 
 //-----------------------------------------------------------------------------
+// Destructor
 //-----------------------------------------------------------------------------
-void space_c::Load(gazebo::physics::ModelPtr _model, sdf::ElementPtr _sdf) {
-  model = _model;
-  world = _model->GetWorld();
+space_c::~space_c( void ) {
+
+}
+
+//-----------------------------------------------------------------------------
+//
+//-----------------------------------------------------------------------------
+void space_c::read( void ) {
+
+  // get the reference to the spatial bound
+  gazebo::physics::ModelPtr space = world->GetModel("pen");
+  if( !space ) 
+    gzerr << "Unable to find model: pen\n";
+  // compute & cache the spatial bound aabb
+
+  // Space is empty inside the boundary, but the boundary is made up of thin walls not just a cube.
+  gazebo::physics::Link_V space_links = space->GetLinks();
+  gazebo::math::Vector3 c( 0.0, 0.0, 0.0 );
+  gazebo::math::Vector3 e( 0.0, 0.0, 0.0 );
+  for( unsigned i = 0; i < space_links.size(); i++ ) {
+    gazebo::physics::LinkPtr link = space_links[i];
+    gazebo::math::Box gzbb = link->GetBoundingBox();
+    c += gzbb.GetCenter();
+    // Note:: following assumes centered at (0,0,0) and symmetric.  Dirty but works.
+    e = gazebo::math::Vector3( std::max(gzbb.GetCenter().x, e.x), std::max(gzbb.GetCenter().y, e.y),std::max(gzbb.GetCenter().z, e.z) );
+  }
+  bounds = aabb_c( c, e );
+
+  planes.resize(6);
+  // east
+  planes[0]=plane_c(Ravelin::Vector3d(c.x+e.x,0,0),Ravelin::Vector3d(-1,0,0));
+  // west
+  planes[1]=plane_c(Ravelin::Vector3d(c.x-e.x,0,0),Ravelin::Vector3d(1,0,0));
+  // north
+  planes[2]=plane_c(Ravelin::Vector3d(0,c.y+e.y,0),Ravelin::Vector3d(0,-1,0));
+  // south
+  planes[3]=plane_c(Ravelin::Vector3d(0,c.y-e.y,0),Ravelin::Vector3d(0,1,0));
+  // up
+  planes[4]=plane_c(Ravelin::Vector3d(0,0,c.z+e.z),Ravelin::Vector3d(0,0,-1));
+  // down
+  planes[5]=plane_c(Ravelin::Vector3d(0,0,c.z-e.z),Ravelin::Vector3d(0,0,1));
+
+}
+
+//-----------------------------------------------------------------------------
+void space_c::make_maze( void ) {
 
   const int SEED = 1;
   srand( SEED );
@@ -34,7 +75,7 @@ void space_c::Load(gazebo::physics::ModelPtr _model, sdf::ElementPtr _sdf) {
  
   const double MAX_DIM = 5.0;
 
-  const int OBSTACLES = 50;
+  const int OBSTACLES = 100;
 
   boost::shared_ptr <sdf::Element> obstacle( new sdf::Element() );
   obssdf.root->InsertElement( obstacle );
@@ -55,18 +96,18 @@ void space_c::Load(gazebo::physics::ModelPtr _model, sdf::ElementPtr _sdf) {
     ssname << "obstacle_" << i;
 
     double x, y, z;
-    x = ((2.0 * (double)rand() / (double)RAND_MAX) - 1.0) * EXTENS_X;
-    y = ((2.0 * (double)rand() / (double)RAND_MAX) - 1.0) * EXTENS_Y;
-    z = ((2.0 * (double)rand() / (double)RAND_MAX) - 1.0) * EXTENS_Z;
+    x = ((2.0 * (double) rand() / RAND_MAX) - 1.0) * EXTENS_X;
+    y = ((2.0 * (double) rand() / RAND_MAX) - 1.0) * EXTENS_Y;
+    z = ((2.0 * (double) rand() / RAND_MAX) - 1.0) * EXTENS_Z;
 
     sspose.str("");
     sspose.clear();
     sspose << x << " " << y << " " << z << " 0 0 0";
 
     double l, w, h;
-    l = ((double)rand() / (double)RAND_MAX) * MAX_DIM;
-    w = ((double)rand() / (double)RAND_MAX) * MAX_DIM;
-    h = ((double)rand() / (double)RAND_MAX) * MAX_DIM;
+    l = (double)rand() / RAND_MAX * MAX_DIM;
+    w = (double)rand() / RAND_MAX * MAX_DIM;
+    h = (double)rand() / RAND_MAX * MAX_DIM;
 
     ssdims.str("");
     ssdims.clear();
@@ -173,25 +214,45 @@ void space_c::Load(gazebo::physics::ModelPtr _model, sdf::ElementPtr _sdf) {
 
     //std::string s = obstacle->ToString( std::string("") );
     //std::cout <<i s;
-
   }
-  obssdf.Write("test.sdf");
-  world->InsertModelSDF( obssdf );
+ 
+  obssdf.Write("maze.sdf");
 
+  std::ifstream infile( "maze.sdf" );
+  std::string str;
+  
+  int line = 0;
+  int lines = 0;
 
+  if( infile.is_open() ) {
+    while( getline( infile, str ) ) {
+      lines++;
+    }
+    infile.close();
+  }
+
+  std::ofstream outfile( "models/maze/model.sdf" );
+  std::ifstream infile2( "maze.sdf" );
+  if( infile2.is_open() ) {
+    while( getline( infile2, str ) ) {
+      line++;
+      if( line == 1 ) {
+        outfile << "<?xml version=\"1.0\" ?>\n<sdf version=\"1.4\">\n";
+      } else if( line == lines ) {
+        outfile << "</sdf>\n";
+      } else {
+        outfile << str << std::endl;
+      }
+    }
+    outfile.close();
+    infile.close();
+  }
 }
-/*
+
 //-----------------------------------------------------------------------------
-void ship_c::Update( ) {
-
+int main( void ) {
+  space_c::make_maze();
 }
-*/
-//-----------------------------------------------------------------------------
-/*
-void ship_c::Reset( ) {
-
-}
-*/
 
 //-----------------------------------------------------------------------------
 

@@ -2,34 +2,48 @@ cmake_minimum_required( VERSION 2.8 )
 
 project( tas_gazebo_holonomic_ship )
 
-
 #add_library( space_controller SHARED space.cpp ${TAS_HEADERS} ${TAS_SOURCES} )
 #target_link_libraries( space_controller ${GAZEBO_LIBRARIES} ${TAS_LIBRARIES} )
 
-set( GAZEBO_SHIP_HEADERS
+set( SHIP_HEADERS
+    ${TAS_HEADERS}
+    ${CMAKE_CURRENT_SOURCE_DIR}/constants.h
     ${CMAKE_CURRENT_SOURCE_DIR}/utilities.h
     ${CMAKE_CURRENT_SOURCE_DIR}/state.h
     ${CMAKE_CURRENT_SOURCE_DIR}/command.h
     ${CMAKE_CURRENT_SOURCE_DIR}/aabb.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/goal.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/control_space.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/integrator.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/state_propagator.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/directed_control_sampler.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/plane.h 
+    ${CMAKE_CURRENT_SOURCE_DIR}/space.h
 )
 
-set( GAZEBO_SHIP_SOURCES )
+set( SHIP_SOURCES
+    ${TAS_SOURCES} 
+)
 
-set( GAZEBO_SHIP_INCLUDE_DIRS
+set( SHIP_INCLUDE_DIRS
     ${CMAKE_CURRENT_SOURCE_DIR}
 )
 
-set( GAZEBO_SHIP_LIBRARIES
+set( SHIP_LIBRARIES
+    ${GAZEBO_LIBRARIES}
+    ${RAVELIN_LIBRARIES}
+    ${TAS_LIBRARIES}
+    libboost_system.so
     libRavelin.so
 )
 
-include_directories( ${GAZEBO_SHIP_INCLUDE_DIRS} )
+include_directories( ${SHIP_INCLUDE_DIRS} )
 
-add_executable( maze space.cpp ${TAS_HEADERS} ${TAS_SOURCES} ${GAZEBO_SHIP_HEADERS} ${GAZEBO_SHIP_SOURCES} )
-target_link_libraries( maze ${GAZEBO_LIBRARIES} ${TAS_LIBRARIES} ${GAZEBO_SHIP_LIBRARIES} )
+add_executable( maze space.cpp ${SHIP_HEADERS} ${SHIP_SOURCES} )
+target_link_libraries( maze ${SHIP_LIBRARIES} )
 
-add_library( ship_controller SHARED ship.cpp ${TAS_HEADERS} ${TAS_SOURCES} ${GAZEBO_SHIP_HEADERS} ${GAZEBO_SHIP_SOURCES} )
-target_link_libraries( ship_controller ${GAZEBO_LIBRARIES} ${RAVELIN_LIBRARIES} ${TAS_LIBRARIES} ${GAZEBO_SHIP_LIBRARIES} )
+add_library( ship_controller SHARED ship.cpp space.cpp ${SHIP_HEADERS} ${SHIP_SOURCES} )
+target_link_libraries( ship_controller ${SHIP_LIBRARIES} )
 
 # Copy data files
 file( COPY ${CMAKE_CURRENT_SOURCE_DIR}/models DESTINATION ${CMAKE_CURRENT_BINARY_DIR} )

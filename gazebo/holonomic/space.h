@@ -3,8 +3,13 @@
 
 //-----------------------------------------------------------------------------
 
+#include "plane.h"
+#include "aabb.h"
+
+//-----------------------------------------------------------------------------
+
 #include <stdlib.h>
-#include <ostream>
+#include <iostream>
 #include <fstream>
 #include <vector>
 #include <string>
@@ -18,36 +23,35 @@
 #include <gazebo/common/Events.hh>
 #include <gazebo/physics/physics.hh>
 
+#include <boost/shared_ptr.hpp>
+
 //-----------------------------------------------------------------------------
 
-class space_c : public gazebo::ModelPlugin {
-protected:
-
-  //gazebo::event::ConnectionPtr updateConnection;
-
-  gazebo::physics::ModelPtr model;
-  gazebo::physics::WorldPtr world;
-  //gazebo::physics::LinkPtr body;
-
-  //double time, dtime, time_start, time_last;
-
+class space_c {
 public:
+  // the gazebo reference to the world in which the ship is located
+  gazebo::physics::WorldPtr world;
+
+  plane_list_t planes;
+
+  aabb_c bounds;
+
   //---------------------------------------------------------------------------
   // Constructors
   //---------------------------------------------------------------------------
   space_c( void );
+  space_c( gazebo::physics::WorldPtr world );
     
   //---------------------------------------------------------------------------
   // Destructor
   //---------------------------------------------------------------------------
   virtual ~space_c( void );
 
-protected:
   //---------------------------------------------------------------------------
-  // Gazebo ModelPlugin Interface
+  void read( void );
+
   //---------------------------------------------------------------------------
-  virtual void Load( gazebo::physics::ModelPtr _model, sdf::ElementPtr _sdf );
-  //virtual void Update( );
+  static void make_maze( void );
 };
 
 //-----------------------------------------------------------------------------
