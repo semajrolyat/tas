@@ -145,6 +145,7 @@ public:
     return 6;
   }
 
+  //---------------------------------------------------------------------------
   std::vector<double> as_vector( void ) {
     std::vector<double> v( size() );
     for( unsigned i = 0; i < size(); i++ ) {

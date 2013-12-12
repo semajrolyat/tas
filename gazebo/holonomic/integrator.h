@@ -3,6 +3,7 @@
 
 #include "command.h"
 #include "state.h"
+#include "utilities.h"
 
 #include <valarray>
 
@@ -32,6 +33,15 @@ public:
 
   //---------------------------------------------------------------------------
   void propagate( const ompl::base::State *start, const ompl::control::Control *control, const double duration, ompl::base::State *result, ship_c* ship ) const {
+    std::vector<double> dstate;
+    space->copyState( result, start );
+
+    ship_state_c q( space, start );
+    ship_command_c u( control );
+
+    ode( result, control, dstate, ship );
+    ode.update( result, time_step * dstate );
+/*
     std::valarray<double> dstate;
     space->copyState( result, start );
 
@@ -40,6 +50,7 @@ public:
 
     ode( result, control, dstate, ship );
     ode.update( result, time_step * dstate );
+*/
   }
 
   //---------------------------------------------------------------------------

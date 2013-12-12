@@ -58,9 +58,10 @@ public:
   static bool inside( const gazebo::math::Vector3& point, const aabb_c& box ) {
     gazebo::math::Vector3 p = point - box.center;
 
-    return fabs( p.x ) <= box.extens.x &&
-           fabs( p.y ) <= box.extens.y &&
-           fabs( p.z ) <= box.extens.z;
+    const double EPSILON = 1e-5;
+    return fabs( p.x ) <= box.extens.x + EPSILON &&
+           fabs( p.y ) <= box.extens.y + EPSILON &&
+           fabs( p.z ) <= box.extens.z + EPSILON;
   }
   //---------------------------------------------------------------------------
   //friend std::ostream& operator<<(std::ostream& ostr, const aabb_c& bb);

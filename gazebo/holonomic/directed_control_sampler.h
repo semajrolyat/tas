@@ -89,7 +89,7 @@ public:
     to_state( statespace, q0, dest );
 
     // integrate for the desired number of steps
-    std::valarray<double> deltaq;
+    std::vector<double> deltaq;
     for( unsigned k = 0; k < NUM_STEPS; k++ ) {
       // get the ODE
       (*ship)(dest, control, deltaq, ship );

@@ -36,6 +36,22 @@ std::ostream& operator<<(std::ostream& ostr, const std::vector<unsigned>& v) {
 }
 
 //-----------------------------------------------------------------------------
+std::vector<double> operator*( const double& c, const std::vector<double>& v ) {
+  std::vector<double> x( v.size() );
+  for( unsigned i = 0; i < v.size(); i++ )
+    x = c * v;
+  return x;
+}
+
+//-----------------------------------------------------------------------------
+std::vector<double> operator*( const std::vector<double>& v, const double& c ) {
+  std::vector<double> x( v.size() );
+  for( unsigned i = 0; i < v.size(); i++ )
+    x = c * v;
+  return x;
+}
+
+//-----------------------------------------------------------------------------
 /// Determine the sign of a double
 double sgn( const double& x ) {
   if (x > 0.0)

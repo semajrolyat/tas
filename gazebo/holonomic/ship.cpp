@@ -182,12 +182,12 @@ void ship_c::init( void ) {
   //write_command_audit_header( audit_file_control_values );
 */
   std::cerr << "Ship Controller Plugin Started" << std::endl;
-
+/*
   // initial test state
   gazebo::math::Vector3 p = gazebo::math::Vector3( 0.0, 0.0, 4.0 );  // for ompl case
   gazebo::math::Quaternion r = gazebo::math::Quaternion(0.0, 0.0, 0.0);
   model->SetWorldPose( gazebo::math::Pose( p, r ) );
-
+*/
   stopped = false;
 
   time_start = world->GetSimTime().Double();
@@ -204,7 +204,18 @@ void ship_c::sense( void ) {
 bool ship_c::plan( void ) {
 
   static bool has_planned = false;
+///*
+  ship_state_c predator( gazebo::math::Vector3(0,0,25), gazebo::math::Quaternion(1,0,0,0), gazebo::math::Vector3(0,0,0), gazebo::math::Vector3(0,0,0) );
+  ship_state_c prey = state();
 
+  std::vector<double> pred_state = predator.as_vector();
+  std::vector<double> prey_state = prey.as_vector();
+  std::vector<double> prey_u;
+  prey_command( pred_state, prey_state, prey_u );
+
+  command_current = ship_command_c( prey_u );
+//*/
+/*
   if( !has_planned ) {
     if( !plan_rrt() ) return false;
     has_planned = true;
@@ -232,20 +243,7 @@ bool ship_c::plan( void ) {
   if( desired_state_duration >= PLANNER_STEP_SIZE ) {
     update_desired_state( );
   }
-
-  ship_state_c q = state();
-  std::vector<double> pred_q( ship_state_c::size() );
-  std::vector<double> prey_q( ship_state_c::size() );
-  std::vector<double> prey_u( ship_command_c::size() );
-  for(unsigned i = 0; i < ship_state_c::size(); i++ ) {
-    prey_q[i] = q.value(i);
-  }
-  for(unsigned i = 0; i < ship_state_c::size(); i++ ) {
-    pred_q[i] = 0;
-  }
-  pred_q[6] = 1.0;
-  
-  prey_command( pred_q, prey_q, prey_u );
+*/
 
   return true;
 }
@@ -340,6 +338,39 @@ void ship_c::update_desired_state( void ) {
 }
 
 //------------------------------------------------------------------------------
+void ship_c::compute_desired_state( ship_state_c& result ) {
+/*
+  // interpolation required for the test case
+  result = interpolate_linear( desired_state_0, desired_state_1, PLANNER_STEP_SIZE, ++state_step );
+*/
+///*
+  // the command has already been computed as current_command
+
+  double DT = dtime;
+
+  // use forward dynamics to compute the change in state applying the command causes
+  std::vector<double> u = command_current.as_vector();
+  std::vector<double> q = state().as_vector();
+  std::vector<double> dq;
+  ode( q, u, dq );
+
+  // integrate the change in state with the current state to get the desired state
+  for( unsigned i = 0; i < ship_state_c::size(); i++ ) {
+    q[i] += dq[i] * DT;
+  }
+  // return the desired state
+
+  result = ship_state_c( q );
+
+  std::pair<double,ship_command_c> up = std::make_pair( DT, command_current );
+  write_audit_datum( audit_file_planned_commands, up );
+  std::pair<double,ship_state_c> qp = std::make_pair( time, result );
+  write_audit_datum( audit_file_planned_states, qp );
+
+//*/
+}
+
+//------------------------------------------------------------------------------
 ship_state_c ship_c::interpolate_linear( const ship_state_c& q0, const ship_state_c& qf, const double& deltat, const int& step ) const {
   ship_state_c _qf( qf );
   ship_state_c _q0( q0 );
@@ -352,8 +383,11 @@ ship_state_c ship_c::interpolate_linear( const ship_state_c& q0, const ship_stat
 
 //-----------------------------------------------------------------------------
 ship_command_c ship_c::compute_feedback( void ) {
-  ship_state_c qx = interpolate_linear( desired_state_0, desired_state_1, PLANNER_STEP_SIZE, ++state_step );
+  //ship_state_c qx = interpolate_linear( desired_state_0, desired_state_1, PLANNER_STEP_SIZE, ++state_step );
   //std::cout << "qx:" << qx << std::endl; 
+
+  ship_state_c qx;
+  compute_desired_state( qx );
 
   // normalize qx's quaternion
   Quatd ex(qx.value(3), qx.value(4), qx.value(5), qx.value(6));
@@ -697,13 +731,22 @@ bool ship_c::is_state_valid(const ompl::control::SpaceInformation *si, const omp
 
 //-----------------------------------------------------------------------------
 /// Ship ordinary differential equation (ODE) (Called by state propagator)
-void ship_c::operator()( const ompl::base::State* ompl_q, const ompl::control::Control* ompl_u, std::valarray<double>& dq, ship_c* ship ) const {
-  static std::vector<double> q;
+void ship_c::operator()( const ompl::base::State* ompl_q, const ompl::control::Control* ompl_u, std::vector<double>& dq, const ship_c* ship ) const {
 
-  const double *u = ompl_u->as<ompl::control::RealVectorControlSpace::ControlType>()->values;
-
-  q.resize( ship_state_c::size() );
+  std::vector<double> q( ship_state_c::size() );
   from_state( statespace, ompl_q, q );
+
+  std::vector<double> u( ship_command_c::size() );
+  const double *_u = ompl_u->as<ompl::control::RealVectorControlSpace::ControlType>()->values;
+  for( unsigned i = 0; i < ship_command_c::size(); i++ ) {
+    u[i] = _u[i];
+  }
+
+  ship->ode( q, u, dq );
+}
+
+//-----------------------------------------------------------------------------
+void ship_c::ode( const std::vector<double>& q, const std::vector<double>& u, std::vector<double>& dq ) const {
 
   dq.resize( ship_state_c::size() );
 
@@ -731,7 +774,7 @@ void ship_c::operator()( const ompl::base::State* ompl_q, const ompl::control::C
   SForced force(u[0], u[1], u[2], u[3], u[4], u[5], P);
 
   // transform the inertia to frame P
-  SpatialRBInertiad inertial = ship->_inertial;
+  SpatialRBInertiad inertial = _inertial;
   inertial.pose = Pi;
   SpatialRBInertiad J = Pose3d::transform(P, inertial);
 
@@ -761,6 +804,7 @@ void ship_c::operator()( const ompl::base::State* ompl_q, const ompl::control::C
   dq[10] = alpha[0];
   dq[11] = alpha[1];
   dq[12] = alpha[2];
+
 }
 
 //-----------------------------------------------------------------------------
@@ -827,7 +871,7 @@ void ship_c::inv_dyn( const std::vector<double>& q, const std::vector<double>& q
 
 //-----------------------------------------------------------------------------
 /// Update the state of the ship after integration (Called by state propagator)
-void ship_c::update( ompl::base::State* ompl_q, const std::valarray<double>& dq ) const {
+void ship_c::update( ompl::base::State* ompl_q, const std::vector<double>& dq ) const {
   static std::vector<double> q;
 
   q.resize( ship_state_c::size() );
@@ -871,7 +915,15 @@ void ship_c::test_intersection_detection( void ) {
 //------------------------------------------------------------------------------
 // computes commands (forces) for if the ship is a prey
 void ship_c::prey_command( const std::vector<double>& pred_state, const std::vector<double>& prey_state, std::vector<double>& prey_u ) {
-  const double FLEE_DIST = 1.0;  // likely needs to be changed
+
+  // open parameters
+  const double FLEE_DIST = 1.0;
+
+  const double MAX_FORCE = 1e-5;
+  const double MAX_TORQUE = 1e-5;
+
+  const double WEIGHT_PREDATOR_FORCE = 1.0;
+  const double WEIGHT_COMBINED_FORCE = 1.0;
 
   // get the predator and prey positions
   Vector3d pred_x( pred_state[0], pred_state[1], pred_state[2] );
@@ -883,6 +935,7 @@ void ship_c::prey_command( const std::vector<double>& pred_state, const std::vec
 
   // case 1: (semi) random walk
   if( dist > FLEE_DIST ) {
+    //std::cout << "pred:" << pred_x << ", prey:" << prey_x << std::endl;
 
     // determine a desired position/orientation and velocities
     // NOTE: desired orientation should likely point toward intended 
@@ -893,11 +946,10 @@ void ship_c::prey_command( const std::vector<double>& pred_state, const std::vec
 
     // compute the seed for the random number generator
     long TSCALE = 1000;
-    long seed = (long)(dtime * time) % TSCALE;
+    long seed = (long)(time / dtime) / TSCALE;
+    //std::cout << "seed:" << seed << ", dtime:" << dtime << ", time:" << time  << std::endl;
 
     // setup the random number generator
-    //GSL_RNG_SEED = tfactor; 
-    //gsl_rng_env_setup();
     gsl_rng * r =  gsl_rng_alloc( gsl_rng_default );
     if( r == NULL ) std::cout << "failed to initialize rng\n";
     gsl_rng_set( r, seed );
@@ -907,16 +959,16 @@ void ship_c::prey_command( const std::vector<double>& pred_state, const std::vec
     const double MU = GAUSSIAN_MEAN;
     std::vector<double> u( ship_command_c::size() );
     for( unsigned i = 0; i < ship_command_c::size(); i++ )
-      u[i] = gsl_ran_gaussian( r, SIGMA ) + MU;
+      if( i < 3 )
+        u[i] = gsl_ran_gaussian( r, SIGMA ) + MU;
+      else
+        u[i] = 0;  // Note: not adding torque yet for debugging.  Also, collisions with world are adding rotation
 
     // free the random number generator
     gsl_rng_free( r );
  
     ship_command_c cmd( u );
     
-    // open parameters
-    const double MAX_FORCE = 1.0;
-    const double MAX_TORQUE = 1.0;
 
     // NOTE: make sure command is limited to max force/torque
     // if the force exceeds the maximum force, limit the force to the max
@@ -930,46 +982,26 @@ void ship_c::prey_command( const std::vector<double>& pred_state, const std::vec
       cmd.torque( tau );
     }
 
+    Ravelin::Vector3d bos_force = boundary_force(Vector3d(prey_state[0],prey_state[1],prey_state[2]),Vector3d(prey_state[7],prey_state[8],prey_state[9]));
+    Ravelin::Vector3d f( cmd.force().x, cmd.force().y, cmd.force().z );
+    f += bos_force;
+    cmd.force( f );
+
     prey_u = cmd.as_vector();
 
   } else {
-
     // case 2: flee behavior from predator
-
 
     // get the vector from the predator to the prey and normalize it
     pp_vec /= dist;
-
-    const double WEIGHT_PREDATOR_FORCE = 1.0;
-    const double WEIGHT_BOUNDARY_FORCE = 1.0;
-    const double WEIGHT_COMBINED_FORCE = 1.0;
 
     // treat the predator to prey (p2p) vector as a repulsive force (i.e. pushing the prey)
     // scale the p2p force
     double mag_predator_force = repulsive_force( dist ) * WEIGHT_PREDATOR_FORCE;
     Ravelin::Vector3d p2p_force = pp_vec * mag_predator_force; 
 
-    // compute the repulsive force from the boundary of space (bos)
-    Ravelin::Vector3d prey_pos( prey_state[0], prey_state[1], prey_state[2] );
-    Ravelin::Vector3d prey_vel( prey_state[7], prey_state[8], prey_state[9] );
-    Ravelin::Vector3d bos_force(0,0,0);
-    for( unsigned i = 0; i < space.planes.size(); i++ ) {
-      double t;
-      Ravelin::Vector3d intersect;
-      if(space.planes[i].ray_intersection( prey_pos, prey_vel, t, intersect )) {
-        // Note: this will always give three planes, so test whether the 
-        // intersection point lies inside the bounding box.
-        if( aabb_c::inside( intersect, space.bounds ) ) {
-          Ravelin::Vector3d v = intersect - prey_pos;
-          double dist_to_plane = v.norm();
-          double repulsion = repulsive_force( dist_to_plane );
-          bos_force += space.planes[i].normal * repulsion;
-        }
-      }
-    }
-    // scale the bos force
-    bos_force *= WEIGHT_BOUNDARY_FORCE;
-    
+    Ravelin::Vector3d bos_force = boundary_force(Vector3d(prey_state[0],prey_state[1],prey_state[2]),Vector3d(prey_state[7],prey_state[8],prey_state[9]));
+
     // add the two vectors together
     Ravelin::Vector3d force = p2p_force + bos_force;
 
@@ -993,9 +1025,37 @@ void ship_c::prey_command( const std::vector<double>& pred_state, const std::vec
 }
 
 //------------------------------------------------------------------------------
+Ravelin::Vector3d ship_c::boundary_force( const Ravelin::Vector3d& pos, const Ravelin::Vector3d& vel ) {
+  const double WEIGHT_BOUNDARY_FORCE = 1.0;
+
+  // compute the repulsive force from the boundary of space (bos)
+  Ravelin::Vector3d bos_force(0,0,0);
+  for( unsigned i = 0; i < space.planes.size(); i++ ) {
+    double t;
+    Ravelin::Vector3d intersect;
+    if(space.planes[i].ray_intersection( pos, vel, t, intersect )) {
+      // Note: this will almost always give three planes, so test whether the 
+      // intersection point lies inside the bounding box.
+
+      //Question Evan: Is there frame dependency in the rotation of the velocity vector?
+      if( aabb_c::inside( intersect, space.bounds ) ) {
+        Ravelin::Vector3d v = intersect - pos;
+        double dist_to_plane = v.norm();
+        double repulsion = repulsive_force( dist_to_plane );
+        bos_force += space.planes[i].normal * repulsion;
+        std::cout << "dist: " << dist_to_plane << ", f:" << bos_force << std::endl;
+      }
+    }
+  }
+  // scale the bos force
+  bos_force *= WEIGHT_BOUNDARY_FORCE;
+  return bos_force; 
+}
+
+//------------------------------------------------------------------------------
 // computes a repulsive force for a given distance
 double ship_c::repulsive_force( double dist ) {
-  const double ALPHA = 1.0;  // this constant will likely need to be changed
+  const double ALPHA = 1e1;  // this constant will likely need to be changed
 
   // logarithmic function will produce negative values for inputs in [0,1] and
   // positive values for inputs > 1

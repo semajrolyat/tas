@@ -123,6 +123,8 @@ public:
   // the current and next states when interpolating
   ship_state_c desired_state_0, desired_state_1;
 
+  ship_state_c desired_state;
+
   // audit file names
   std::string audit_file_planned_commands;
   std::string audit_file_planned_states;
@@ -227,8 +229,14 @@ protected:
   // updates the desired state for feedback control
   void update_desired_state( void );
 
+  // compute the desired state based on the current command and current state
+  void compute_desired_state( ship_state_c& result );
+
   // interpolates state given two states
   ship_state_c interpolate_linear( const ship_state_c& q0, const ship_state_c& qf, const double& deltat, const int& step ) const; 
+
+  // compute any force(field) that the boundary contributes to repel collision
+  Ravelin::Vector3d boundary_force( const Ravelin::Vector3d& pos, const Ravelin::Vector3d& vel );
 
 public:
   // compute the bounding box for the ship given a state
@@ -238,13 +246,15 @@ public:
   aabb_c aabb( void );
 
   // query whether a bounding box intersects another bounding box
-  bool intersects_any_obstacle( const aabb_c& mybb, aabb_c& obstale );
+  bool intersects_any_obstacle( const aabb_c& mybb, aabb_c& obstacle );
 
   // query whether the ship intersects the world bounding box
   bool intersects_world_bounds( const aabb_c& mybb );
 
   // compute the inverse dynamics for the ship 
   void inv_dyn(const std::vector<double>& q, const std::vector<double>& qdot_des, std::vector<double>& u) const;
+
+  void ode( const std::vector<double>& q, const std::vector<double>& u, std::vector<double>& dq ) const;
 
   //---------------------------------------------------------------------------
   // Testing Method
@@ -266,10 +276,10 @@ public:
   ompl::control::DirectedControlSamplerPtr allocate_directed_control_sampler( const ompl::control::SpaceInformation* si );
 
   // ode.  called by the eular_integrator_c in integrator.h
-  void operator()( const ompl::base::State* state, const ompl::control::Control* control, std::valarray<double>& dstate, ship_c* ship ) const;
+  void operator()( const ompl::base::State* state, const ompl::control::Control* control, std::vector<double>& dstate, const ship_c* ship ) const;
 
   // post integration update method
-  void update( ompl::base::State* state, const std::valarray<double>& dstate ) const;
+  void update( ompl::base::State* state, const std::vector<double>& dstate ) const;
 
 };
 

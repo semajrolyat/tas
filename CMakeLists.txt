@@ -14,6 +14,7 @@ find_package( Pthread REQUIRED )
 find_package( Moby REQUIRED )
 find_package( OMPL REQUIRED )
 find_package( GSL REQUIRED )
+find_package( Boost REQUIRED)
 
 set( TAS_HEADERS
     ${CMAKE_CURRENT_SOURCE_DIR}/include/tas/tas.h
@@ -33,6 +34,7 @@ set( TAS_SOURCES )
 
 set( TAS_INCLUDE_DIRS
     ${MOBY_INCLUDE_DIR}
+    ${BOOST_INCLUDE_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 
@@ -43,6 +45,7 @@ set( TAS_LIBRARIES
     ${MOBY_LIBRARIES}
     ${OMPL_LIBRARIES}
     ${GSL_LIBRARIES}
+    ${BOOST_LIBRARIES}
 )
 
 include_directories( ${TAS_INCLUDE_DIRS} )
