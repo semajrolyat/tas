@@ -748,6 +748,8 @@ void ship_c::operator()( const ompl::base::State* ompl_q, const ompl::control::C
 //-----------------------------------------------------------------------------
 void ship_c::ode( const std::vector<double>& q, const std::vector<double>& u, std::vector<double>& dq ) const {
 
+  const double DRAG = 0.1;
+
   dq.resize( ship_state_c::size() );
 
   // - Newton-Euler -
@@ -770,7 +772,15 @@ void ship_c::ode( const std::vector<double>& q, const std::vector<double>& u, st
   SVelocityd vel(q[10], q[11], q[12], q[7], q[8], q[9], P);
   Quatd edot = Quatd::deriv(e, omega);
 
-  // get the force
+  // setup the drag force
+  Vector3d lv = vel.get_linear();
+  double lv_sq = lv.norm_sq();
+  if (lv_sq > std::numeric_limits<double>::epsilon())
+    lv /= std::sqrt(lv_sq);
+  SForced drag_force(P);
+  drag_force.set_force(-lv * lv_sq);
+
+  // get the external force
   SForced force(u[0], u[1], u[2], u[3], u[4], u[5], P);
 
   // transform the inertia to frame P
@@ -779,7 +789,7 @@ void ship_c::ode( const std::vector<double>& q, const std::vector<double>& u, st
   SpatialRBInertiad J = Pose3d::transform(P, inertial);
 
   // get the acceleration
-  SAcceld acc = J.inverse_mult(force - vel.cross(J * vel));
+  SAcceld acc = J.inverse_mult(force + drag_force - vel.cross(J * vel));
   Vector3d xdd = acc.get_linear();
   Vector3d alpha = acc.get_angular();
 
