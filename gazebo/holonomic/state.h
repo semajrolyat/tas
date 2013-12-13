@@ -239,6 +239,270 @@ ship_state_c operator/( ship_state_c& a, const double& c ) {
   return state;
 }
 
+/// Class encapsulating the state of the predator and the prey
+/**
+ * The first 13 dimensions are the predator state. The next 13 dimensions are
+ * the prey state.
+ */ 
+class pp_state_c {
+  //---------------------------------------------------------------------------
+  // Constructors
+  //---------------------------------------------------------------------------
+public:
+  //---------------------------------------------------------------------------
+  pp_state_c( void ) {
+    _values.resize( size() );
+    for( unsigned i = 0; i < size(); i++ )
+      _values[i] = 0.0;
+    _values[6] = _values[19] = 1.0; // Normalize w coordinate
+  }
+
+  //---------------------------------------------------------------------------
+  pp_state_c( const pp_state_c& state ) { 
+    _values.resize( size() );
+    for( unsigned i = 0; i < size(); i++ )
+      _values[i] = state._values[i];
+  }
+
+  //---------------------------------------------------------------------------
+  pp_state_c( std::vector<double>& x ) { 
+    assert( x.size() == size() );
+    _values.resize( size() );
+    for( unsigned i = 0; i < size(); i++ )
+      _values[i] = x[i];
+  }
+
+  //---------------------------------------------------------------------------
+  pp_state_c( std::valarray<double>& x ) { 
+    assert( x.size() == size() );
+    _values.resize( size() );
+    for( unsigned i = 0; i < size(); i++ )
+      _values[i] = x[i];
+  }
+
+  //---------------------------------------------------------------------------
+  // this is disabled b/c it would take too many arguments
+  /*
+  pp_state_c( gazebo::math::Vector3 x, gazebo::math::Quaternion theta, gazebo::math::Vector3 dx, gazebo::math::Vector3 dtheta ) { 
+    _values.resize( size() );
+    position( x );
+    rotation( theta );
+    dposition( dx );
+    drotation( dtheta );
+  }
+  */
+
+  //---------------------------------------------------------------------------
+  pp_state_c( const ompl::base::StateSpace* space, const ompl::base::State* x ) { 
+    //assert( x.size() == size() );
+
+    _values.resize( size() );
+    for( unsigned i = 0; i < size(); i++ )
+      _values[i] = *space->getValueAddressAtIndex(x, i);
+  }
+
+  //---------------------------------------------------------------------------
+  // Destructor
+  //---------------------------------------------------------------------------
+  virtual ~pp_state_c( void ) {}
+
+  //---------------------------------------------------------------------------
+  //
+  //---------------------------------------------------------------------------
+  void position_pred( const gazebo::math::Vector3& v ) {
+    _values[0] = v.x;
+    _values[1] = v.y;
+    _values[2] = v.z;
+  }
+
+  void position_prey( const gazebo::math::Vector3& v ) {
+    _values[13] = v.x;
+    _values[14] = v.y;
+    _values[15] = v.z;
+  }
+
+  //---------------------------------------------------------------------------
+  gazebo::math::Vector3 position_pred( void ) const {
+    return gazebo::math::Vector3( _values[0], _values[1], _values[2] );
+  }
+
+  gazebo::math::Vector3 position_prey( void ) const {
+    return gazebo::math::Vector3( _values[13], _values[14], _values[15] );
+  }
+
+  //---------------------------------------------------------------------------
+  void rotation_pred( const gazebo::math::Quaternion& q ) {
+    _values[3] = q.x;
+    _values[4] = q.y;
+    _values[5] = q.z;
+    _values[6] = q.w;
+  }
+
+  void rotation_prey( const gazebo::math::Quaternion& q ) {
+    _values[16] = q.x;
+    _values[17] = q.y;
+    _values[18] = q.z;
+    _values[19] = q.w;
+  }
+
+  //---------------------------------------------------------------------------
+  gazebo::math::Quaternion rotation_pred( void ) const {
+    return gazebo::math::Quaternion( _values[6], _values[3], _values[4], _values[5] );
+  }
+
+  gazebo::math::Quaternion rotation_prey( void ) const {
+    return gazebo::math::Quaternion( _values[19], _values[16], _values[17], _values[18] );
+  }
+
+  //---------------------------------------------------------------------------
+  void dposition_pred( const gazebo::math::Vector3& v ) {
+    _values[7] = v.x;
+    _values[8] = v.y;
+    _values[9] = v.z;
+  }
+
+  void dposition_prey( const gazebo::math::Vector3& v ) {
+    _values[20] = v.x;
+    _values[21] = v.y;
+    _values[22] = v.z;
+  }
+
+  //---------------------------------------------------------------------------
+  gazebo::math::Vector3 dposition_pred( void ) const {
+    return gazebo::math::Vector3( _values[7], _values[8], _values[9] );
+  }
+
+  gazebo::math::Vector3 dposition_prey( void ) const {
+    return gazebo::math::Vector3( _values[20], _values[21], _values[22] );
+  }
+
+  //---------------------------------------------------------------------------
+  void drotation_pred( const gazebo::math::Vector3& v ) {
+    _values[10] = v.x;
+    _values[11] = v.y;
+    _values[12] = v.z;
+  }
+
+  void drotation_prey( const gazebo::math::Vector3& v ) {
+    _values[23] = v.x;
+    _values[24] = v.y;
+    _values[25] = v.z;
+  }
+
+
+  //---------------------------------------------------------------------------
+  gazebo::math::Vector3 drotation_pred( void ) const {
+    return gazebo::math::Vector3( _values[10], _values[11], _values[12] );
+  }
+
+  gazebo::math::Vector3 drotation_prey( void ) const {
+    return gazebo::math::Vector3( _values[23], _values[24], _values[25] );
+  }
+
+  //---------------------------------------------------------------------------
+  double& operator()( const unsigned& i ) {
+    assert( i < size() );
+    return _values[i];
+  }
+
+  //---------------------------------------------------------------------------
+  double value( const unsigned& i ) const {
+    assert( i < size() );
+    return _values[i];
+  }
+
+  //---------------------------------------------------------------------------
+  static unsigned size( void ) {
+    return 13*2;
+  }
+
+  //---------------------------------------------------------------------------
+  std::vector<double> as_vector( void ) {
+    std::vector<double> v( size() );
+    for( unsigned i = 0; i < size(); i++ ) {
+      v[i] = _values[i];
+    }
+    return v;
+  }
+
+  //---------------------------------------------------------------------------
+  // Member Variables
+  //---------------------------------------------------------------------------
+private:
+  std::vector<double> _values;
+ 
+  //---------------------------------------------------------------------------
+  // Output
+  //---------------------------------------------------------------------------
+public:
+  static std::string header( void ) {
+    return "t, pred pos[x, y, z], pred rot[x, y, z, w], pred dpos[x, y, z], pred drot[x, y, z], prey pos[x, y, z], prey rot[x, y, z, w], prey dpos[x, y, z], prey drot[x, y, z]";
+  }
+
+  friend std::ostream& operator<<(std::ostream& ostr, const pp_state_c& state);
+  friend std::ostream& operator<<(std::ostream& ostr, const std::pair<double,pp_state_c>& state);
+};
+
+//-----------------------------------------------------------------------------
+std::ostream& operator<<(std::ostream& ostr, const pp_state_c& state) {
+  return ostr << "predator: " << state.value(0) << "," << state.value(1) << "," << state.value(2) << "," 
+              << state.value(3) << "," << state.value(4) << "," << state.value(5) << "," << state.value(6) << "," 
+              << state.value(7) << "," << state.value(8) << "," << state.value(9) << "," 
+              << state.value(10) << "," << state.value(11) << "," << state.value(12) << "prey: " << state.value(13) << "," << state.value(14) << "," << state.value(15) << "," << state.value(16) << "," << state.value(17) << "," << state.value(18) << "," << state.value(19) << ","  << state.value(20) << "," << state.value(21) << "," << state.value(22) << "," << state.value(23) << "," << state.value(24) << "," << state.value(25);
+}
+
+//-----------------------------------------------------------------------------
+std::ostream& operator<<(std::ostream& ostr, const std::pair<double,pp_state_c>& state) {
+  return ostr << "t=" << state.first << " " << state.second;
+}
+
+//-----------------------------------------------------------------------------
+// Note for the below arithmetic operations, need to normalize the quaternion after the computation
+pp_state_c operator+( pp_state_c& a, pp_state_c& b ) {
+
+  pp_state_c state( a );
+  for( unsigned i = 0; i < state.size(); i++ )
+    state(i) += b(i);
+  return state;
+}
+
+//-----------------------------------------------------------------------------
+pp_state_c operator-( pp_state_c& a, pp_state_c& b ) {
+
+  pp_state_c state( a );
+  for( unsigned i = 0; i < state.size(); i++ )
+    state(i) -= b(i);
+  return state;
+}
+
+//-----------------------------------------------------------------------------
+pp_state_c operator*( const double& c, pp_state_c& a ) {
+  pp_state_c state( a );
+  for( unsigned i = 0; i < state.size(); i++ )
+    state(i) *= c;
+  return state;
+}
+
+//-----------------------------------------------------------------------------
+pp_state_c operator*( pp_state_c& a, const double& c ) {
+  pp_state_c state( a );
+  for( unsigned i = 0; i < state.size(); i++ )
+    state(i) *= c;
+  return state;
+}
+
+//-----------------------------------------------------------------------------
+pp_state_c operator/( pp_state_c& a, const double& c ) {
+  const double EPSILON = 1e-16;
+  assert( fabs(c) > EPSILON );
+
+  pp_state_c state( a );
+  for( unsigned i = 0; i < state.size(); i++ )
+    state(i) /= c;
+  return state;
+}
+
+
 //------------------------------------------------------------------------------
 // Auditing 
 //------------------------------------------------------------------------------
