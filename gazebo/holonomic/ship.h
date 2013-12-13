@@ -215,7 +215,7 @@ protected:
   void stop( void );
 
   // computes commands (forces) if the ship is prey
-  void prey_command( const std::vector<double>& pred_state, const std::vector<double>& prey_state, std::vector<double>& prey_u );
+  static void prey_command( const std::vector<double>& pred_state, const std::vector<double>& prey_state, std::vector<double>& prey_u );
 
   // computes a repulsive force for a given distance
   double repulsive_force( double dist );
@@ -239,6 +239,9 @@ protected:
   Ravelin::Vector3d boundary_force( const Ravelin::Vector3d& pos, const Ravelin::Vector3d& vel );
 
 public:
+  // normalizes the quaternion components of the state
+  static void renormalize_state_quat(std::vector<double>& q);
+
   // compute the bounding box for the ship given a state
   aabb_c aabb( const std::vector<double>& q );
 
@@ -252,9 +255,9 @@ public:
   bool intersects_world_bounds( const aabb_c& mybb );
 
   // compute the inverse dynamics for the ship 
-  void inv_dyn(const std::vector<double>& q, const std::vector<double>& qdot_des, std::vector<double>& u) const;
+  static void inv_dyn(const std::vector<double>& q, const std::vector<double>& qdot_des, std::vector<double>& u) const;
 
-  void ode( const std::vector<double>& q, const std::vector<double>& u, std::vector<double>& dq ) const;
+  static void ode( const std::vector<double>& q, const std::vector<double>& u, std::vector<double>& dq ) const;
 
   //---------------------------------------------------------------------------
   // Testing Method

@@ -293,6 +293,19 @@ aabb_c ship_c::aabb( const std::vector<double>& q ) {
 }
 
 //-----------------------------------------------------------------------------
+void ship_c::renormalize_state_quat(std::vector<double>& q)
+{
+  double qnorm = 0.0;
+  for( unsigned i = 3; i < 7; i++ )
+    qnorm += q[i] * q[i];
+  qnorm = std::sqrt( qnorm );
+  for( unsigned i = 3; i < 7; i++ )
+    q[i] /= qnorm;
+}
+
+//-----------------------------------------------------------------------------
+
+//-----------------------------------------------------------------------------
 /// Query the current axis aligned bounding box of the ship
 aabb_c ship_c::aabb( void ) {
   // Note: following may need to query GetCollisionBox instead
