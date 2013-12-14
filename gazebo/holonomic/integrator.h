@@ -4,6 +4,7 @@
 #include "command.h"
 #include "state.h"
 #include "utilities.h"
+#include "ship.h"
 
 #include <valarray>
 
@@ -13,44 +14,34 @@
 
 //-----------------------------------------------------------------------------
 
-class ship_c;           // forward declaration
+//class ship_c;           // forward declaration
 
 //-----------------------------------------------------------------------------
 template<typename F>
 class euler_integrator_c {
 private:
-  const ompl::base::StateSpace *space;
+  const ompl::base::StateSpace *statespace;
   double time_step;
   F      ode;
 
   //---------------------------------------------------------------------------
 public:
-  euler_integrator_c( const ompl::base::StateSpace *_space, const double& _time_step ) : 
-    space( _space ), 
+  euler_integrator_c( const ompl::base::StateSpace *_statespace, const double& _time_step ) : 
+    statespace( _statespace ), 
     time_step( _time_step), 
-    ode( _space )
+    ode( _statespace )
   { }
 
   //---------------------------------------------------------------------------
   void propagate( const ompl::base::State *start, const ompl::control::Control *control, const double duration, ompl::base::State *result, ship_c* ship ) const {
     std::vector<double> dstate;
-    space->copyState( result, start );
+    statespace->copyState( result, start );
 
-    ship_state_c q( space, start );
+    ship_state_c q( statespace, start );
     ship_command_c u( control );
 
     ode( result, control, dstate, ship );
     ode.update( result, time_step * dstate );
-/*
-    std::valarray<double> dstate;
-    space->copyState( result, start );
-
-    ship_state_c q( space, start );
-    ship_command_c u( control );
-
-    ode( result, control, dstate, ship );
-    ode.update( result, time_step * dstate );
-*/
   }
 
   //---------------------------------------------------------------------------
@@ -70,44 +61,47 @@ public:
 template<typename F>
 class pp_integrator_c {
 private:
-  const ompl::base::StateSpace *space;
+  const ompl::base::StateSpace *statespace;
   double time_step;
   F      ode;
 
   //---------------------------------------------------------------------------
 public:
-  pp_integrator_c( const ompl::base::StateSpace *_space, const double& _time_step ) : 
-    space( _space ), 
+  pp_integrator_c( const ompl::base::StateSpace *_statespace, const double& _time_step ) : 
+    statespace( _statespace ), 
     time_step( _time_step), 
-    ode( _space )
+    ode( _statespace )
   { }
 
   //---------------------------------------------------------------------------
   void propagate( const ompl::base::State *start, const ompl::control::Control *control, const double duration, ompl::base::State *result, ship_c* pred, ship_c* prey ) const {
     std::vector<double> state_pred, state_prey, dstate_pred, dstate_prey;
     std::vector<double> u_pred, u_prey;
-    space->copyState( result, start );
+    statespace->copyState( result, start );
 
     // get the predator and prey states
-    pp_state_c q( space, start );
+    //pp_state_c q( statespace, start );
 
-    // TODO: get the predator and prey states
+    // *TODO: get the predator and prey states
+    from_state( statespace, start, state_pred );
+    from_state( statespace, start, state_prey, ship_state_c::size() );
 
     // get the commands for the predator and prey
     ship_command_c u( control );
-    std::vector<double> u_pred = u.as_vector();
-    std::vector<double> u_prey;
-    ship::prey_command(state_pred, state_prey, u_prey);
+    u_pred = u.as_vector();
+    //std::vector<double> u_prey;
+    ship_c::prey_command(state_pred, state_prey, u_prey, pred->time, pred->dtime, &pred->space);
 
     // get the ODEs for the predator and prey
-    pred->ode(state_pred, u_pred, state_dpred);
-    prey->ode(state_prey, u_prey, state_dprey);
+    // NOTE: Incomplete Type
+    ship_c::ode( state_pred, u_pred, dstate_pred, pred );
+    ship_c::ode( state_prey, u_prey, dstate_prey, prey );
 
     // update the predator and prey states
     for (unsigned i=0; i< state_pred.size(); i++)
     {
-      state_pred[i] += state_dpred[i] * time_step;
-      state_prey[i] += state_dprey[i] * time_step;
+      state_pred[i] += dstate_pred[i] * time_step;
+      state_prey[i] += dstate_prey[i] * time_step;
     }
 
     // renormalize the quaternions
@@ -124,19 +118,10 @@ public:
     state_prey[4] = ey.z;
     state_prey[5] = ey.w;
 
-    // TODO: convert back to the state space
-
-
-/*
-    std::valarray<double> dstate;
-    space->copyState( result, start );
-
-    ship_state_c q( space, start );
-    ship_command_c u( control );
-
-    ode( result, control, dstate, ship );
-    ode.update( result, time_step * dstate );
-*/
+    // *TODO: convert back to the state space
+    to_state( statespace, state_pred, result );
+    to_state( statespace, state_prey, result, ship_state_c::size() );
+    statespace->enforceBounds( result );
   }
 
   //---------------------------------------------------------------------------

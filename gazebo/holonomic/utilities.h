@@ -71,16 +71,16 @@ double unit_rand( )
 
 //-----------------------------------------------------------------------------
 /// Copy a state vector to (a pointer to) ompl's state structure
-void to_state(const ompl::base::StateSpace* space, const std::vector<double>& values, ompl::base::State* state) {
-  for( unsigned i=0; i< values.size(); i++ )
+void to_state( const ompl::base::StateSpace* space, const std::vector<double>& values, ompl::base::State* state, unsigned start_index = 0, unsigned elements = 13 ) {
+  for( unsigned i = start_index; i < elements; i++ )
     *space->getValueAddressAtIndex(state, i) = values[i];
 }
 
 
 //-----------------------------------------------------------------------------
 /// Copy from (a pointer to) ompl's state structure to a state vector
-void from_state(const ompl::base::StateSpace* space, const ompl::base::State* state, std::vector<double>& values) {
-  for( unsigned i=0; i< values.size(); i++ )
+void from_state( const ompl::base::StateSpace* space, const ompl::base::State* state, std::vector<double>& values, unsigned start_index = 0, unsigned elements = 13 ) {
+  for( unsigned i = start_index; i < elements; i++ )
     values[i] = *space->getValueAddressAtIndex(state, i);
 }
 

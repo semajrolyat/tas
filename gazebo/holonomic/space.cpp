@@ -23,16 +23,26 @@ space_c::~space_c( void ) {
 //-----------------------------------------------------------------------------
 //
 //-----------------------------------------------------------------------------
-void space_c::read( void ) {
+bool space_c::read( void ) {
 
   // get the reference to the spatial bound
   gazebo::physics::ModelPtr space = world->GetModel("pen");
-  if( !space ) 
+  if( !space ) {
     gzerr << "Unable to find model: pen\n";
+    return false;
+  }
   // compute & cache the spatial bound aabb
 
-  // Space is empty inside the boundary, but the boundary is made up of thin walls not just a cube.
+  // Space is empty inside the boundary, but the boundary is made up of 
+  // thin walls not just a cube.
   gazebo::physics::Link_V space_links = space->GetLinks();
+  if( space_links.size() != 6 ) {
+    // very basic validation.  can still be malformed even if has correct 
+    // number of planes
+    gzerr << "Spatial boundary is malformed: model=pen\n";
+    return false;
+  }
+
   gazebo::math::Vector3 c( 0.0, 0.0, 0.0 );
   gazebo::math::Vector3 e( 0.0, 0.0, 0.0 );
   for( unsigned i = 0; i < space_links.size(); i++ ) {
@@ -58,6 +68,7 @@ void space_c::read( void ) {
   // down
   planes[5]=plane_c(Ravelin::Vector3d(0,0,c.z-e.z),Ravelin::Vector3d(0,0,1));
 
+  return true;
 }
 
 //-----------------------------------------------------------------------------

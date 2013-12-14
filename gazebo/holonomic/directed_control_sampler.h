@@ -76,7 +76,7 @@ public:
 
     // call inverse dynamics
     std::vector<double> u;
-    ship->inv_dyn( q0, dq, u );
+    ship_c::inv_dyn( q0, dq, u, ship );
 
     //std::cout << "u:" << u << std::endl;
 
@@ -158,18 +158,23 @@ public:
   virtual unsigned int getBestControl( ompl::control::Control *control, const ompl::base::State *source, ompl::base::State *dest, const ompl::control::Control *previous ) {
 
     const ompl::base::StateSpace *statespace = si_->getStateSpace().get();
-    std::vector<double> dq_pred;
+    //std::vector<double> dq_pred;
     const double DT = pred->PLANNER_STEP_SIZE;
     const unsigned NUM_STEPS = 1;
 
-    // TODO: must fix from_state() to compensate for the new state types
-    // TODO: (cont'd) following vectors should be init'd and populated:
-    // TODO: (cont'd) q0_pred, q1_pred
-    std::vector<double> q0( pp_state_c::size() );
-    from_state( statespace, source, q0 );
-    std::vector<double> q1( pp_state_c::size() );
-    from_state( statespace, dest, q1 );
+    // *TODO: must fix from_state() to compensate for the new state types
+    // *TODO: (cont'd) following vectors should be init'd and populated:
+    // *TODO: (cont'd) q0_pred, q1_pred
+    std::vector<double> q0_pred( ship_state_c::size() );
+    from_state( statespace, source, q0_pred );
+    std::vector<double> q1_pred( ship_state_c::size() );
+    from_state( statespace, source, q1_pred );
+    std::vector<double> q0_prey( ship_state_c::size() );
+    from_state( statespace, source, q0_prey, ship_state_c::size() );
+    std::vector<double> q1_prey( ship_state_c::size() );
+    from_state( statespace, source, q1_prey, ship_state_c::size() );
 
+ 
     // normalize the destination state quaternion for the predator; the
     // prey's state cannot be determined using 'dest' (b/c we do not plan
     // for commands to get the prey from one state to another)
@@ -177,7 +182,7 @@ public:
 
     // generate differential vector
     std::vector<double> dq_pred( q1_pred.size() );
-    std::vector<double> dq_prey( q1_pred.size() );
+    std::vector<double> dq_prey( q1_prey.size() );
     for( unsigned i = 0; i < q1_pred.size(); i++ )
       dq_pred[i] = q1_pred[i] - q0_pred[i];
 
@@ -196,7 +201,7 @@ public:
 
     // call inverse dynamics to generate command for predator
     std::vector<double> u_pred;
-    pred->inv_dyn( q0_pred, dq_pred, u_pred );
+    ship_c::inv_dyn( q0_pred, dq_pred, u_pred, pred );
 
     // use prey policy to generate command for prey
     // NOTE: we *might* want to try multiple random commands generated using 
@@ -205,7 +210,9 @@ public:
     // and see which the predator can get closest to. This strategy would
     // only need to be tried if the planner has a really hard time planning. 
     double time_input = (double) rand();
-    ship::prey_command(q0_pred, q0_prey, u_prey, time_input);
+    std::vector<double> u_prey;
+    // TODO: not sure if the following DT is correct?
+    ship_c::prey_command(q0_pred, q0_prey, u_prey, time_input, DT, &pred->space);
 
     //std::cout << "u:" << u << std::endl;
 
@@ -218,8 +225,8 @@ public:
     std::vector<double> deltaq;
     for( unsigned k = 0; k < NUM_STEPS; k++ ) {
       // get the ODEs
-      ship_c::ode(q0_pred, u_pred, dq_pred);
-      ship_c::ode(q0_prey, u_prey, dq_prey);
+      ship_c::ode(q0_pred, u_pred, dq_pred, pred );
+      ship_c::ode(q0_prey, u_prey, dq_prey, prey );
 
       // first, update the velocity components using Euler integration
       for( unsigned i = 7; i < ship_state_c::size(); i++ ) {
@@ -239,8 +246,8 @@ public:
       Ravelin::Quatd e_pred(q0_pred[3], q0_pred[4], q0_pred[5], q0_pred[6]);
       Ravelin::Vector3d omega_pred(q0_pred[10], q0_pred[11], q0_pred[12]);
       Ravelin::Quatd edot_pred = Ravelin::Quatd::deriv(e_pred, omega_pred);
-      Ravelin::Quatd e_pre(q0_prey[3], q0_prey[4], q0_prey[5], q0_prey[6]);
-      Ravelin::Vector3d omega_prey(q0_pre[10], q0_prey[11], q0_prey[12]);
+      Ravelin::Quatd e_prey(q0_prey[3], q0_prey[4], q0_prey[5], q0_prey[6]);
+      Ravelin::Vector3d omega_prey(q0_prey[10], q0_prey[11], q0_prey[12]);
       Ravelin::Quatd edot_prey = Ravelin::Quatd::deriv(e_prey, omega_prey);
 
       // update the orientation components using the angular velocity and
@@ -260,8 +267,9 @@ public:
       //std::cout << "q0_dest[" << k << "]:" << q0 << std::endl;
     }
 
-      // TODO: update destination state from q0_pred, q0_prey
-//      to_state(statespace, q0, dest);
+    // *TODO: update destination state from q0_pred, q0_prey
+    to_state(statespace, q0_pred, dest );
+    to_state(statespace, q0_prey, dest, ship_state_c::size() );
 
     // return number of steps taken 
     return (unsigned) NUM_STEPS;

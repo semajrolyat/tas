@@ -48,7 +48,7 @@ target_link_libraries( ship_controller ${SHIP_LIBRARIES} )
 # Copy data files
 file( COPY ${CMAKE_CURRENT_SOURCE_DIR}/models DESTINATION ${CMAKE_CURRENT_BINARY_DIR} )
 file( COPY ${CMAKE_CURRENT_SOURCE_DIR}/ship.world DESTINATION ${CMAKE_CURRENT_BINARY_DIR} )
-file( COPY ${CMAKE_CURRENT_SOURCE_DIR}/ship.world DESTINATION ${CMAKE_CURRENT_BINARY_DIR} )
+file( COPY ${CMAKE_CURRENT_SOURCE_DIR}/pursuit.world DESTINATION ${CMAKE_CURRENT_BINARY_DIR} )
 
 # Copy setup file and substitute correct path into file
 SET( SEARCH_REGEX "%BUILD_DIR%" )

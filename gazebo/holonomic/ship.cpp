@@ -22,6 +22,15 @@ ship_c::ship_c( const ompl::base::StateSpace *_statespace ) : statespace(_states
 }
 
 //-----------------------------------------------------------------------------
+ship_c::ship_c( const player_type_e& player_type ) {
+  if( player_type == PREY ) {
+    ADVERSARY_TYPE = PREDATOR;
+  } else {
+    ADVERSARY_TYPE = PREY;
+  }
+}
+
+//-----------------------------------------------------------------------------
 //-----------------------------------------------------------------------------
 ship_c::~ship_c( void ) {
     gazebo::event::Events::DisconnectWorldUpdateBegin( this->updateConnection );
@@ -29,36 +38,44 @@ ship_c::~ship_c( void ) {
 
 //-----------------------------------------------------------------------------
 //-----------------------------------------------------------------------------
+// Note: the system has not finished loading up.  Indeterminent what models are
+// loaded when.  Ideally we validate everything now, but it can't be done if
+// the shared memory of the world is incomplete.  Will therefore only validate
+// self in Load and in the first update, will validate everything else
 void ship_c::Load(gazebo::physics::ModelPtr _model, sdf::ElementPtr _sdf) {
-  const unsigned X = 0, Y = 1, Z = 2;
 
-  model = _model;
-  world = _model->GetWorld();
-  space = space_c( _model->GetWorld() );
-
-  body = model->GetLink("body");
-  if( !body ) {
-    gzerr << "Unable to find link: body\n";
-    return;
+  // Query what model this controller is handling
+  std::string name = _model->GetName();
+  if( name.compare( "ship" ) == 0 ) {
+    // This is just a generic ship, so play the solo testing case
+    GAME_TYPE = SOLO;
+    if( !read_model( _model ) ) return;
+  } else if( name.compare( "predator" ) == 0 || name.compare( "prey" ) == 0 ) {
+    // This ship is either predator or prey, so play the pursuit game
+    GAME_TYPE = PURSUIT;
+    if( name.compare( "predator" ) == 0 ) {
+      // This ship is predator and the other is prey
+      PLAYER_TYPE = PREDATOR;
+      adversary = ship_p( new ship_c( PREY ) ); 
+      if( !read_model( _model ) ) {
+        gzerr << "Failed to read (predator) model in predator\n";
+        return;
+      }
+    } else {
+      // This ship is prey and the other is predator
+      PLAYER_TYPE = PREY;
+      adversary = ship_p( new ship_c( PREDATOR ) ); 
+      if( !read_model( _model ) ) {
+        gzerr << "Failed to read (prey) model in prey\n";
+        return;
+      }
+    }
+  } else {
+      // bad configuration
+      GAME_TYPE = UNDEFINED;
+      gzerr << "Bad Configuration\n";
+      return;
   }
-
-  GAUSSIAN_MEAN = 0.0;
-  GAUSSIAN_VARIANCE = 35.0;
-  GAUSSIAN_STDDEV = sqrt( GAUSSIAN_VARIANCE );
-
-  // get inertial properties from Gazebo
-  gazebo::physics::InertialPtr inertial = body->GetInertial();
-
-  // setup mass
-  _inertial.m = inertial->GetMass();
-
-  // setup moment of inertia
-  gazebo::math::Vector3 pm = inertial->GetPrincipalMoments();
-  _inertial.J(X,X) = pm.x;  _inertial.J(X,Y) = 0.0;  _inertial.J(X,Z) = 0.0;
-  _inertial.J(Y,X) = 0.0;   _inertial.J(Y,Y) = pm.y; _inertial.J(Y,Z) = 0.0;
-  _inertial.J(Z,X) = 0.0;   _inertial.J(Z,Y) = 0.0;  _inertial.J(Z,Z) = pm.z;
-
-  // NOTE: center-of-mass is assumed to be (0,0,0) relative to the body frame
 
   //---------------------------------------------------------------------------
   // Call Init Function (Note: target function subject to inheritance)
@@ -69,60 +86,24 @@ void ship_c::Load(gazebo::physics::ModelPtr _model, sdf::ElementPtr _sdf) {
 //-----------------------------------------------------------------------------
 void ship_c::Update( ) {
 
-  // Note: we only do spatial query on first pass (and not on initialization)
-  // because it is nondeterministic (or treated as such) when the world gets 
-  // loaded.
+  // Note: See Note for Load(...) as to why validation is continued here on first update
   static bool first_update = true;
   if( first_update ) {
-
-    // Note: following may not be tight fit if the ship begins unaligned to world
-    // and error may propagate through future collision queries
-    ship_frame_bb = aabb();    
-
-/*
-    // get the reference to the spatial bound
-    gazebo::physics::ModelPtr space = world->GetModel("pen");
-    if( !space ) 
-      gzerr << "Unable to find model: pen\n";
-    // compute & cache the spatial bound aabb
-
-    // Space is empty inside the boundary, but the boundary is made up of thin walls not just a cube.
-    gazebo::physics::Link_V space_links = space->GetLinks();
-    gazebo::math::Vector3 c( 0.0, 0.0, 0.0 );
-    gazebo::math::Vector3 e( 0.0, 0.0, 0.0 );
-    for( unsigned i = 0; i < space_links.size(); i++ ) {
-      gazebo::physics::LinkPtr link = space_links[i];
-      gazebo::math::Box gzbb = link->GetBoundingBox();
-      c += gzbb.GetCenter();
-      // Note:: following assumes centered at (0,0,0) and symmetric.  Dirty but works.
-      e = gazebo::math::Vector3( std::max(gzbb.GetCenter().x, e.x), std::max(gzbb.GetCenter().y, e.y),std::max(gzbb.GetCenter().z, e.z) );
+    // Read world information
+    if( !read_world() ) {
+      // Failed Validation
+        gzerr << "Failed to read world information.  No guarantees on sim\n";
     }
-    spatial_bound = aabb_c( c, e );
-*/
-    space.read();
-    spatial_bound = space.bounds;
 
-    //std::cout << "space: " << spatial_bound << std::endl;
-
-/*
-    // get the reference to the obstacles    
-    gazebo::physics::ModelPtr maze = world->GetModel("maze");
-    if( !maze ) 
-      gzerr << "Unable to find model: maze\n";
-    
-    // compute and cache the static world aabb's
-    gazebo::physics::Link_V maze_links = maze->GetLinks();
-    for( unsigned i = 0; i < maze_links.size(); i++ ) {
-      gazebo::physics::LinkPtr link = maze_links[i];
-      // Note: following may need to query GetCollisionBox instead
-      gazebo::math::Box gzbb = link->GetBoundingBox();
-      gazebo::math::Vector3 c = gzbb.GetCenter();
-      gazebo::math::Vector3 e = gzbb.GetSize() / 2;
-
-      aabb_c obstacle( c, e );
-      obstacles.push_back( obstacle );
+    if( GAME_TYPE == PURSUIT ) {
+      // Validate the game
+      // Read the adversary information
+      if( !read_adversary() ) {
+        // Failed Validation
+        gzerr << "Failed to read model information for adversary.  No guarantees on sim\n";
+      }
+      // Game appears generally valid.  Note: Some additional validation may be necessary
     }
-*/
     first_update = false;
   }
 
@@ -183,7 +164,7 @@ void ship_c::init( void ) {
 */
   std::cerr << "Ship Controller Plugin Started" << std::endl;
 /*
-  // initial test state
+  // this is the old 'parallel parking' test case
   gazebo::math::Vector3 p = gazebo::math::Vector3( 0.0, 0.0, 4.0 );  // for ompl case
   gazebo::math::Quaternion r = gazebo::math::Quaternion(0.0, 0.0, 0.0);
   model->SetWorldPose( gazebo::math::Pose( p, r ) );
@@ -211,11 +192,12 @@ bool ship_c::plan( void ) {
   std::vector<double> pred_state = predator.as_vector();
   std::vector<double> prey_state = prey.as_vector();
   std::vector<double> prey_u;
-  prey_command( pred_state, prey_state, prey_u );
+  prey_command( pred_state, prey_state, prey_u, time, dtime, &space );
 
   command_current = ship_command_c( prey_u );
 //*/
 /*
+  // This is the old 'parallel parking test case'
   if( !has_planned ) {
     if( !plan_rrt() ) return false;
     has_planned = true;
@@ -273,23 +255,141 @@ void ship_c::act( void ) {
 
 //-----------------------------------------------------------------------------
 //-----------------------------------------------------------------------------
+bool ship_c::read_model( gazebo::physics::ModelPtr _model ) {
+  const unsigned X = 0, Y = 1, Z = 2;
+
+  model = _model;
+  world = _model->GetWorld();
+  space = space_c( _model->GetWorld() );
+
+  body = _model->GetLink("body");
+  if( !body ) {
+    gzerr << "Unable to find link: body\n";
+    return false;
+  }
+
+  // get inertial properties from Gazebo
+  gazebo::physics::InertialPtr _inertial = body->GetInertial();
+
+  // setup mass
+  inertial.m = _inertial->GetMass();
+
+  // setup moment of inertia
+  gazebo::math::Vector3 pm = _inertial->GetPrincipalMoments();
+  inertial.J(X,X) = pm.x;  inertial.J(X,Y) = 0.0;  inertial.J(X,Z) = 0.0;
+  inertial.J(Y,X) = 0.0;   inertial.J(Y,Y) = pm.y; inertial.J(Y,Z) = 0.0;
+  inertial.J(Z,X) = 0.0;   inertial.J(Z,Y) = 0.0;  inertial.J(Z,Z) = pm.z;
+
+  // Note: center-of-mass is assumed to be (0,0,0) relative to the body frame
+
+  // Note: aabb may not be tight fit if the ship begins unaligned to world
+  // and error may propagate through future collision queries.
+  ship_frame_bb = aabb();    
+
+  return true;
+}
+
+//-----------------------------------------------------------------------------
+bool ship_c::read_adversary( void ) {
+  if( PLAYER_TYPE == PREDATOR ) {
+    // This ship is predator and the other is prey
+
+    // Query for the prey model
+    gazebo::physics::ModelPtr prey = world->GetModel( "prey" );
+    if( !prey ) {
+      // Incomplete validation.  Bail out.
+      gzerr << "Unable to find model: prey\n";
+      return false;
+    }
+    if( !adversary->read_model( prey ) ) {
+      gzerr << "Failed to read (prey) model in predator\n";
+      return false;
+    }
+  } else {
+    // This ship is prey and the other is predator
+
+    // Query for the predator model
+    gazebo::physics::ModelPtr predator = world->GetModel( "predator" );
+    if( !predator ) {
+      // Incomplete validation.  Bail out.
+      gzerr << "Unable to find model: predator\n";
+      return false;
+    }
+    if( !adversary->read_model( predator ) ) {
+      gzerr << "Failed to read (predator) model in prey\n";
+      return false;
+    }
+  }
+  return true;
+}
+
+//-----------------------------------------------------------------------------
+bool ship_c::read_world( void ) {
+  if( !space.read() ) return false;
+  spatial_bound = space.bounds;
+
+/*
+  // get the reference to the obstacles    
+  gazebo::physics::ModelPtr maze = world->GetModel("maze");
+  if( !maze ) 
+    gzerr << "Unable to find model: maze\n";
+  
+  // compute and cache the static world aabb's
+  gazebo::physics::Link_V maze_links = maze->GetLinks();
+  for( unsigned i = 0; i < maze_links.size(); i++ ) {
+    gazebo::physics::LinkPtr link = maze_links[i];
+    // Note: following may need to query GetCollisionBox instead
+    gazebo::math::Box gzbb = link->GetBoundingBox();
+    gazebo::math::Vector3 c = gzbb.GetCenter();
+    gazebo::math::Vector3 e = gzbb.GetSize() / 2;
+
+    aabb_c obstacle( c, e );
+    obstacles.push_back( obstacle );
+  }
+*/
+  return true;
+}
+
+//-----------------------------------------------------------------------------
+//-----------------------------------------------------------------------------
 /// Build an axis aligned bounding box of the ship based on state vector
-/// TODO : Evan please verify.  Computation of extens doesn't sound right
 aabb_c ship_c::aabb( const std::vector<double>& q ) {
 
   //pull the center of the ship from the state vector
-  Origin3d c( q[0], q[1], q[2] );
+  Ravelin::Origin3d c( q[0], q[1], q[2] );
   //rotate the ship frame aabb
-  Quatd e( q[3], q[4], q[5], q[6] );
+  Ravelin::Quatd e( q[3], q[4], q[5], q[6] );
   e.normalize();  // Just in case
 
-  //recompute the extens
-  // extract the ship frame extens
-  Origin3d sfext( ship_frame_bb.extens.x, ship_frame_bb.extens.y, ship_frame_bb.extens.z );
-  // compute extens in rotation frame
-  Origin3d rfext = e * sfext;
+  std::vector<Ravelin::Origin3d> verts(8);
+  //  x,  y,  z
+  verts[0] = Ravelin::Origin3d( ship_frame_bb.extens.x - ship_frame_bb.center.x, ship_frame_bb.extens.y - ship_frame_bb.center.y, ship_frame_bb.extens.z - ship_frame_bb.center.z );
+  //  x,  y, -z
+  verts[1] = Ravelin::Origin3d( ship_frame_bb.extens.x - ship_frame_bb.center.x, ship_frame_bb.extens.y - ship_frame_bb.center.y, -(ship_frame_bb.extens.z - ship_frame_bb.center.z) );
+  //  x, -y,  z
+  verts[2] = Ravelin::Origin3d( ship_frame_bb.extens.x - ship_frame_bb.center.x, -(ship_frame_bb.extens.y - ship_frame_bb.center.y), ship_frame_bb.extens.z - ship_frame_bb.center.z );
+  //  x, -y, -z
+  verts[3] = Ravelin::Origin3d( ship_frame_bb.extens.x - ship_frame_bb.center.x, -(ship_frame_bb.extens.y - ship_frame_bb.center.y), -(ship_frame_bb.extens.z - ship_frame_bb.center.z) );
+  // -x,  y,  z
+  verts[4] = Ravelin::Origin3d( -(ship_frame_bb.extens.x - ship_frame_bb.center.x), ship_frame_bb.extens.y - ship_frame_bb.center.y, ship_frame_bb.extens.z - ship_frame_bb.center.z );
+  // -x,  y, -z
+  verts[5] = Ravelin::Origin3d( -(ship_frame_bb.extens.x - ship_frame_bb.center.x), ship_frame_bb.extens.y - ship_frame_bb.center.y, -(ship_frame_bb.extens.z - ship_frame_bb.center.z) );
+  // -x, -y,  z
+  verts[6] = Ravelin::Origin3d( -(ship_frame_bb.extens.x - ship_frame_bb.center.x), -(ship_frame_bb.extens.y - ship_frame_bb.center.y), ship_frame_bb.extens.z - ship_frame_bb.center.z );
+  // -x, -y, -z
+  verts[7] = Ravelin::Origin3d( -(ship_frame_bb.extens.x - ship_frame_bb.center.x), -(ship_frame_bb.extens.y - ship_frame_bb.center.y), -(ship_frame_bb.extens.z - ship_frame_bb.center.z) );
+
+  double ext_x = 0, ext_y = 0, ext_z = 0;
+  for( unsigned i = 0; i < 8; i++ ) {
+    // compute vertex in rotation frame
+    Ravelin::Origin3d v_rot = e * verts[i];
+
+    ext_x = std::max( ext_x, fabs( v_rot.x() ) );
+    ext_y = std::max( ext_y, fabs( v_rot.y() ) );
+    ext_z = std::max( ext_z, fabs( v_rot.z() ) );
+  }
   
-  return aabb_c ( c, rfext );
+  return aabb_c ( c, Ravelin::Origin3d( ext_x, ext_y, ext_z ) );
 }
 
 //-----------------------------------------------------------------------------
@@ -353,7 +453,7 @@ void ship_c::update_desired_state( void ) {
 //------------------------------------------------------------------------------
 void ship_c::compute_desired_state( ship_state_c& result ) {
 /*
-  // interpolation required for the test case
+  // interpolation required for the 'parallel parking' test case
   result = interpolate_linear( desired_state_0, desired_state_1, PLANNER_STEP_SIZE, ++state_step );
 */
 ///*
@@ -365,7 +465,7 @@ void ship_c::compute_desired_state( ship_state_c& result ) {
   std::vector<double> u = command_current.as_vector();
   std::vector<double> q = state().as_vector();
   std::vector<double> dq;
-  ode( q, u, dq );
+  ode( q, u, dq, this );
 
   // integrate the change in state with the current state to get the desired state
   for( unsigned i = 0; i < ship_state_c::size(); i++ ) {
@@ -755,11 +855,11 @@ void ship_c::operator()( const ompl::base::State* ompl_q, const ompl::control::C
     u[i] = _u[i];
   }
 
-  ship->ode( q, u, dq );
+  ode( q, u, dq, ship );
 }
 
 //-----------------------------------------------------------------------------
-void ship_c::ode( const std::vector<double>& q, const std::vector<double>& u, std::vector<double>& dq ) const {
+void ship_c::ode( const std::vector<double>& q, const std::vector<double>& u, std::vector<double>& dq, const ship_c* ship ) {
 
   const double DRAG = 0.1;
 
@@ -797,9 +897,9 @@ void ship_c::ode( const std::vector<double>& q, const std::vector<double>& u, st
   SForced force(u[0], u[1], u[2], u[3], u[4], u[5], P);
 
   // transform the inertia to frame P
-  SpatialRBInertiad inertial = _inertial;
-  inertial.pose = Pi;
-  SpatialRBInertiad J = Pose3d::transform(P, inertial);
+  SpatialRBInertiad _inertial = ship->inertial;
+  _inertial.pose = Pi;
+  SpatialRBInertiad J = Pose3d::transform(P, _inertial);
 
   // get the acceleration
   SAcceld acc = J.inverse_mult(force + drag_force - vel.cross(J * vel));
@@ -832,7 +932,7 @@ void ship_c::ode( const std::vector<double>& q, const std::vector<double>& u, st
 
 //-----------------------------------------------------------------------------
 /// Compute the inverse dynamics of the ship
-void ship_c::inv_dyn( const std::vector<double>& q, const std::vector<double>& qdot_des, std::vector<double>& u) const {
+void ship_c::inv_dyn( const std::vector<double>& q, const std::vector<double>& qdot_des, std::vector<double>& u, const ship_c* ship ) {
 
   // - Newton-Euler -
 
@@ -872,9 +972,9 @@ void ship_c::inv_dyn( const std::vector<double>& q, const std::vector<double>& q
   acc.set_angular(alpha);
 
   // transform the inertia to frame P
-  SpatialRBInertiad inertial = _inertial; 
-  inertial.pose = Pi;
-  SpatialRBInertiad J = Pose3d::transform(P, inertial);
+  SpatialRBInertiad _inertial = ship->inertial; 
+  _inertial.pose = Pi;
+  SpatialRBInertiad J = Pose3d::transform(P, _inertial);
 
   // get the acceleration
   SForced pseudo = vel.cross(J*vel);
@@ -937,7 +1037,7 @@ void ship_c::test_intersection_detection( void ) {
 //------------------------------------------------------------------------------
 //------------------------------------------------------------------------------
 // computes commands (forces) for if the ship is a prey
-void ship_c::prey_command( const std::vector<double>& pred_state, const std::vector<double>& prey_state, std::vector<double>& prey_u ) {
+void ship_c::prey_command( const std::vector<double>& pred_state, const std::vector<double>& prey_state, std::vector<double>& prey_u, const double& time, const double& dtime, space_c* space ) {
 
   // open parameters
   const double FLEE_DIST = 1.0;
@@ -1005,7 +1105,7 @@ void ship_c::prey_command( const std::vector<double>& pred_state, const std::vec
       cmd.torque( tau );
     }
 
-    Ravelin::Vector3d bos_force = boundary_force(Vector3d(prey_state[0],prey_state[1],prey_state[2]),Vector3d(prey_state[7],prey_state[8],prey_state[9]));
+    Ravelin::Vector3d bos_force = boundary_force( space, Vector3d(prey_state[0],prey_state[1],prey_state[2]),Vector3d(prey_state[7],prey_state[8],prey_state[9]) );
     Ravelin::Vector3d f( cmd.force().x, cmd.force().y, cmd.force().z );
     f += bos_force;
     cmd.force( f );
@@ -1023,7 +1123,7 @@ void ship_c::prey_command( const std::vector<double>& pred_state, const std::vec
     double mag_predator_force = repulsive_force( dist ) * WEIGHT_PREDATOR_FORCE;
     Ravelin::Vector3d p2p_force = pp_vec * mag_predator_force; 
 
-    Ravelin::Vector3d bos_force = boundary_force(Vector3d(prey_state[0],prey_state[1],prey_state[2]),Vector3d(prey_state[7],prey_state[8],prey_state[9]));
+    Ravelin::Vector3d bos_force = boundary_force( space, Vector3d(prey_state[0],prey_state[1],prey_state[2]),Vector3d(prey_state[7],prey_state[8],prey_state[9]) );
 
     // add the two vectors together
     Ravelin::Vector3d force = p2p_force + bos_force;
@@ -1048,24 +1148,24 @@ void ship_c::prey_command( const std::vector<double>& pred_state, const std::vec
 }
 
 //------------------------------------------------------------------------------
-Ravelin::Vector3d ship_c::boundary_force( const Ravelin::Vector3d& pos, const Ravelin::Vector3d& vel ) {
+Ravelin::Vector3d ship_c::boundary_force( space_c* space, const Ravelin::Vector3d& pos, const Ravelin::Vector3d& vel ) {
   const double WEIGHT_BOUNDARY_FORCE = 1.0;
 
   // compute the repulsive force from the boundary of space (bos)
   Ravelin::Vector3d bos_force(0,0,0);
-  for( unsigned i = 0; i < space.planes.size(); i++ ) {
+  for( unsigned i = 0; i < space->planes.size(); i++ ) {
     double t;
     Ravelin::Vector3d intersect;
-    if(space.planes[i].ray_intersection( pos, vel, t, intersect )) {
+    if(space->planes[i].ray_intersection( pos, vel, t, intersect )) {
       // Note: this will almost always give three planes, so test whether the 
       // intersection point lies inside the bounding box.
 
       //Question Evan: Is there frame dependency in the rotation of the velocity vector?
-      if( aabb_c::inside( intersect, space.bounds ) ) {
+      if( aabb_c::inside( intersect, space->bounds ) ) {
         Ravelin::Vector3d v = intersect - pos;
         double dist_to_plane = v.norm();
         double repulsion = repulsive_force( dist_to_plane );
-        bos_force += space.planes[i].normal * repulsion;
+        bos_force += space->planes[i].normal * repulsion;
         std::cout << "dist: " << dist_to_plane << ", f:" << bos_force << std::endl;
       }
     }

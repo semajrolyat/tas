@@ -2,7 +2,7 @@
 #define _GAZEBO_SHIP_H_
 
 #include "constants.h"
-#include "integrator.h"
+//#include "integrator.h"
 #include "control_space.h"
 #include "goal.h"
 #include "aabb.h"
@@ -52,6 +52,16 @@
 #include <Ravelin/SpatialRBInertiad.h>
 #include <Ravelin/MatrixNd.h>
 
+// Variables for the Random Walk planning
+const double GAUSSIAN_MEAN = 0.0;
+const double GAUSSIAN_VARIANCE = 35.0;
+const double GAUSSIAN_STDDEV = sqrt(GAUSSIAN_VARIANCE);
+
+//-----------------------------------------------------------------------------
+
+class ship_c;
+typedef boost::shared_ptr<ship_c> ship_p;
+
 //-----------------------------------------------------------------------------
 /// Class encapsulating the ship itself.  A Gazebo plugin
 class ship_c : public gazebo::ModelPlugin {
@@ -66,8 +76,32 @@ public:
   // the gazebo reference to the ship's link
   gazebo::physics::LinkPtr body;
 
+  // information about the adversary/opponent 
+  ship_p adversary;
+
+  // the set of possible game types
+  enum game_type_e {
+    UNDEFINED,
+    SOLO,
+    PURSUIT
+  };
+
+  // the type of game that has started
+  game_type_e GAME_TYPE;
+
+  // the set of possible player types
+  enum player_type_e {
+    PREY,
+    PREDATOR
+  };
+
+  // my player type
+  player_type_e PLAYER_TYPE;
+  // my adversary's player type
+  player_type_e ADVERSARY_TYPE;
+
   // the inertial mass matrix of the ship
-  Ravelin::SpatialRBInertiad _inertial;
+  Ravelin::SpatialRBInertiad inertial;
 
   // the current time of the simulation
   double time;
@@ -81,10 +115,6 @@ public:
   // the time of the last update
   double time_last;
 
-  // Variables for the Random Walk planning
-  double GAUSSIAN_MEAN;
-  double GAUSSIAN_VARIANCE;
-  double GAUSSIAN_STDDEV;
 
   // whether the ship should stop interacting with the world
   bool stopped;
@@ -160,6 +190,7 @@ public:
   //---------------------------------------------------------------------------
   ship_c( void );
   ship_c( const ompl::base::StateSpace *_statespace );
+  ship_c( const player_type_e& player_type );
     
   //---------------------------------------------------------------------------
   // Destructor
@@ -196,6 +227,13 @@ protected:
 
   //---------------------------------------------------------------------------
   //---------------------------------------------------------------------------
+  bool read_model( gazebo::physics::ModelPtr _model );
+
+  bool read_adversary( void );
+  
+  bool read_world( void );
+  //---------------------------------------------------------------------------
+  //---------------------------------------------------------------------------
   // plans using the ompl rrt planner
   bool plan_rrt( void );
 
@@ -214,12 +252,6 @@ protected:
   // send a command to stop the ship
   void stop( void );
 
-  // computes commands (forces) if the ship is prey
-  static void prey_command( const std::vector<double>& pred_state, const std::vector<double>& prey_state, std::vector<double>& prey_u );
-
-  // computes a repulsive force for a given distance
-  double repulsive_force( double dist );
-
   // query for the state of the ship as maintained by the simulator
   ship_state_c state( void );
 
@@ -235,10 +267,10 @@ protected:
   // interpolates state given two states
   ship_state_c interpolate_linear( const ship_state_c& q0, const ship_state_c& qf, const double& deltat, const int& step ) const; 
 
-  // compute any force(field) that the boundary contributes to repel collision
-  Ravelin::Vector3d boundary_force( const Ravelin::Vector3d& pos, const Ravelin::Vector3d& vel );
-
 public:
+  // computes commands (forces) if the ship is prey
+  static void prey_command( const std::vector<double>& pred_state, const std::vector<double>& prey_state, std::vector<double>& prey_u, const double& time, const double& dtime, space_c* space );
+
   // normalizes the quaternion components of the state
   static void renormalize_state_quat(std::vector<double>& q);
 
@@ -255,9 +287,15 @@ public:
   bool intersects_world_bounds( const aabb_c& mybb );
 
   // compute the inverse dynamics for the ship 
-  static void inv_dyn(const std::vector<double>& q, const std::vector<double>& qdot_des, std::vector<double>& u) const;
+  static void inv_dyn( const std::vector<double>& q, const std::vector<double>& qdot_des, std::vector<double>& u, const ship_c* ship );
 
-  static void ode( const std::vector<double>& q, const std::vector<double>& u, std::vector<double>& dq ) const;
+  static void ode( const std::vector<double>& q, const std::vector<double>& u, std::vector<double>& dq, const ship_c* ship );
+
+  // compute any force(field) that the boundary contributes to repel collision
+  static Ravelin::Vector3d boundary_force( space_c* space, const Ravelin::Vector3d& pos, const Ravelin::Vector3d& vel );
+
+  // computes a repulsive force for a given distance
+  static double repulsive_force( double dist );
 
   //---------------------------------------------------------------------------
   // Testing Method

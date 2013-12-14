@@ -5,6 +5,7 @@
 #include <iostream>
 #include <gazebo/math/Vector3.hh>
 #include <Ravelin/Origin3d.h>
+#include <Ravelin/Vector3d.h>
 
 //-----------------------------------------------------------------------------
 
