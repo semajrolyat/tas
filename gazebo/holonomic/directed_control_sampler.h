@@ -212,7 +212,7 @@ public:
     double time_input = (double) rand();
     std::vector<double> u_prey;
     // TODO: not sure if the following DT is correct?
-    ship_c::prey_command(q0_pred, q0_prey, u_prey, time_input, DT, &pred->space);
+    ship_c::compute_prey_command(q0_pred, q0_prey, u_prey, time_input, DT, &pred->space);
 
     //std::cout << "u:" << u << std::endl;
 

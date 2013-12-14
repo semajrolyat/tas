@@ -17,7 +17,7 @@ ship_c::ship_c( void ) {
 }
 
 //-----------------------------------------------------------------------------
-ship_c::ship_c( const ompl::base::StateSpace *_statespace ) : statespace(_statespace) {
+ship_c::ship_c( ompl::base::StateSpace *_statespace ) : statespace(_statespace) {
 
 }
 
@@ -43,32 +43,28 @@ ship_c::~ship_c( void ) {
 // the shared memory of the world is incomplete.  Will therefore only validate
 // self in Load and in the first update, will validate everything else
 void ship_c::Load(gazebo::physics::ModelPtr _model, sdf::ElementPtr _sdf) {
+  first_update = true;
 
   // Query what model this controller is handling
   std::string name = _model->GetName();
-  if( name.compare( "ship" ) == 0 ) {
+  if( name == "ship" ) {
     // This is just a generic ship, so play the solo testing case
     GAME_TYPE = SOLO;
+    PLAYER_TYPE = NONE;
     if( !read_model( _model ) ) return;
-  } else if( name.compare( "predator" ) == 0 || name.compare( "prey" ) == 0 ) {
+  } else if( name == "predator" || name == "prey" ) {
     // This ship is either predator or prey, so play the pursuit game
     GAME_TYPE = PURSUIT;
-    if( name.compare( "predator" ) == 0 ) {
+    if( name == "predator" ) {
       // This ship is predator and the other is prey
       PLAYER_TYPE = PREDATOR;
-      adversary = ship_p( new ship_c( PREY ) ); 
-      if( !read_model( _model ) ) {
-        gzerr << "Failed to read (predator) model in predator\n";
-        return;
-      }
-    } else {
+    } else if( name == "prey" ) {
       // This ship is prey and the other is predator
       PLAYER_TYPE = PREY;
-      adversary = ship_p( new ship_c( PREDATOR ) ); 
-      if( !read_model( _model ) ) {
-        gzerr << "Failed to read (prey) model in prey\n";
-        return;
-      }
+    }
+    if( !read_model( _model ) ) {
+      gzerr << "Failed to read (" << name << ") model in " << name << "\n";
+      return;
     }
   } else {
       // bad configuration
@@ -87,16 +83,15 @@ void ship_c::Load(gazebo::physics::ModelPtr _model, sdf::ElementPtr _sdf) {
 void ship_c::Update( ) {
 
   // Note: See Note for Load(...) as to why validation is continued here on first update
-  static bool first_update = true;
   if( first_update ) {
     // Read world information
     if( !read_world() ) {
-      // Failed Validation
+      // Failed World Validation
         gzerr << "Failed to read world information.  No guarantees on sim\n";
     }
 
+    // Validate the game
     if( GAME_TYPE == PURSUIT ) {
-      // Validate the game
       // Read the adversary information
       if( !read_adversary() ) {
         // Failed Validation
@@ -121,8 +116,6 @@ void ship_c::Update( ) {
     stop( );
   else
     act( );
-
-  //test_intersection_detection(); 
 
   time_last = time;
 }
@@ -154,7 +147,6 @@ void ship_c::init( void ) {
   write_state_audit_header( audit_file_planned_states );
   write_command_audit_header( audit_file_actual_commands );
   write_state_audit_header( audit_file_actual_states );
-
   write_state_audit_header( audit_file_fb_error );
 /*
   //write_command_audit_header( audit_file_ff_commands );
@@ -183,21 +175,38 @@ void ship_c::sense( void ) {
 
 //-----------------------------------------------------------------------------
 bool ship_c::plan( void ) {
+  std::vector<double> pred_q, prey_q, prey_u, prey_dq;
 
-  static bool has_planned = false;
-///*
-  ship_state_c predator( gazebo::math::Vector3(0,0,25), gazebo::math::Quaternion(1,0,0,0), gazebo::math::Vector3(0,0,0), gazebo::math::Vector3(0,0,0) );
-  ship_state_c prey = state();
+  if( GAME_TYPE == SOLO ) {
+    // virtual predator parked
+    ship_state_c predator( gazebo::math::Vector3(0,0,25), gazebo::math::Quaternion(1,0,0,0), gazebo::math::Vector3(0,0,0), gazebo::math::Vector3(0,0,0) );
+    // get the active ship's state, treat active ship as prey
+    ship_state_c prey = state();
 
-  std::vector<double> pred_state = predator.as_vector();
-  std::vector<double> prey_state = prey.as_vector();
-  std::vector<double> prey_u;
-  prey_command( pred_state, prey_state, prey_u, time, dtime, &space );
+    pred_q = predator.as_vector();
+    prey_q = prey.as_vector();
+    compute_prey_command( pred_q, prey_q, prey_u, time, dtime, &space );
 
-  command_current = ship_command_c( prey_u );
-//*/
+    command_current = ship_command_c( prey_u );
+  } else if( GAME_TYPE == PURSUIT ) {
+    if( PLAYER_TYPE == PREY ) {
+      // generate a prey command
+      ship_state_c predator = adversary->state();
+      ship_state_c prey = state();
+
+      pred_q = predator.as_vector();
+      prey_q = prey.as_vector();
+      compute_prey_command( pred_q, prey_q, prey_u, time, dtime, &space );
+
+      command_current = ship_command_c( prey_u );
+    } else if( PLAYER_TYPE == PREDATOR ) {
+      plan_rrt();
+    }
+  }
+
 /*
   // This is the old 'parallel parking test case'
+  static bool has_planned = false;
   if( !has_planned ) {
     if( !plan_rrt() ) return false;
     has_planned = true;
@@ -291,35 +300,45 @@ bool ship_c::read_model( gazebo::physics::ModelPtr _model ) {
 
 //-----------------------------------------------------------------------------
 bool ship_c::read_adversary( void ) {
+  std::string my_name, adversary_name;
+  gazebo::physics::ModelPtr adversary_model;
+
   if( PLAYER_TYPE == PREDATOR ) {
     // This ship is predator and the other is prey
-
-    // Query for the prey model
-    gazebo::physics::ModelPtr prey = world->GetModel( "prey" );
-    if( !prey ) {
-      // Incomplete validation.  Bail out.
-      gzerr << "Unable to find model: prey\n";
-      return false;
-    }
-    if( !adversary->read_model( prey ) ) {
-      gzerr << "Failed to read (prey) model in predator\n";
-      return false;
-    }
-  } else {
+    my_name = "predator";
+    adversary_name = "prey";
+    ADVERSARY_TYPE = PREY;
+  } else if( PLAYER_TYPE == PREY ) {
     // This ship is prey and the other is predator
-
-    // Query for the predator model
-    gazebo::physics::ModelPtr predator = world->GetModel( "predator" );
-    if( !predator ) {
-      // Incomplete validation.  Bail out.
-      gzerr << "Unable to find model: predator\n";
-      return false;
-    }
-    if( !adversary->read_model( predator ) ) {
-      gzerr << "Failed to read (predator) model in prey\n";
-      return false;
-    }
+    my_name = "prey";
+    adversary_name = "predator";
+    ADVERSARY_TYPE = PREDATOR;
+  } else {
+    // Something is improperly defined.  Getting here should be impossible. Bail out.
+    return false;
   }
+
+  // Query for the adversary model
+  adversary_model = world->GetModel( adversary_name );
+  if( !adversary_model ) {
+    // Incomplete validation.  Bail out.
+    gzerr << "Unable to find model: " << adversary_name << "\n";
+    return false;
+  }
+  // Create the adversary reference
+  adversary = ship_p( new ship_c( ADVERSARY_TYPE ) ); 
+  if( !adversary ) {
+    // Could not create pointer to an adversary ship.  Bail out.
+    gzerr << "Failed to create (" << adversary_name << ") adversary in " << my_name << "\n";
+    return false;
+  }
+  // Read the adversary model information
+  if( !adversary->read_model( adversary_model ) ) {
+    // Could not read the adversary model information from gazebo.  Bail out.
+    gzerr << "Failed to read (" << adversary_name << ") model in " << my_name << "\n";
+    return false;
+  }
+
   return true;
 }
 
@@ -329,6 +348,8 @@ bool ship_c::read_world( void ) {
   spatial_bound = space.bounds;
 
 /*
+  // Note: Uncomment when the maze is again a part of the system
+
   // get the reference to the obstacles    
   gazebo::physics::ModelPtr maze = world->GetModel("maze");
   if( !maze ) 
@@ -471,8 +492,15 @@ void ship_c::compute_desired_state( ship_state_c& result ) {
   for( unsigned i = 0; i < ship_state_c::size(); i++ ) {
     q[i] += dq[i] * DT;
   }
-  // return the desired state
+  // normalize q's quaternion
+  Quatd ex(q[3], q[4], q[5], q[6]);
+  ex.normalize();
+  q[3] = ex.x;
+  q[4] = ex.y;
+  q[5] = ex.z;
+  q[6] = ex.w;
 
+  // return the desired state
   result = ship_state_c( q );
 
   std::pair<double,ship_command_c> up = std::make_pair( DT, command_current );
@@ -658,170 +686,318 @@ bool ship_c::plan_simple( void ) {
 // OMPL
 //-----------------------------------------------------------------------------
 bool ship_c::plan_rrt( void ) {
+ if( GAME_TYPE == PURSUIT ) {
+    const double MAX_PLANNING_TIME = 0.5;
+    PLANNER_STEP_SIZE = 0.1;
+    //const double GOAL_THRESHOLD = 1e-5; 
+    const double MAX_COMMAND = 100.0;
 
-  const double MAX_PLANNING_TIME = 10.0;
-  PLANNER_STEP_SIZE = .1;
-  //const double GOAL_THRESHOLD = 1e-5; 
-  const double MAX_COMMAND = 100.0;
+    ompl::base::StateSpacePtr sspace( new ompl::base::RealVectorStateSpace( pp_state_c::size() ) );
+    statespace = sspace.get();
 
-  /// construct the state space we are planning in
-  ompl::base::StateSpacePtr space( new ompl::base::RealVectorStateSpace( ship_state_c::size() ) );
-  statespace = space.get();
-
-  // Set the bounds for the state space
-  ompl::base::RealVectorBounds bounds( ship_state_c::size() );
-  for (unsigned i = 0; i < 3; i++)  {
-    // x, y, z extens
-    bounds.setLow(i, -25.0);
-    bounds.setHigh(i, 25.0);
-  }
-  for (unsigned i=3; i< 7; i++)
-  {
+    // Define bounds for the state space
+    ompl::base::RealVectorBounds bounds( pp_state_c::size() );
+    // Set Predator Bounds
+    for( unsigned i = 0; i < 3; i++ )  {
+      // x, y, z extens
+      bounds.setLow(i, -25.0);
+      bounds.setHigh(i, 25.0);
+    }
+    for( unsigned i = 3; i < 7; i++ ) {
     // quaternion extents 
     bounds.setLow(i, -1.0);
     bounds.setHigh(i, 1.0);
-  }
-  for (unsigned i = 7; i < ship_state_c::size(); i++)  {
-    // all other extens
-    bounds.setLow(i, -1e1);
-    bounds.setHigh(i, 1e1);
-  }
-  space->as<ompl::base::RealVectorStateSpace>()->setBounds(bounds);
+    }
+    for( unsigned i = 7; i < ship_state_c::size(); i++ )  {
+      // all other extens
+      bounds.setLow(i, -1e1);
+      bounds.setHigh(i, 1e1);
+    }
+    // Set Prey Bounds
+    for( unsigned i = ship_state_c::size(); i < ship_state_c::size() + 3; i++ )  {
+      // x, y, z extens
+      bounds.setLow(i, -25.0);
+      bounds.setHigh(i, 25.0);
+    }
+    for( unsigned i = ship_state_c::size() + 3; i < ship_state_c::size() + 7; i++ ) {
+      // quaternion extents 
+      bounds.setLow(i, -1.0);
+      bounds.setHigh(i, 1.0);
+    }
+    for( unsigned i = 7 + ship_state_c::size(); i < pp_state_c::size(); i++ )  {
+      // all other extens
+      bounds.setLow(i, -1e1);
+      bounds.setHigh(i, 1e1);
+    }
+    sspace->as<ompl::base::RealVectorStateSpace>()->setBounds( bounds );
 
-  // create a control space
-  ompl::control::ControlSpacePtr cspace(new control_space_c(space));
+    // create a control space
+    ompl::control::ControlSpacePtr cspace( new control_space_c( sspace ) );
 
-  // set the bounds for the control space
-  ompl::base::RealVectorBounds cbounds( ship_command_c::size() );
-  cbounds.setLow( -MAX_COMMAND );
-  cbounds.setHigh( MAX_COMMAND );
-  cspace->as<control_space_c>()->setBounds(cbounds);
+    // set the bounds for the control space
+    ompl::base::RealVectorBounds cbounds( ship_command_c::size() );
+    cbounds.setLow( -MAX_COMMAND );
+    cbounds.setHigh( MAX_COMMAND );
+    cspace->as<control_space_c>()->setBounds( cbounds );
 
-  // define a simple setup class
-  ompl::control::SimpleSetup ss(cspace);
+    // define a simple setup class
+    ompl::control::SimpleSetup ss( cspace );
 
-  ompl::control::SpaceInformationPtr si( ss.getSpaceInformation() );
+    ompl::control::SpaceInformationPtr si( ss.getSpaceInformation() );
 
-  si->setDirectedControlSamplerAllocator( boost::bind(&ship_c::allocate_directed_control_sampler, this, _1) );
+    si->setDirectedControlSamplerAllocator( boost::bind(&ship_c::allocate_pp_control_sampler, this, _1) );
 
-  ompl::base::ProblemDefinition pdef(si);
+    ompl::base::ProblemDefinition pdef( si );
 
-  /// set state validity checking for this space
-  ss.setStateValidityChecker(boost::bind(&ship_c::is_state_valid, this, si.get(), _1 ));
+    /// set state validity checking for this space
+    ss.setStateValidityChecker( boost::bind(&ship_c::is_state_valid, this, si.get(), _1 ) );
 
-  /// set the propagation routine for this space
-  ss.setStatePropagator( ompl::control::StatePropagatorPtr( new state_propagator_c( si, this ) ) );
+    /// set the propagation routine for this space
+    ss.setStatePropagator( ompl::control::StatePropagatorPtr( new state_propagator_c( si, this ) ) );
 
-  // create initial and goal states
-  std::vector<double> initial( ship_state_c::size() ), target( ship_state_c::size() );
+    // form a compound predator, prey state
+    pp_state_c pp_q( state(), adversary->state() );
 
-/*
-  gazebo::math::Vector3 pos0( 0.0, 4.0, 0.0 );
-  gazebo::math::Quaternion rot0( 0.0, 0.0, 0.0 );
-  gazebo::math::Vector3 dpos0( 0.0, 0.0, 0.0 );
-  gazebo::math::Vector3 drot0( 0.0, 0.0, 0.0 );
-*/
-  gazebo::math::Vector3 posf( 0.0, 0.0, 0.0 );
-  gazebo::math::Quaternion rotf( PI, 0.0, 0.0 );
-  gazebo::math::Vector3 dposf( 0.0, 0.0, 0.0 );
-  gazebo::math::Vector3 drotf( 0.0, 0.0, 0.0 );
-
-  ship_state_c state0, statef;
-
-  state0 = state();
-  std::cout << state0 << std::endl;
-
-  statef.position( posf );
-  statef.rotation( rotf );
-  statef.dposition( dposf );
-  statef.drotation( drotf );
-
-  for( unsigned i = 0; i < ship_state_c::size(); i++ ) {
-    initial[i] = state0(i);
-    target[i] = statef(i);
-  }
+    // create current state vector
+    std::vector<double> current_q = pp_q.as_vector();
   
-  /// create a start state
-  ompl::base::ScopedState<ompl::base::RealVectorStateSpace> start(space);
-  to_state( space.get(), initial, start.get() );
+    /// create a start state
+    ompl::base::ScopedState<ompl::base::RealVectorStateSpace> start( sspace );
+    to_state( statespace, current_q, start.get() );
 
-  /// create a  goal state; use the hard way to set the elements
-  ompl::base::ScopedState<ompl::base::RealVectorStateSpace> goal(space);
-  to_state( space.get(), target, goal.get() );
+    /// create a  goal state
+    ompl::base::ScopedState<ompl::base::RealVectorStateSpace> goal( sspace );
+    //to_state( statespace.get(), target, goal.get() );
+    boost::shared_ptr <pp_goal_c> pgoal( new pp_goal_c( si ) );
+    //pgoal->setState( goal );
 
-  boost::shared_ptr <ship_goal_c> pgoal( new ship_goal_c(si) );
-  pgoal->setState( goal );
+    /// set the start and goal
+    ss.setStartState( start );
+    ss.setGoal( pgoal );
 
-  /// set the start and goal states
-  ss.setStartState( start );
-  ss.setGoal( pgoal );
+    ompl::control::RRT* rrt = new ompl::control::RRT(si);
+    rrt->setGoalBias( 0.05 );
+    ompl::base::PlannerPtr planner( rrt );
 
-  ompl::control::RRT* rrt = new ompl::control::RRT(si);
-  rrt->setGoalBias( 0.05 );
-  ompl::base::PlannerPtr planner( rrt );
+    ss.setPlanner( planner );
 
-  ss.setPlanner( planner );
+    ss.getSpaceInformation()->setPropagationStepSize( PLANNER_STEP_SIZE );
+    //ss.getSpaceInformation()->setMinMaxControlDuration(1, 10);
+    ss.setup();
+    static_cast<state_propagator_c*>(ss.getStatePropagator().get())->setIntegrationTimeStep(ss.getSpaceInformation()->getPropagationStepSize());
 
-  ss.getSpaceInformation()->setPropagationStepSize( PLANNER_STEP_SIZE );
-  //ss.getSpaceInformation()->setMinMaxControlDuration(1, 10);
-  ss.setup();
-  static_cast<state_propagator_c*>(ss.getStatePropagator().get())->setIntegrationTimeStep(ss.getSpaceInformation()->getPropagationStepSize());
+    ompl::base::PlannerStatus solved;
+    solved = ss.solve( MAX_PLANNING_TIME );
 
-  ompl::base::PlannerStatus solved;
-  solved = ss.solve( MAX_PLANNING_TIME );
+    if( solved ) {
+      std::cout << "Found solution:" << std::endl;
+/*
+      ompl::geometric::PathGeometric path = ss.getSolutionPath().asGeometric();
+      unsigned int state_count = path.getStateCount();
 
-  if (solved) {
+      const double EPSILON = 1e-4;
+      // check that final state is very close to goal state
+      ship_state_c state_plan_end( statespace, path.getState( state_count - 1 ) );
 
-    std::cout << "Found solution:" << std::endl;
-
-    ompl::geometric::PathGeometric path = ss.getSolutionPath().asGeometric();
-    unsigned int state_count = path.getStateCount();
-///*
-    const double EPSILON = 1e-4;
-    // check that final state is very close to goal state
-    ship_state_c state_plan_end( statespace, path.getState( state_count - 1 ) );
-
-    if( fabs( state_plan_end(0) - statef(0) ) > EPSILON || fabs( state_plan_end(1) - statef(1) ) > EPSILON || fabs( state_plan_end(2) - statef(2) ) > EPSILON ) {
-      std::cout << "Planning Failed: final state diverged significantly from goal state\n";
-      if( fabs( state_plan_end(0) - statef(0) ) > EPSILON ) {
-        std::cout << "x diff: " << state_plan_end(0) - statef(0) << std::endl;
+      if( fabs( state_plan_end(0) - statef(0) ) > EPSILON || fabs( state_plan_end(1) - statef(1) ) > EPSILON || fabs( state_plan_end(2) - statef(2) ) > EPSILON ) {
+        std::cout << "Planning Failed: final state diverged significantly from goal state\n";
+        if( fabs( state_plan_end(0) - statef(0) ) > EPSILON ) {
+          std::cout << "x diff: " << state_plan_end(0) - statef(0) << std::endl;
+        }
+        if( fabs( state_plan_end(1) - statef(1) ) > EPSILON ) {
+          std::cout << "y diff: " << state_plan_end(1) - statef(1) << std::endl;
+        }
+        if( fabs( state_plan_end(2) - statef(2) ) > EPSILON ) {
+          std::cout << "z diff: " << state_plan_end(2) - statef(2) << std::endl;
+        }    
+        return false;
       }
-      if( fabs( state_plan_end(1) - statef(1) ) > EPSILON ) {
-        std::cout << "y diff: " << state_plan_end(1) - statef(1) << std::endl;
+
+      for( unsigned int i = 0; i < state_count; i++ ) {
+        ship_state_c q( statespace, path.getState( i ) );
+        double t = (double)i * PLANNER_STEP_SIZE;
+        std::pair<double,ship_state_c> qp = std::make_pair( t, q );
+        states_desired.push_back( qp );
       }
-      if( fabs( state_plan_end(2) - statef(2) ) > EPSILON ) {
-        std::cout << "z diff: " << state_plan_end(2) - statef(2) << std::endl;
+
+      unsigned int control_count = ss.getSolutionPath().getControlCount();
+      for( unsigned int i = 0; i < control_count; i++ ) {
+        ship_command_c u( ss.getSolutionPath().getControl(i) );
+        double t = ss.getSolutionPath().getControlDuration( i );
+
+        std::pair<double,ship_command_c> up = std::make_pair( t, u );
+        commands_desired.push_back( up );
       }
-      
+      update_desired_state( );
+
+      command_current_duration = 0.0;
+*/
+      command_current = ship_command_c( ss.getSolutionPath().getControl(0) );
+      command_current_duration = dtime;      
+      std::cout << "command:" << command_current << std::endl;
+
+      return true;
+    } else {
+      std::cout << "No solution found" << std::endl;
       return false;
     }
+  } else if( GAME_TYPE == SOLO ) {
+    const double MAX_PLANNING_TIME = 10.0;
+    PLANNER_STEP_SIZE = .1;
+    //const double GOAL_THRESHOLD = 1e-5; 
+    const double MAX_COMMAND = 100.0;
+
+    /// construct the state space we are planning in
+    ompl::base::StateSpacePtr sspace( new ompl::base::RealVectorStateSpace( ship_state_c::size() ) );
+    statespace = sspace.get();
+
+    // Set the bounds for the state space
+    ompl::base::RealVectorBounds bounds( ship_state_c::size() );
+    for (unsigned i = 0; i < 3; i++)  {
+      // x, y, z extens
+      bounds.setLow(i, -25.0);
+      bounds.setHigh(i, 25.0);
+    }
+    for (unsigned i=3; i< 7; i++)
+    {
+      // quaternion extents 
+      bounds.setLow(i, -1.0);
+      bounds.setHigh(i, 1.0);
+    }
+    for (unsigned i = 7; i < ship_state_c::size(); i++)  {
+      // all other extens
+      bounds.setLow(i, -1e1);
+      bounds.setHigh(i, 1e1);
+    }
+    sspace->as<ompl::base::RealVectorStateSpace>()->setBounds( bounds );
+
+    // create a control space
+    ompl::control::ControlSpacePtr cspace( new control_space_c( sspace ) );
+
+    // set the bounds for the control space
+    ompl::base::RealVectorBounds cbounds( ship_command_c::size() );
+    cbounds.setLow( -MAX_COMMAND );
+    cbounds.setHigh( MAX_COMMAND );
+    cspace->as<control_space_c>()->setBounds( cbounds );
+
+    // define a simple setup class
+    ompl::control::SimpleSetup ss( cspace );
+
+    ompl::control::SpaceInformationPtr si( ss.getSpaceInformation() );
+
+    si->setDirectedControlSamplerAllocator( boost::bind(&ship_c::allocate_directed_control_sampler, this, _1) );
+
+    ompl::base::ProblemDefinition pdef( si );
+
+    /// set state validity checking for this space
+    ss.setStateValidityChecker( boost::bind( &ship_c::is_state_valid, this, si.get(), _1 ) );
+
+    /// set the propagation routine for this space
+    ss.setStatePropagator( ompl::control::StatePropagatorPtr( new state_propagator_c( si, this ) ) );
+
+    // create initial and goal states
+    std::vector<double> initial( ship_state_c::size() ), target( ship_state_c::size() );
+
+    gazebo::math::Vector3 posf( 0.0, 0.0, 0.0 );
+    gazebo::math::Quaternion rotf( PI, 0.0, 0.0 );
+    gazebo::math::Vector3 dposf( 0.0, 0.0, 0.0 );
+    gazebo::math::Vector3 drotf( 0.0, 0.0, 0.0 );
+
+    ship_state_c state0, statef;
+
+    state0 = state();
+    std::cout << state0 << std::endl;
+
+    statef.position( posf );
+    statef.rotation( rotf );
+    statef.dposition( dposf );
+    statef.drotation( drotf );
+
+    for( unsigned i = 0; i < ship_state_c::size(); i++ ) {
+      initial[i] = state0(i);
+      target[i] = statef(i);
+    }
+  
+    /// create a start state
+    ompl::base::ScopedState<ompl::base::RealVectorStateSpace> start( sspace );
+    to_state( statespace, initial, start.get() );
+
+    /// create a  goal state; use the hard way to set the elements
+    ompl::base::ScopedState<ompl::base::RealVectorStateSpace> goal( sspace );
+    to_state( statespace, target, goal.get() );
+
+    boost::shared_ptr <ship_goal_c> pgoal( new ship_goal_c(si) );
+    pgoal->setState( goal );
+
+    /// set the start and goal states
+    ss.setStartState( start );
+    ss.setGoal( pgoal );
+
+    ompl::control::RRT* rrt = new ompl::control::RRT(si);
+    rrt->setGoalBias( 0.05 );
+    ompl::base::PlannerPtr planner( rrt );
+
+    ss.setPlanner( planner );
+
+    ss.getSpaceInformation()->setPropagationStepSize( PLANNER_STEP_SIZE );
+    //ss.getSpaceInformation()->setMinMaxControlDuration(1, 10);
+    ss.setup();
+    static_cast<state_propagator_c*>(ss.getStatePropagator().get())->setIntegrationTimeStep(ss.getSpaceInformation()->getPropagationStepSize());
+
+    ompl::base::PlannerStatus solved;
+    solved = ss.solve( MAX_PLANNING_TIME );
+
+    if( solved ) {
+      std::cout << "Found solution:" << std::endl;
+
+      ompl::geometric::PathGeometric path = ss.getSolutionPath().asGeometric();
+      unsigned int state_count = path.getStateCount();
+
+      const double EPSILON = 1e-4;
+      // check that final state is very close to goal state
+      ship_state_c state_plan_end( statespace, path.getState( state_count - 1 ) );
+///*
+      if( fabs( state_plan_end(0) - statef(0) ) > EPSILON || fabs( state_plan_end(1) - statef(1) ) > EPSILON || fabs( state_plan_end(2) - statef(2) ) > EPSILON ) {
+        std::cout << "Planning Failed: final state diverged significantly from goal state\n";
+        if( fabs( state_plan_end(0) - statef(0) ) > EPSILON ) {
+          std::cout << "x diff: " << state_plan_end(0) - statef(0) << std::endl;
+        }
+        if( fabs( state_plan_end(1) - statef(1) ) > EPSILON ) {
+          std::cout << "y diff: " << state_plan_end(1) - statef(1) << std::endl;
+        }
+        if( fabs( state_plan_end(2) - statef(2) ) > EPSILON ) {
+          std::cout << "z diff: " << state_plan_end(2) - statef(2) << std::endl;
+        }    
+        return false;
+      }
 //*/
-    for( unsigned int i = 0; i < state_count; i++ ) {
-      ship_state_c q( statespace, path.getState( i ) );
-      double t = (double)i * PLANNER_STEP_SIZE;
-      std::pair<double,ship_state_c> qp = std::make_pair( t, q );
-      states_desired.push_back( qp );
+      for( unsigned int i = 0; i < state_count; i++ ) {
+        ship_state_c q( statespace, path.getState( i ) );
+        double t = (double)i * PLANNER_STEP_SIZE;
+        std::pair<double,ship_state_c> qp = std::make_pair( t, q );
+        states_desired.push_back( qp );
+      }
+
+      unsigned int control_count = ss.getSolutionPath().getControlCount();
+      for( unsigned int i = 0; i < control_count; i++ ) {
+        ship_command_c u( ss.getSolutionPath().getControl(i) );
+        double t = ss.getSolutionPath().getControlDuration( i );
+
+        std::pair<double,ship_command_c> up = std::make_pair( t, u );
+        commands_desired.push_back( up );
+      }
+      update_desired_state( );
+
+      command_current_duration = 0.0;
+
+      time_start = world->GetSimTime().Double();
+      time_last = time_start;
+
+      return true;
+    } else {
+      std::cout << "No solution found" << std::endl;
+      return false;
     }
-
-    unsigned int control_count = ss.getSolutionPath().getControlCount();
-    for( unsigned int i = 0; i < control_count; i++ ) {
-      ship_command_c u( ss.getSolutionPath().getControl(i) );
-      double t = ss.getSolutionPath().getControlDuration( i );
-
-      std::pair<double,ship_command_c> up = std::make_pair( t, u );
-      commands_desired.push_back( up );
-    }
-    update_desired_state( );
-
-    command_current_duration = 0.0;
-
-    time_start = world->GetSimTime().Double();
-    time_last = time_start;
-
-    return true;
-  } else {
-    std::cout << "No solution found" << std::endl;
-    return false;
   }
 }
 
@@ -1022,6 +1198,12 @@ ompl::control::DirectedControlSamplerPtr ship_c::allocate_directed_control_sampl
 }
 
 //------------------------------------------------------------------------------
+ompl::control::DirectedControlSamplerPtr ship_c::allocate_pp_control_sampler( const ompl::control::SpaceInformation* si ) {
+  int k = 1;
+  return ompl::control::DirectedControlSamplerPtr( new pp_control_sampler_c( si, this, adversary.get(), k ) );
+}
+
+//------------------------------------------------------------------------------
 // Testing 
 //------------------------------------------------------------------------------
 /// Test whether intersection of aabb's works
@@ -1037,7 +1219,7 @@ void ship_c::test_intersection_detection( void ) {
 //------------------------------------------------------------------------------
 //------------------------------------------------------------------------------
 // computes commands (forces) for if the ship is a prey
-void ship_c::prey_command( const std::vector<double>& pred_state, const std::vector<double>& prey_state, std::vector<double>& prey_u, const double& time, const double& dtime, space_c* space ) {
+void ship_c::compute_prey_command( const std::vector<double>& pred_state, const std::vector<double>& prey_state, std::vector<double>& prey_u, const double& time, const double& dtime, space_c* space ) {
 
   // open parameters
   const double FLEE_DIST = 1.0;
@@ -1166,7 +1348,7 @@ Ravelin::Vector3d ship_c::boundary_force( space_c* space, const Ravelin::Vector3
         double dist_to_plane = v.norm();
         double repulsion = repulsive_force( dist_to_plane );
         bos_force += space->planes[i].normal * repulsion;
-        std::cout << "dist: " << dist_to_plane << ", f:" << bos_force << std::endl;
+        //std::cout << "dist: " << dist_to_plane << ", f:" << bos_force << std::endl;
       }
     }
   }

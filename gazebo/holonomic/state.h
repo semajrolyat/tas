@@ -24,10 +24,15 @@ typedef std::vector< std::pair<double,ship_state_c> > ship_state_list_t;
 /// Class encapsulating the state of a ship
 class ship_state_c {
   //---------------------------------------------------------------------------
+  // Member Variables
+  //---------------------------------------------------------------------------
+private:
+  std::vector<double> _values;
+ 
+  //---------------------------------------------------------------------------
   // Constructors
   //---------------------------------------------------------------------------
 public:
-  //---------------------------------------------------------------------------
   ship_state_c( void ) {
     _values.resize( size() );
     for( unsigned i = 0; i < size(); i++ )
@@ -159,12 +164,6 @@ public:
   }
 
   //---------------------------------------------------------------------------
-  // Member Variables
-  //---------------------------------------------------------------------------
-private:
-  std::vector<double> _values;
- 
-  //---------------------------------------------------------------------------
   // Output
   //---------------------------------------------------------------------------
 public:
@@ -246,10 +245,15 @@ ship_state_c operator/( ship_state_c& a, const double& c ) {
  */ 
 class pp_state_c {
   //---------------------------------------------------------------------------
+  // Member Variables
+  //---------------------------------------------------------------------------
+private:
+  std::vector<double> _values;
+
+  //---------------------------------------------------------------------------
   // Constructors
   //---------------------------------------------------------------------------
 public:
-  //---------------------------------------------------------------------------
   pp_state_c( void ) {
     _values.resize( size() );
     for( unsigned i = 0; i < size(); i++ )
@@ -262,6 +266,15 @@ public:
     _values.resize( size() );
     for( unsigned i = 0; i < size(); i++ )
       _values[i] = state._values[i];
+  }
+
+  //---------------------------------------------------------------------------
+  pp_state_c( const ship_state_c& pred, const ship_state_c& prey ) { 
+    _values.resize( size() );
+    for( unsigned i = 0; i < ship_state_c::size(); i++ )
+      _values[i] = pred.value(i);
+    for( unsigned i = 0; i < ship_state_c::size(); i++ )
+      _values[ i + ship_state_c::size() ] = prey.value(i);
   }
 
   //---------------------------------------------------------------------------
@@ -418,18 +431,50 @@ public:
 
   //---------------------------------------------------------------------------
   std::vector<double> as_vector( void ) {
-    std::vector<double> v( size() );
+    std::vector<double> q( size() );
     for( unsigned i = 0; i < size(); i++ ) {
-      v[i] = _values[i];
+      q[i] = _values[i];
     }
-    return v;
+    return q;
   }
 
   //---------------------------------------------------------------------------
-  // Member Variables
+  // Get the predator state components as a vector
+  std::vector<double> pred_vector( void ) {
+    std::vector<double> q( ship_state_c::size() );
+    for( unsigned i = 0; i < ship_state_c::size(); i++ ) {
+      q[i] = _values[i];
+    }
+    return q;
+  }
+
   //---------------------------------------------------------------------------
-private:
-  std::vector<double> _values;
+  // Get the prey state components as a vector
+  std::vector<double> prey_vector( void ) {
+    std::vector<double> q( ship_state_c::size() );
+    for( unsigned i = 0; i < ship_state_c::size(); i++ ) {
+      q[i] = _values[ i + ship_state_c::size() ];
+    }
+    return q;
+  }
+
+  //---------------------------------------------------------------------------
+  // Set the predator state components from a vector
+  void pred_vector( const std::vector<double>& q ) {
+    assert( q.size() == ship_state_c::size() );
+    for( unsigned i = 0; i < ship_state_c::size(); i++ ) {
+      _values[i] = q[i];
+    }
+  }
+
+  //---------------------------------------------------------------------------
+  // Set the prey state components from a vector
+  void prey_vector( const std::vector<double> q ) {
+    assert( q.size() == ship_state_c::size() );
+    for( unsigned i = 0; i < ship_state_c::size(); i++ ) {
+      _values[ i + ship_state_c::size() ] = q[i];
+    }
+  }
  
   //---------------------------------------------------------------------------
   // Output

@@ -28,11 +28,11 @@
     </include>
     <include>
       <uri>file://models/prey</uri>
-      <pose>0 0 0 0 0 0</pose>
+      <pose>5 0 0 0 0 0</pose>
     </include>
     <include>
       <uri>file://models/predator</uri>
-      <pose>0 0 0 0 0 0</pose>
+      <pose>-5 0 0 0 0 0</pose>
     </include>
 <!--
     <include>

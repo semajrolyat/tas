@@ -20,13 +20,13 @@
 template<typename F>
 class euler_integrator_c {
 private:
-  const ompl::base::StateSpace *statespace;
+  ompl::base::StateSpace *statespace;
   double time_step;
   F      ode;
 
   //---------------------------------------------------------------------------
 public:
-  euler_integrator_c( const ompl::base::StateSpace *_statespace, const double& _time_step ) : 
+  euler_integrator_c( ompl::base::StateSpace *_statespace, const double& _time_step ) : 
     statespace( _statespace ), 
     time_step( _time_step), 
     ode( _statespace )
@@ -90,7 +90,7 @@ public:
     ship_command_c u( control );
     u_pred = u.as_vector();
     //std::vector<double> u_prey;
-    ship_c::prey_command(state_pred, state_prey, u_prey, pred->time, pred->dtime, &pred->space);
+    ship_c::compute_prey_command(state_pred, state_prey, u_prey, pred->time, pred->dtime, &pred->space);
 
     // get the ODEs for the predator and prey
     // NOTE: Incomplete Type
