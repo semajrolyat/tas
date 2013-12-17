@@ -155,7 +155,7 @@ public:
   }
 
   //---------------------------------------------------------------------------
-  std::vector<double> as_vector( void ) {
+  std::vector<double> as_vector( void ) const {
     std::vector<double> v( size() );
     for( unsigned i = 0; i < size(); i++ ) {
       v[i] = _values[i];
@@ -271,10 +271,19 @@ public:
   //---------------------------------------------------------------------------
   pp_state_c( const ship_state_c& pred, const ship_state_c& prey ) { 
     _values.resize( size() );
-    for( unsigned i = 0; i < ship_state_c::size(); i++ )
+    for( unsigned i = 0; i < ship_state_c::size(); i++ ) {
       _values[i] = pred.value(i);
-    for( unsigned i = 0; i < ship_state_c::size(); i++ )
       _values[ i + ship_state_c::size() ] = prey.value(i);
+    }
+  }
+
+  //---------------------------------------------------------------------------
+  pp_state_c( const std::vector<double>& pred, const std::vector<double>& prey ) { 
+    _values.resize( size() );
+    for( unsigned i = 0; i < ship_state_c::size(); i++ ) {
+      _values[i] = pred[i];
+      _values[ i + ship_state_c::size() ] = prey[i];
+    }
   }
 
   //---------------------------------------------------------------------------
@@ -430,7 +439,7 @@ public:
   }
 
   //---------------------------------------------------------------------------
-  std::vector<double> as_vector( void ) {
+  std::vector<double> as_vector( void ) const {
     std::vector<double> q( size() );
     for( unsigned i = 0; i < size(); i++ ) {
       q[i] = _values[i];
@@ -439,8 +448,14 @@ public:
   }
 
   //---------------------------------------------------------------------------
+  void write_ompl_state( ompl::base::StateSpace *statespace, ompl::base::State *state ) {
+    for( unsigned i = 0; i < size(); i++ )
+      *statespace->getValueAddressAtIndex(state, i) = _values[i];
+  }
+
+  //---------------------------------------------------------------------------
   // Get the predator state components as a vector
-  std::vector<double> pred_vector( void ) {
+  std::vector<double> pred_vector( void ) const {
     std::vector<double> q( ship_state_c::size() );
     for( unsigned i = 0; i < ship_state_c::size(); i++ ) {
       q[i] = _values[i];
@@ -450,7 +465,7 @@ public:
 
   //---------------------------------------------------------------------------
   // Get the prey state components as a vector
-  std::vector<double> prey_vector( void ) {
+  std::vector<double> prey_vector( void ) const {
     std::vector<double> q( ship_state_c::size() );
     for( unsigned i = 0; i < ship_state_c::size(); i++ ) {
       q[i] = _values[ i + ship_state_c::size() ];

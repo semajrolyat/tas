@@ -1,27 +1,32 @@
 #include <ship.h>
-
 #include "state_propagator.h"
 #include "directed_control_sampler.h"
+
+//-----------------------------------------------------------------------------
 
 using boost::shared_ptr;
 using namespace Ravelin;
 
 //-----------------------------------------------------------------------------
-//-----------------------------------------------------------------------------
+
 GZ_REGISTER_MODEL_PLUGIN( ship_c )
 
 //-----------------------------------------------------------------------------
+// Constructors
 //-----------------------------------------------------------------------------
+/// Default Constructor
 ship_c::ship_c( void ) { 
 
 }
 
 //-----------------------------------------------------------------------------
+/// Constructs a temporary for ompl planning
 ship_c::ship_c( ompl::base::StateSpace *_statespace ) : statespace(_statespace) {
 
 }
 
 //-----------------------------------------------------------------------------
+/// Constructs a ship reference based on player type for predator/prey scenario
 ship_c::ship_c( const player_type_e& player_type ) {
   if( player_type == PREY ) {
     ADVERSARY_TYPE = PREDATOR;
@@ -31,13 +36,16 @@ ship_c::ship_c( const player_type_e& player_type ) {
 }
 
 //-----------------------------------------------------------------------------
+// Destructor
 //-----------------------------------------------------------------------------
 ship_c::~ship_c( void ) {
     gazebo::event::Events::DisconnectWorldUpdateBegin( this->updateConnection );
 }
 
 //-----------------------------------------------------------------------------
+// Gazebo Plugin Interface
 //-----------------------------------------------------------------------------
+/// Gazebo Load callback defined in ModelPlugin
 // Note: the system has not finished loading up.  Indeterminent what models are
 // loaded when.  Ideally we validate everything now, but it can't be done if
 // the shared memory of the world is incomplete.  Will therefore only validate
@@ -80,6 +88,7 @@ void ship_c::Load(gazebo::physics::ModelPtr _model, sdf::ElementPtr _sdf) {
 }
 
 //-----------------------------------------------------------------------------
+/// Gazebo callback on each update
 void ship_c::Update( ) {
 
   // Note: See Note for Load(...) as to why validation is continued here on first update
@@ -128,7 +137,9 @@ void ship_c::Reset( ) {
 */
 
 //-----------------------------------------------------------------------------
+// Robot Interface
 //-----------------------------------------------------------------------------
+/// Initialization of the robot
 void ship_c::init( void ) {
   this->updateConnection = gazebo::event::Events::ConnectWorldUpdateBegin(
     boost::bind( &ship_c::Update, this ) );
@@ -169,11 +180,13 @@ void ship_c::init( void ) {
 }
 
 //-----------------------------------------------------------------------------
+/// Encapsulates the sense phase of robot execution
 void ship_c::sense( void ) {
 
 }
 
 //-----------------------------------------------------------------------------
+/// Encapsulates the plan phase of robot execution
 bool ship_c::plan( void ) {
   std::vector<double> pred_q, prey_q, prey_u, prey_dq;
 
@@ -241,6 +254,7 @@ bool ship_c::plan( void ) {
 
 
 //-----------------------------------------------------------------------------
+/// Encapsulates the act phase of robot execution
 void ship_c::act( void ) {
   command_current_duration -= dtime;
 
@@ -263,7 +277,23 @@ void ship_c::act( void ) {
 }
 
 //-----------------------------------------------------------------------------
+// Utilities
 //-----------------------------------------------------------------------------
+/// Renormalize the quaternion component of a state vector
+void ship_c::renormalize_state_quat(std::vector<double>& q)
+{
+  double qnorm = 0.0;
+  for( unsigned i = 3; i < 7; i++ )
+    qnorm += q[i] * q[i];
+  qnorm = std::sqrt( qnorm );
+  for( unsigned i = 3; i < 7; i++ )
+    q[i] /= qnorm;
+}
+
+//-----------------------------------------------------------------------------
+// Gazebo Queries
+//-----------------------------------------------------------------------------
+/// Read a model definition from the gazebo system
 bool ship_c::read_model( gazebo::physics::ModelPtr _model ) {
   const unsigned X = 0, Y = 1, Z = 2;
 
@@ -299,6 +329,7 @@ bool ship_c::read_model( gazebo::physics::ModelPtr _model ) {
 }
 
 //-----------------------------------------------------------------------------
+/// Read the adversary definition from the gazebo system
 bool ship_c::read_adversary( void ) {
   std::string my_name, adversary_name;
   gazebo::physics::ModelPtr adversary_model;
@@ -343,6 +374,7 @@ bool ship_c::read_adversary( void ) {
 }
 
 //-----------------------------------------------------------------------------
+/// Read the world definition from the gazebo system
 bool ship_c::read_world( void ) {
   if( !space.read() ) return false;
   spatial_bound = space.bounds;
@@ -372,6 +404,20 @@ bool ship_c::read_world( void ) {
 }
 
 //-----------------------------------------------------------------------------
+// Spatial Queries
+//-----------------------------------------------------------------------------
+/// Query for the state of the ship as maintained by the gazebo system
+ship_state_c ship_c::state( void ) {
+  gazebo::math::Vector3 pos = model->GetWorldPose().pos;
+  gazebo::math::Quaternion rot = model->GetWorldPose().rot;
+  gazebo::math::Vector3 dpos = model->GetWorldLinearVel();
+  gazebo::math::Vector3 drot = model->GetWorldAngularVel();
+
+  ship_state_c q( pos, rot, dpos, drot );
+
+  return q;
+}
+
 //-----------------------------------------------------------------------------
 /// Build an axis aligned bounding box of the ship based on state vector
 aabb_c ship_c::aabb( const std::vector<double>& q ) {
@@ -414,19 +460,6 @@ aabb_c ship_c::aabb( const std::vector<double>& q ) {
 }
 
 //-----------------------------------------------------------------------------
-void ship_c::renormalize_state_quat(std::vector<double>& q)
-{
-  double qnorm = 0.0;
-  for( unsigned i = 3; i < 7; i++ )
-    qnorm += q[i] * q[i];
-  qnorm = std::sqrt( qnorm );
-  for( unsigned i = 3; i < 7; i++ )
-    q[i] /= qnorm;
-}
-
-//-----------------------------------------------------------------------------
-
-//-----------------------------------------------------------------------------
 /// Query the current axis aligned bounding box of the ship
 aabb_c ship_c::aabb( void ) {
   // Note: following may need to query GetCollisionBox instead
@@ -455,7 +488,10 @@ bool ship_c::intersects_world_bounds( const aabb_c& mybb ) {
 }
 
 //-----------------------------------------------------------------------------
+// State Management
 //-----------------------------------------------------------------------------
+/// Updates the desired states queue once the previous head has expired
+/// Typically used in conjunction with linear interpolation and feedback control
 void ship_c::update_desired_state( void ) {
   if( stopped ) return;
 
@@ -472,18 +508,18 @@ void ship_c::update_desired_state( void ) {
 }
 
 //------------------------------------------------------------------------------
-void ship_c::compute_desired_state( ship_state_c& result ) {
+/// Compute the desired state given a command 
+void ship_c::compute_desired_state( const ship_command_c& command, ship_state_c& result ) {
 /*
   // interpolation required for the 'parallel parking' test case
   result = interpolate_linear( desired_state_0, desired_state_1, PLANNER_STEP_SIZE, ++state_step );
 */
 ///*
-  // the command has already been computed as current_command
 
   double DT = dtime;
 
   // use forward dynamics to compute the change in state applying the command causes
-  std::vector<double> u = command_current.as_vector();
+  std::vector<double> u = command.as_vector();
   std::vector<double> q = state().as_vector();
   std::vector<double> dq;
   ode( q, u, dq, this );
@@ -512,6 +548,7 @@ void ship_c::compute_desired_state( ship_state_c& result ) {
 }
 
 //------------------------------------------------------------------------------
+/// Linear interpolation between two states
 ship_state_c ship_c::interpolate_linear( const ship_state_c& q0, const ship_state_c& qf, const double& deltat, const int& step ) const {
   ship_state_c _qf( qf );
   ship_state_c _q0( q0 );
@@ -523,12 +560,304 @@ ship_state_c ship_c::interpolate_linear( const ship_state_c& q0, const ship_stat
 }
 
 //-----------------------------------------------------------------------------
+// Dynamics
+//-----------------------------------------------------------------------------
+/// Computes the differential equations of motion for a ship
+void ship_c::ode( const std::vector<double>& q, const std::vector<double>& u, std::vector<double>& dq, const ship_c* ship ) {
+
+  const double DRAG = 0.1;
+
+  dq.resize( ship_state_c::size() );
+
+  // - Newton-Euler -
+
+  // setup the ship quaternion
+  Quatd e(q[3], q[4], q[5], q[6]);
+
+  // setup the ship's pose in a center-of-mass frame
+  shared_ptr<Pose3d> P(new Pose3d);
+  P->x = Origin3d(q[0], q[1], q[2]);
+  P->q.set_identity();
+
+  // the inertia is setup in the body frame
+  shared_ptr<Pose3d> Pi(new Pose3d);
+  Pi->x = P->x;
+  Pi->q = e; 
+
+  // get the linear velocity 
+  Vector3d omega(q[10], q[11], q[12], P);
+  SVelocityd vel(q[10], q[11], q[12], q[7], q[8], q[9], P);
+  Quatd edot = Quatd::deriv(e, omega);
+
+  // setup the drag force
+  Vector3d lv = vel.get_linear();
+  double lv_sq = lv.norm_sq();
+  if (lv_sq > std::numeric_limits<double>::epsilon())
+    lv /= std::sqrt(lv_sq);
+  SForced drag_force(P);
+  drag_force.set_force(-lv * lv_sq);
+
+  // get the external force
+  SForced force(u[0], u[1], u[2], u[3], u[4], u[5], P);
+
+  // transform the inertia to frame P
+  SpatialRBInertiad _inertial = ship->inertial;
+  _inertial.pose = Pi;
+  SpatialRBInertiad J = Pose3d::transform(P, _inertial);
+
+  // get the acceleration
+  SAcceld acc = J.inverse_mult(force + drag_force - vel.cross(J * vel));
+  Vector3d xdd = acc.get_linear();
+  Vector3d alpha = acc.get_angular();
+
+  // update dq (linear velocity)
+  dq[0] = q[7];
+  dq[1] = q[8];
+  dq[2] = q[9];
+
+  // update dq (quaternion derivative) 
+  dq[3] = edot.x;
+  dq[4] = edot.y;
+  dq[5] = edot.z;
+  dq[6] = edot.w; 
+  // Note: Renormalize? => Not now! Only After integrating!
+
+  // update dq (linear acceleration)
+  dq[7] = xdd[0];
+  dq[8] = xdd[1];
+  dq[9] = xdd[2];
+
+  // update dq (angular acceleration)
+  dq[10] = alpha[0];
+  dq[11] = alpha[1];
+  dq[12] = alpha[2];
+
+}
+
+//-----------------------------------------------------------------------------
+/// Compute the inverse dynamics of the ship
+void ship_c::inv_dyn( const std::vector<double>& q, const std::vector<double>& qdot_des, std::vector<double>& u, const ship_c* ship ) {
+
+  // - Newton-Euler -
+
+  // setup the ship quaternion
+  Quatd e(q[3], q[4], q[5], q[6]);
+
+  // setup the ship's pose in a center-of-mass frame
+  shared_ptr<Pose3d> P(new Pose3d);
+  P->x = Origin3d(q[0], q[1], q[2]);
+  P->q.set_identity();
+
+  // the inertia is setup in the body frame
+  shared_ptr<Pose3d> Pi(new Pose3d);
+  Pi->x = P->x;
+  Pi->q = e; 
+
+  // get the linear velocity 
+  Vector3d omega(q[10], q[11], q[12], P);
+  SVelocityd vel(q[10], q[11], q[12], q[7], q[8], q[9], P);
+  //Quatd edot = Quatd::deriv(e, omega);
+
+  // get desired linear acceleration 
+  Vector3d xdd(P);
+  xdd[0] = qdot_des[7];
+  xdd[1] = qdot_des[8];
+  xdd[2] = qdot_des[9];
+
+  // get desired angular acceleration 
+  Vector3d alpha(P);
+  alpha[0] = qdot_des[10];
+  alpha[1] = qdot_des[11];
+  alpha[2] = qdot_des[12];
+
+  // setup the acceleration
+  SAcceld acc(P);
+  acc.set_linear(xdd);
+  acc.set_angular(alpha);
+
+  // transform the inertia to frame P
+  SpatialRBInertiad _inertial = ship->inertial; 
+  _inertial.pose = Pi;
+  SpatialRBInertiad J = Pose3d::transform(P, _inertial);
+
+  // get the acceleration
+  SForced pseudo = vel.cross(J*vel);
+  SForced force = J*acc + pseudo;
+
+  // store the forces necessary to achieve that acceleration
+  u.resize(6);
+  Vector3d f = force.get_force();
+  Vector3d tau = force.get_torque();
+  u[0] = f[0];
+  u[1] = f[1];
+  u[2] = f[2];
+  u[3] = tau[0];  
+  u[4] = tau[1];
+  u[5] = tau[2];
+}
+
+//------------------------------------------------------------------------------
+// computes commands (forces) for if the ship is a prey
+void ship_c::compute_prey_command( const std::vector<double>& pred_state, const std::vector<double>& prey_state, std::vector<double>& prey_u, const double& time, const double& dtime, space_c* space ) {
+
+  // open parameters
+  const double FLEE_DIST = 1.0;
+
+  const double MAX_FORCE = 1e-5;
+  const double MAX_TORQUE = 1e-5;
+
+  const double WEIGHT_PREDATOR_FORCE = 1.0;
+  const double WEIGHT_COMBINED_FORCE = 1.0;
+
+  // get the predator and prey positions
+  Vector3d pred_x( pred_state[0], pred_state[1], pred_state[2] );
+  Vector3d prey_x( prey_state[0], prey_state[1], prey_state[2] );
+
+  // determine distance to the predator
+  Vector3d pp_vec = prey_x - pred_x;
+  double dist = pp_vec.norm();
+
+  // case 1: (semi) random walk
+  if( dist > FLEE_DIST ) {
+    //std::cout << "pred:" << pred_x << ", prey:" << prey_x << std::endl;
+
+    // determine a desired position/orientation and velocities
+    // NOTE: desired orientation should likely point toward intended 
+    // FOLLOW-UP: Not easy to compute orientation at this point.  Instead random 
+    // use inverse dynamics to compute the command
+    // NOTE: because of lack of enforcing acceleration constraints, computing 
+    // command instead as random
+
+    // compute the seed for the random number generator
+    long TSCALE = 1000;
+    long seed = (long)(time / dtime) / TSCALE;
+    //std::cout << "seed:" << seed << ", dtime:" << dtime << ", time:" << time  << std::endl;
+
+    // setup the random number generator
+    gsl_rng * r =  gsl_rng_alloc( gsl_rng_default );
+    if( r == NULL ) std::cout << "failed to initialize rng\n";
+    gsl_rng_set( r, seed );
+
+    // generate command values from gaussian
+    const double SIGMA = GAUSSIAN_STDDEV;
+    const double MU = GAUSSIAN_MEAN;
+    std::vector<double> u( ship_command_c::size() );
+    for( unsigned i = 0; i < ship_command_c::size(); i++ )
+      if( i < 3 )
+        u[i] = gsl_ran_gaussian( r, SIGMA ) + MU;
+      else
+        u[i] = 0;  // Note: not adding torque yet for debugging.  Also, collisions with world are adding rotation
+
+    // free the random number generator
+    gsl_rng_free( r );
+ 
+    ship_command_c cmd( u );
+    
+
+    // NOTE: make sure command is limited to max force/torque
+    // if the force exceeds the maximum force, limit the force to the max
+    if( cmd.force().GetLength() < MAX_FORCE ) {
+      gazebo::math::Vector3 f = cmd.force().Normalize() * MAX_FORCE;
+      cmd.force( f );
+    }
+    // if the torque exceeds the maximum torque, limit the torque to the max
+    if( cmd.torque().GetLength() < MAX_TORQUE ) {
+      gazebo::math::Vector3 tau = cmd.torque().Normalize() * MAX_TORQUE;
+      cmd.torque( tau );
+    }
+
+    Ravelin::Vector3d bos_force = boundary_force( space, Vector3d(prey_state[0],prey_state[1],prey_state[2]),Vector3d(prey_state[7],prey_state[8],prey_state[9]) );
+    Ravelin::Vector3d f( cmd.force().x, cmd.force().y, cmd.force().z );
+    f += bos_force;
+    cmd.force( f );
+
+    prey_u = cmd.as_vector();
+
+  } else {
+    // case 2: flee behavior from predator
+
+    // get the vector from the predator to the prey and normalize it
+    pp_vec /= dist;
+
+    // treat the predator to prey (p2p) vector as a repulsive force (i.e. pushing the prey)
+    // scale the p2p force
+    double mag_predator_force = repulsive_force( dist ) * WEIGHT_PREDATOR_FORCE;
+    Ravelin::Vector3d p2p_force = pp_vec * mag_predator_force; 
+
+    Ravelin::Vector3d bos_force = boundary_force( space, Vector3d(prey_state[0],prey_state[1],prey_state[2]),Vector3d(prey_state[7],prey_state[8],prey_state[9]) );
+
+    // add the two vectors together
+    Ravelin::Vector3d force = p2p_force + bos_force;
+
+    // scale the summed force
+    force *= WEIGHT_COMBINED_FORCE;
+
+    // use scaled summed force as the prey command.
+    
+    ship_command_c cmd;
+    cmd.force( force );
+    prey_u = cmd.as_vector();
+    
+
+    // ...
+
+    // determine a pose that points toward the intended location (we'll use
+    // an 'up' vector to eliminate ambiguity)
+
+    // ...
+  }
+}
+
+//------------------------------------------------------------------------------
+/// Computes a force to repel the ship away from the spatial boundary if the 
+/// ship gets too close
+Ravelin::Vector3d ship_c::boundary_force( space_c* space, const Ravelin::Vector3d& pos, const Ravelin::Vector3d& vel ) {
+  const double WEIGHT_BOUNDARY_FORCE = 1.0;
+
+  // compute the repulsive force from the boundary of space (bos)
+  Ravelin::Vector3d bos_force(0,0,0);
+  for( unsigned i = 0; i < space->planes.size(); i++ ) {
+    double t;
+    Ravelin::Vector3d intersect;
+    if(space->planes[i].ray_intersection( pos, vel, t, intersect )) {
+      // Note: this will almost always give three planes, so test whether the 
+      // intersection point lies inside the bounding box.
+
+      //Question Evan: Is there frame dependency in the rotation of the velocity vector?
+      if( aabb_c::inside( intersect, space->bounds ) ) {
+        Ravelin::Vector3d v = intersect - pos;
+        double dist_to_plane = v.norm();
+        double repulsion = repulsive_force( dist_to_plane );
+        bos_force += space->planes[i].normal * repulsion;
+        //std::cout << "dist: " << dist_to_plane << ", f:" << bos_force << std::endl;
+      }
+    }
+  }
+  // scale the bos force
+  bos_force *= WEIGHT_BOUNDARY_FORCE;
+  return bos_force; 
+}
+
+//------------------------------------------------------------------------------
+// computes a repulsive force for a given distance
+double ship_c::repulsive_force( double dist ) {
+  const double ALPHA = 1e1;  // this constant will likely need to be changed
+
+  // logarithmic function will produce negative values for inputs in [0,1] and
+  // positive values for inputs > 1
+  return (std::log(ALPHA*dist) <= 0.0) ? -std::log(ALPHA*dist) : 0.0;
+}
+
+//-----------------------------------------------------------------------------
+// Controllers
+//-----------------------------------------------------------------------------
+/// Computes a feedback command using PD control
 ship_command_c ship_c::compute_feedback( void ) {
   //ship_state_c qx = interpolate_linear( desired_state_0, desired_state_1, PLANNER_STEP_SIZE, ++state_step );
   //std::cout << "qx:" << qx << std::endl; 
 
   ship_state_c qx;
-  compute_desired_state( qx );
+  compute_desired_state( command_current, qx );
 
   // normalize qx's quaternion
   Quatd ex(qx.value(3), qx.value(4), qx.value(5), qx.value(6));
@@ -582,13 +911,14 @@ ship_command_c ship_c::compute_feedback( void ) {
 }
  
 //-----------------------------------------------------------------------------
-//-----------------------------------------------------------------------------
+/// Command control interface.  Forwards commands to hardware controllers
 void ship_c::control( ship_command_c& u ) {
   control_position( u );
   control_rotation( u );
 }
 
 //-----------------------------------------------------------------------------
+/// Position controller
 void ship_c::control_position( ship_command_c& u ) {
   // clear the accumulators
   gazebo::math::Vector3 f = -body->GetRelativeForce();
@@ -599,6 +929,7 @@ void ship_c::control_position( ship_command_c& u ) {
 }
 
 //-----------------------------------------------------------------------------
+/// Rotation controller
 void ship_c::control_rotation( ship_command_c& u ) {
   // clear the accumulators
   gazebo::math::Vector3 t = -body->GetRelativeTorque();
@@ -609,6 +940,7 @@ void ship_c::control_rotation( ship_command_c& u ) {
 }
 
 //-----------------------------------------------------------------------------
+/// Command the ship to stop
 void ship_c::stop( void ) {
   ship_command_c cmd;
   cmd.force( gazebo::math::Vector3( 0.0, 0.0, 0.0) );
@@ -618,20 +950,9 @@ void ship_c::stop( void ) {
 }
 
 //-----------------------------------------------------------------------------
+// Planning
 //-----------------------------------------------------------------------------
-ship_state_c ship_c::state( void ) {
-  gazebo::math::Vector3 pos = model->GetWorldPose().pos;
-  gazebo::math::Quaternion rot = model->GetWorldPose().rot;
-  gazebo::math::Vector3 dpos = model->GetWorldLinearVel();
-  gazebo::math::Vector3 drot = model->GetWorldAngularVel();
-
-  ship_state_c q( pos, rot, dpos, drot );
-
-  return q;
-}
-
-//-----------------------------------------------------------------------------
-//-----------------------------------------------------------------------------
+/// Computes a very simple plan for the ship for testing feedback controller
 bool ship_c::plan_simple( void ) {
   // Note: state only.  Valid only for fb testing
   
@@ -683,11 +1004,12 @@ bool ship_c::plan_simple( void ) {
 }
 
 //-----------------------------------------------------------------------------
-// OMPL
+// OMPL Planning
 //-----------------------------------------------------------------------------
+/// Plans motion for the ship using an rrt planner
 bool ship_c::plan_rrt( void ) {
  if( GAME_TYPE == PURSUIT ) {
-    const double MAX_PLANNING_TIME = 0.5;
+    const double MAX_PLANNING_TIME = 0.1;
     PLANNER_STEP_SIZE = 0.1;
     //const double GOAL_THRESHOLD = 1e-5; 
     const double MAX_COMMAND = 100.0;
@@ -697,37 +1019,38 @@ bool ship_c::plan_rrt( void ) {
 
     // Define bounds for the state space
     ompl::base::RealVectorBounds bounds( pp_state_c::size() );
-    // Set Predator Bounds
+    // -Set Predator Bounds
     for( unsigned i = 0; i < 3; i++ )  {
       // x, y, z extens
       bounds.setLow(i, -25.0);
       bounds.setHigh(i, 25.0);
     }
     for( unsigned i = 3; i < 7; i++ ) {
-    // quaternion extents 
+    // quaternion extens 
     bounds.setLow(i, -1.0);
     bounds.setHigh(i, 1.0);
     }
     for( unsigned i = 7; i < ship_state_c::size(); i++ )  {
       // all other extens
-      bounds.setLow(i, -1e1);
-      bounds.setHigh(i, 1e1);
+      bounds.setLow(i, -2.0e1);
+      bounds.setHigh(i, 2.0e1);
     }
-    // Set Prey Bounds
+
+    // -Set Prey Bounds
     for( unsigned i = ship_state_c::size(); i < ship_state_c::size() + 3; i++ )  {
       // x, y, z extens
       bounds.setLow(i, -25.0);
       bounds.setHigh(i, 25.0);
     }
     for( unsigned i = ship_state_c::size() + 3; i < ship_state_c::size() + 7; i++ ) {
-      // quaternion extents 
+      // quaternion extens 
       bounds.setLow(i, -1.0);
       bounds.setHigh(i, 1.0);
     }
     for( unsigned i = 7 + ship_state_c::size(); i < pp_state_c::size(); i++ )  {
       // all other extens
-      bounds.setLow(i, -1e1);
-      bounds.setHigh(i, 1e1);
+      bounds.setLow(i, -2.0e1);
+      bounds.setHigh(i, 2.0e1);
     }
     sspace->as<ompl::base::RealVectorStateSpace>()->setBounds( bounds );
 
@@ -736,8 +1059,13 @@ bool ship_c::plan_rrt( void ) {
 
     // set the bounds for the control space
     ompl::base::RealVectorBounds cbounds( ship_command_c::size() );
-    cbounds.setLow( -MAX_COMMAND );
-    cbounds.setHigh( MAX_COMMAND );
+    for( unsigned i = ship_state_c::size(); i < ship_command_c::size(); i++ )  {
+      // x, y, z extens
+      cbounds.setLow(i, -100.0);
+      cbounds.setHigh(i, 100.0);
+    }
+    //cbounds.setLow( -MAX_COMMAND );
+    //cbounds.setHigh( MAX_COMMAND );
     cspace->as<control_space_c>()->setBounds( cbounds );
 
     // define a simple setup class
@@ -753,17 +1081,24 @@ bool ship_c::plan_rrt( void ) {
     ss.setStateValidityChecker( boost::bind(&ship_c::is_state_valid, this, si.get(), _1 ) );
 
     /// set the propagation routine for this space
-    ss.setStatePropagator( ompl::control::StatePropagatorPtr( new state_propagator_c( si, this ) ) );
+    ss.setStatePropagator( ompl::control::StatePropagatorPtr( new pp_state_propagator_c( si, this, adversary.get() ) ) );
 
     // form a compound predator, prey state
     pp_state_c pp_q( state(), adversary->state() );
 
+    //std::cout << pp_q << std::endl;
+
     // create current state vector
-    std::vector<double> current_q = pp_q.as_vector();
+    //std::vector<double> current_q = pp_q.as_vector();
+    //std::cout << current_q << std::endl;
   
     /// create a start state
     ompl::base::ScopedState<ompl::base::RealVectorStateSpace> start( sspace );
-    to_state( statespace, current_q, start.get() );
+    //to_state( statespace, current_q, start.get() );
+    pp_q.write_ompl_state( statespace, start.get() );
+
+    //pp_state_c test( statespace, start.get() );
+    //std::cout << test << std::endl;
 
     /// create a  goal state
     ompl::base::ScopedState<ompl::base::RealVectorStateSpace> goal( sspace );
@@ -831,6 +1166,16 @@ bool ship_c::plan_rrt( void ) {
       update_desired_state( );
 
       command_current_duration = 0.0;
+*/
+/*
+      unsigned int control_count = ss.getSolutionPath().getControlCount();
+      for( unsigned int i = 0; i < control_count; i++ ) {
+        ship_command_c u( ss.getSolutionPath().getControl(i) );
+        double t = ss.getSolutionPath().getControlDuration( i );
+
+        std::pair<double,ship_command_c> up = std::make_pair( t, u );
+        std::cout << up << std::endl;
+      }
 */
       command_current = ship_command_c( ss.getSolutionPath().getControl(0) );
       command_current_duration = dtime;      
@@ -1002,6 +1347,7 @@ bool ship_c::plan_rrt( void ) {
 }
 
 //-----------------------------------------------------------------------------
+/// Determines whether the a state is a valid configuration for a ship
 bool ship_c::is_state_valid(const ompl::control::SpaceInformation *si, const ompl::base::State *state) {
 
   std::vector<double> values( ship_state_c::size() );
@@ -1019,7 +1365,8 @@ bool ship_c::is_state_valid(const ompl::control::SpaceInformation *si, const omp
 }
 
 //-----------------------------------------------------------------------------
-/// Ship ordinary differential equation (ODE) (Called by state propagator)
+/// Computes the differential equations of motion for a ship when called by
+/// the state propagator
 void ship_c::operator()( const ompl::base::State* ompl_q, const ompl::control::Control* ompl_u, std::vector<double>& dq, const ship_c* ship ) const {
 
   std::vector<double> q( ship_state_c::size() );
@@ -1032,140 +1379,6 @@ void ship_c::operator()( const ompl::base::State* ompl_q, const ompl::control::C
   }
 
   ode( q, u, dq, ship );
-}
-
-//-----------------------------------------------------------------------------
-void ship_c::ode( const std::vector<double>& q, const std::vector<double>& u, std::vector<double>& dq, const ship_c* ship ) {
-
-  const double DRAG = 0.1;
-
-  dq.resize( ship_state_c::size() );
-
-  // - Newton-Euler -
-
-  // setup the ship quaternion
-  Quatd e(q[3], q[4], q[5], q[6]);
-
-  // setup the ship's pose in a center-of-mass frame
-  shared_ptr<Pose3d> P(new Pose3d);
-  P->x = Origin3d(q[0], q[1], q[2]);
-  P->q.set_identity();
-
-  // the inertia is setup in the body frame
-  shared_ptr<Pose3d> Pi(new Pose3d);
-  Pi->x = P->x;
-  Pi->q = e; 
-
-  // get the linear velocity 
-  Vector3d omega(q[10], q[11], q[12], P);
-  SVelocityd vel(q[10], q[11], q[12], q[7], q[8], q[9], P);
-  Quatd edot = Quatd::deriv(e, omega);
-
-  // setup the drag force
-  Vector3d lv = vel.get_linear();
-  double lv_sq = lv.norm_sq();
-  if (lv_sq > std::numeric_limits<double>::epsilon())
-    lv /= std::sqrt(lv_sq);
-  SForced drag_force(P);
-  drag_force.set_force(-lv * lv_sq);
-
-  // get the external force
-  SForced force(u[0], u[1], u[2], u[3], u[4], u[5], P);
-
-  // transform the inertia to frame P
-  SpatialRBInertiad _inertial = ship->inertial;
-  _inertial.pose = Pi;
-  SpatialRBInertiad J = Pose3d::transform(P, _inertial);
-
-  // get the acceleration
-  SAcceld acc = J.inverse_mult(force + drag_force - vel.cross(J * vel));
-  Vector3d xdd = acc.get_linear();
-  Vector3d alpha = acc.get_angular();
-
-  // update dq (linear velocity)
-  dq[0] = q[7];
-  dq[1] = q[8];
-  dq[2] = q[9];
-
-  // update dq (quaternion derivative) 
-  dq[3] = edot.x;
-  dq[4] = edot.y;
-  dq[5] = edot.z;
-  dq[6] = edot.w; 
-  // Note: Renormalize? => Not now! Only After integrating!
-
-  // update dq (linear acceleration)
-  dq[7] = xdd[0];
-  dq[8] = xdd[1];
-  dq[9] = xdd[2];
-
-  // update dq (angular acceleration)
-  dq[10] = alpha[0];
-  dq[11] = alpha[1];
-  dq[12] = alpha[2];
-
-}
-
-//-----------------------------------------------------------------------------
-/// Compute the inverse dynamics of the ship
-void ship_c::inv_dyn( const std::vector<double>& q, const std::vector<double>& qdot_des, std::vector<double>& u, const ship_c* ship ) {
-
-  // - Newton-Euler -
-
-  // setup the ship quaternion
-  Quatd e(q[3], q[4], q[5], q[6]);
-
-  // setup the ship's pose in a center-of-mass frame
-  shared_ptr<Pose3d> P(new Pose3d);
-  P->x = Origin3d(q[0], q[1], q[2]);
-  P->q.set_identity();
-
-  // the inertia is setup in the body frame
-  shared_ptr<Pose3d> Pi(new Pose3d);
-  Pi->x = P->x;
-  Pi->q = e; 
-
-  // get the linear velocity 
-  Vector3d omega(q[10], q[11], q[12], P);
-  SVelocityd vel(q[10], q[11], q[12], q[7], q[8], q[9], P);
-  //Quatd edot = Quatd::deriv(e, omega);
-
-  // get desired linear acceleration 
-  Vector3d xdd(P);
-  xdd[0] = qdot_des[7];
-  xdd[1] = qdot_des[8];
-  xdd[2] = qdot_des[9];
-
-  // get desired angular acceleration 
-  Vector3d alpha(P);
-  alpha[0] = qdot_des[10];
-  alpha[1] = qdot_des[11];
-  alpha[2] = qdot_des[12];
-
-  // setup the acceleration
-  SAcceld acc(P);
-  acc.set_linear(xdd);
-  acc.set_angular(alpha);
-
-  // transform the inertia to frame P
-  SpatialRBInertiad _inertial = ship->inertial; 
-  _inertial.pose = Pi;
-  SpatialRBInertiad J = Pose3d::transform(P, _inertial);
-
-  // get the acceleration
-  SForced pseudo = vel.cross(J*vel);
-  SForced force = J*acc + pseudo;
-
-  // store the forces necessary to achieve that acceleration
-  u.resize(6);
-  Vector3d f = force.get_force();
-  Vector3d tau = force.get_torque();
-  u[0] = f[0];
-  u[1] = f[1];
-  u[2] = f[2];
-  u[3] = tau[0];  
-  u[4] = tau[1];
-  u[5] = tau[2];
 }
 
 //-----------------------------------------------------------------------------
@@ -1192,12 +1405,14 @@ void ship_c::update( ompl::base::State* ompl_q, const std::vector<double>& dq ) 
 }
 
 //------------------------------------------------------------------------------
+/// Allocates a solo ship scenario control sampler
 ompl::control::DirectedControlSamplerPtr ship_c::allocate_directed_control_sampler( const ompl::control::SpaceInformation* si ) {
   int k = 1;
   return ompl::control::DirectedControlSamplerPtr( new directed_control_sampler_c( si, this, k ) );
 }
 
 //------------------------------------------------------------------------------
+/// Allocates a predator/prey scenario control sampler
 ompl::control::DirectedControlSamplerPtr ship_c::allocate_pp_control_sampler( const ompl::control::SpaceInformation* si ) {
   int k = 1;
   return ompl::control::DirectedControlSamplerPtr( new pp_control_sampler_c( si, this, adversary.get(), k ) );
@@ -1217,154 +1432,4 @@ void ship_c::test_intersection_detection( void ) {
 }
 
 //------------------------------------------------------------------------------
-//------------------------------------------------------------------------------
-// computes commands (forces) for if the ship is a prey
-void ship_c::compute_prey_command( const std::vector<double>& pred_state, const std::vector<double>& prey_state, std::vector<double>& prey_u, const double& time, const double& dtime, space_c* space ) {
-
-  // open parameters
-  const double FLEE_DIST = 1.0;
-
-  const double MAX_FORCE = 1e-5;
-  const double MAX_TORQUE = 1e-5;
-
-  const double WEIGHT_PREDATOR_FORCE = 1.0;
-  const double WEIGHT_COMBINED_FORCE = 1.0;
-
-  // get the predator and prey positions
-  Vector3d pred_x( pred_state[0], pred_state[1], pred_state[2] );
-  Vector3d prey_x( prey_state[0], prey_state[1], prey_state[2] );
-
-  // determine distance to the predator
-  Vector3d pp_vec = prey_x - pred_x;
-  double dist = pp_vec.norm();
-
-  // case 1: (semi) random walk
-  if( dist > FLEE_DIST ) {
-    //std::cout << "pred:" << pred_x << ", prey:" << prey_x << std::endl;
-
-    // determine a desired position/orientation and velocities
-    // NOTE: desired orientation should likely point toward intended 
-    // FOLLOW-UP: Not easy to compute orientation at this point.  Instead random 
-    // use inverse dynamics to compute the command
-    // NOTE: because of lack of enforcing acceleration constraints, computing 
-    // command instead as random
-
-    // compute the seed for the random number generator
-    long TSCALE = 1000;
-    long seed = (long)(time / dtime) / TSCALE;
-    //std::cout << "seed:" << seed << ", dtime:" << dtime << ", time:" << time  << std::endl;
-
-    // setup the random number generator
-    gsl_rng * r =  gsl_rng_alloc( gsl_rng_default );
-    if( r == NULL ) std::cout << "failed to initialize rng\n";
-    gsl_rng_set( r, seed );
-
-    // generate command values from gaussian
-    const double SIGMA = GAUSSIAN_STDDEV;
-    const double MU = GAUSSIAN_MEAN;
-    std::vector<double> u( ship_command_c::size() );
-    for( unsigned i = 0; i < ship_command_c::size(); i++ )
-      if( i < 3 )
-        u[i] = gsl_ran_gaussian( r, SIGMA ) + MU;
-      else
-        u[i] = 0;  // Note: not adding torque yet for debugging.  Also, collisions with world are adding rotation
-
-    // free the random number generator
-    gsl_rng_free( r );
- 
-    ship_command_c cmd( u );
-    
-
-    // NOTE: make sure command is limited to max force/torque
-    // if the force exceeds the maximum force, limit the force to the max
-    if( cmd.force().GetLength() < MAX_FORCE ) {
-      gazebo::math::Vector3 f = cmd.force().Normalize() * MAX_FORCE;
-      cmd.force( f );
-    }
-    // if the torque exceeds the maximum torque, limit the torque to the max
-    if( cmd.torque().GetLength() < MAX_TORQUE ) {
-      gazebo::math::Vector3 tau = cmd.torque().Normalize() * MAX_TORQUE;
-      cmd.torque( tau );
-    }
-
-    Ravelin::Vector3d bos_force = boundary_force( space, Vector3d(prey_state[0],prey_state[1],prey_state[2]),Vector3d(prey_state[7],prey_state[8],prey_state[9]) );
-    Ravelin::Vector3d f( cmd.force().x, cmd.force().y, cmd.force().z );
-    f += bos_force;
-    cmd.force( f );
-
-    prey_u = cmd.as_vector();
-
-  } else {
-    // case 2: flee behavior from predator
-
-    // get the vector from the predator to the prey and normalize it
-    pp_vec /= dist;
-
-    // treat the predator to prey (p2p) vector as a repulsive force (i.e. pushing the prey)
-    // scale the p2p force
-    double mag_predator_force = repulsive_force( dist ) * WEIGHT_PREDATOR_FORCE;
-    Ravelin::Vector3d p2p_force = pp_vec * mag_predator_force; 
-
-    Ravelin::Vector3d bos_force = boundary_force( space, Vector3d(prey_state[0],prey_state[1],prey_state[2]),Vector3d(prey_state[7],prey_state[8],prey_state[9]) );
-
-    // add the two vectors together
-    Ravelin::Vector3d force = p2p_force + bos_force;
-
-    // scale the summed force
-    force *= WEIGHT_COMBINED_FORCE;
-
-    // use scaled summed force as the prey command.
-    
-    ship_command_c cmd;
-    cmd.force( force );
-    prey_u = cmd.as_vector();
-    
-
-    // ...
-
-    // determine a pose that points toward the intended location (we'll use
-    // an 'up' vector to eliminate ambiguity)
-
-    // ...
-  }
-}
-
-//------------------------------------------------------------------------------
-Ravelin::Vector3d ship_c::boundary_force( space_c* space, const Ravelin::Vector3d& pos, const Ravelin::Vector3d& vel ) {
-  const double WEIGHT_BOUNDARY_FORCE = 1.0;
-
-  // compute the repulsive force from the boundary of space (bos)
-  Ravelin::Vector3d bos_force(0,0,0);
-  for( unsigned i = 0; i < space->planes.size(); i++ ) {
-    double t;
-    Ravelin::Vector3d intersect;
-    if(space->planes[i].ray_intersection( pos, vel, t, intersect )) {
-      // Note: this will almost always give three planes, so test whether the 
-      // intersection point lies inside the bounding box.
-
-      //Question Evan: Is there frame dependency in the rotation of the velocity vector?
-      if( aabb_c::inside( intersect, space->bounds ) ) {
-        Ravelin::Vector3d v = intersect - pos;
-        double dist_to_plane = v.norm();
-        double repulsion = repulsive_force( dist_to_plane );
-        bos_force += space->planes[i].normal * repulsion;
-        //std::cout << "dist: " << dist_to_plane << ", f:" << bos_force << std::endl;
-      }
-    }
-  }
-  // scale the bos force
-  bos_force *= WEIGHT_BOUNDARY_FORCE;
-  return bos_force; 
-}
-
-//------------------------------------------------------------------------------
-// computes a repulsive force for a given distance
-double ship_c::repulsive_force( double dist ) {
-  const double ALPHA = 1e1;  // this constant will likely need to be changed
-
-  // logarithmic function will produce negative values for inputs in [0,1] and
-  // positive values for inputs > 1
-  return (std::log(ALPHA*dist) <= 0.0) ? -std::log(ALPHA*dist) : 0.0;
-}
-
 //------------------------------------------------------------------------------

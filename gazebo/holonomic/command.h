@@ -146,7 +146,7 @@ public:
   }
 
   //---------------------------------------------------------------------------
-  std::vector<double> as_vector( void ) {
+  std::vector<double> as_vector( void ) const {
     std::vector<double> v( size() );
     for( unsigned i = 0; i < size(); i++ ) {
       v[i] = _values[i];

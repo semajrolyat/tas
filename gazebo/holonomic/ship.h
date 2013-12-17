@@ -264,7 +264,7 @@ protected:
   void update_desired_state( void );
 
   // compute the desired state based on the current command and current state
-  void compute_desired_state( ship_state_c& result );
+  void compute_desired_state( const ship_command_c& command, ship_state_c& result );
 
   // interpolates state given two states
   ship_state_c interpolate_linear( const ship_state_c& q0, const ship_state_c& qf, const double& deltat, const int& step ) const; 

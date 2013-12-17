@@ -1,5 +1,6 @@
 #include <space.h>
 
+#include <maze.h>
 
 //-----------------------------------------------------------------------------
 // Constructors
@@ -11,6 +12,29 @@ space_c::space_c( void ) {
 //-----------------------------------------------------------------------------
 space_c::space_c( gazebo::physics::WorldPtr _world ) { 
   world = _world;
+
+  //sdf::SDF obssdf = make_maze();
+
+  //world->InsertModelSDF( obssdf );
+/*
+  static bool first_call = true;
+  if( first_call ) {
+    maze_c maze( world );
+    maze.create( 1 );
+
+    gazebo::physics::ModelPtr mazemodel = world->GetModel("maze");
+    if( !mazemodel ) 
+      gzerr << "Unable to find model: maze\n";
+    first_call = false;
+
+    gazebo::physics::Model_V modelvector = world->GetModels();
+    for( unsigned i = 0; i < modelvector.size(); i++ ) {
+      std::string name = modelvector[i]->GetName();
+      std::cout << name << std::endl;
+    }
+    world->PrintEntityTree();
+  }
+*/
 }
 
 //-----------------------------------------------------------------------------
@@ -72,7 +96,7 @@ bool space_c::read( void ) {
 }
 
 //-----------------------------------------------------------------------------
-void space_c::make_maze( void ) {
+sdf::SDF space_c::make_maze( void ) {
 
   const int SEED = 1;
   srand( SEED );
@@ -229,6 +253,10 @@ void space_c::make_maze( void ) {
  
   obssdf.Write("maze.sdf");
 
+  return obssdf;
+
+/*
+  // Add the appropriate headers
   std::ifstream infile( "maze.sdf" );
   std::string str;
   
@@ -258,6 +286,7 @@ void space_c::make_maze( void ) {
     outfile.close();
     infile.close();
   }
+*/
 }
 
 //-----------------------------------------------------------------------------

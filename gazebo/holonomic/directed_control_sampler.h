@@ -1,6 +1,8 @@
 #ifndef _GAZEBO_SHIP_DIRECTED_CONTROL_SAMPLER_H_
 #define _GAZEBO_SHIP_DIRECTED_CONTROL_SAMPLER_H_
 
+//-----------------------------------------------------------------------------
+
 #include "ship.h"
 
 #include <ompl/base/State.h>
@@ -10,29 +12,36 @@
 #include <ompl/control/SimpleDirectedControlSampler.h>
 
 //-----------------------------------------------------------------------------
+/// Control sampler for the single ship scenario
 class directed_control_sampler_c : public ompl::control::SimpleDirectedControlSampler {
 public:
   ship_c* ship;
 
   //---------------------------------------------------------------------------
+  // Contructors
+  //---------------------------------------------------------------------------
   directed_control_sampler_c( const ompl::control::SpaceInformation *si, ship_c* _ship, unsigned int k = 1 ) :
-    SimpleDirectedControlSampler(si, k) //, cs_(si->allocControlSampler()), numControlSamples_(k)
+    SimpleDirectedControlSampler(si, k) 
   {
     ship = _ship;
   }
 
+  //---------------------------------------------------------------------------
+  // Destructor
   //---------------------------------------------------------------------------
   virtual ~directed_control_sampler_c( void ) {
 
   }
 
   //---------------------------------------------------------------------------
+  // Overloading base class
   //---------------------------------------------------------------------------
   virtual unsigned int getBestControl( ompl::control::Control *control, const ompl::base::State *source, ompl::base::State *dest, const ompl::control::Control *previous ) {
 
     const ompl::base::StateSpace *statespace = si_->getStateSpace().get();
 
-    const double DT = ship->PLANNER_STEP_SIZE;
+    //const double DT = ship->PLANNER_STEP_SIZE;
+    const double DT = ship->dtime;
     const unsigned NUM_STEPS = 1;
 
     // generate state vector(s)
@@ -40,9 +49,6 @@ public:
     from_state( statespace, source, q0 );
     std::vector<double> q1( ship_state_c::size() );
     from_state( statespace, dest, q1 );
-
-    //std::cout << "q0:" << q0 << std::endl;
-    //std::cout << "q1:" << q1 << std::endl;
 
     // normalize the destination state quaternion
     double qnorm = 0.0;
@@ -77,8 +83,6 @@ public:
     // call inverse dynamics
     std::vector<double> u;
     ship_c::inv_dyn( q0, dq, u, ship );
-
-    //std::cout << "u:" << u << std::endl;
 
     // copy u to control
     double *ctl = control->as<ompl::control::RealVectorControlSpace::ControlType>()->values;
@@ -125,8 +129,6 @@ public:
 
       // update dest
       to_state(statespace, q0, dest);
-
-      //std::cout << "q0_dest[" << k << "]:" << q0 << std::endl;
     }
 
     // return 1
@@ -134,47 +136,50 @@ public:
   }
 
 };
+//-----------------------------------------------------------------------------
 
+//-----------------------------------------------------------------------------
+/// Control Sampler for Predator and Prey pursuit scenario
 class pp_control_sampler_c : public ompl::control::SimpleDirectedControlSampler {
 public:
   ship_c* pred;
   ship_c* prey;
 
   //---------------------------------------------------------------------------
+  // Contructors
+  //---------------------------------------------------------------------------
   pp_control_sampler_c( const ompl::control::SpaceInformation *si, ship_c* _pred, ship_c* _prey, unsigned int k = 1 ) :
-    SimpleDirectedControlSampler(si, k) //, cs_(si->allocControlSampler()), numControlSamples_(k)
+    SimpleDirectedControlSampler(si, k) 
   {
     pred = _pred;
     prey = _prey;
   }
 
   //---------------------------------------------------------------------------
+  // Destructor
+  //---------------------------------------------------------------------------
   virtual ~pp_control_sampler_c( void ) {
 
   }
 
   //---------------------------------------------------------------------------
+  // Overloading base class
   //---------------------------------------------------------------------------
   virtual unsigned int getBestControl( ompl::control::Control *control, const ompl::base::State *source, ompl::base::State *dest, const ompl::control::Control *previous ) {
 
-    const ompl::base::StateSpace *statespace = si_->getStateSpace().get();
-    //std::vector<double> dq_pred;
+    ompl::base::StateSpace *statespace = si_->getStateSpace().get();
     const double DT = pred->PLANNER_STEP_SIZE;
     const unsigned NUM_STEPS = 1;
+    std::vector<double> q0_pred, q0_prey, q1_pred, q1_prey;
 
-    // *TODO: must fix from_state() to compensate for the new state types
-    // *TODO: (cont'd) following vectors should be init'd and populated:
-    // *TODO: (cont'd) q0_pred, q1_pred
-    std::vector<double> q0_pred( ship_state_c::size() );
-    from_state( statespace, source, q0_pred );
-    std::vector<double> q1_pred( ship_state_c::size() );
-    from_state( statespace, source, q1_pred );
-    std::vector<double> q0_prey( ship_state_c::size() );
-    from_state( statespace, source, q0_prey, ship_state_c::size() );
-    std::vector<double> q1_prey( ship_state_c::size() );
-    from_state( statespace, source, q1_prey, ship_state_c::size() );
+    // initialize state vectors from ompl state information
+    pp_state_c q0( statespace, source );
+    pp_state_c q1( statespace, dest );
+    q0_pred = q0.pred_vector();
+    q0_prey = q0.prey_vector();
+    q1_pred = q1.pred_vector();
+    q1_prey = q1.prey_vector();
 
- 
     // normalize the destination state quaternion for the predator; the
     // prey's state cannot be determined using 'dest' (b/c we do not plan
     // for commands to get the prey from one state to another)
@@ -211,10 +216,7 @@ public:
     // only need to be tried if the planner has a really hard time planning. 
     double time_input = (double) rand();
     std::vector<double> u_prey;
-    // TODO: not sure if the following DT is correct?
     ship_c::compute_prey_command(q0_pred, q0_prey, u_prey, time_input, DT, &pred->space);
-
-    //std::cout << "u:" << u << std::endl;
 
     // copy u to control
     double *ctl = control->as<ompl::control::RealVectorControlSpace::ControlType>()->values;
@@ -264,19 +266,17 @@ public:
       // renormalize quaternions
       ship_c::renormalize_state_quat(q0_pred);
       ship_c::renormalize_state_quat(q0_prey);
-      //std::cout << "q0_dest[" << k << "]:" << q0 << std::endl;
     }
 
-    // *TODO: update destination state from q0_pred, q0_prey
-    to_state(statespace, q0_pred, dest );
-    to_state(statespace, q0_prey, dest, ship_state_c::size() );
+    // update destination state from q0_pred, q0_prey
+    pp_state_c qf( q0_pred, q0_prey );
+    qf.write_ompl_state( statespace, dest );
 
     // return number of steps taken 
     return (unsigned) NUM_STEPS;
   }
 
 };
-//-----------------------------------------------------------------------------
 //-----------------------------------------------------------------------------
 
 #endif // _GAZEBO_SHIP_DIRECTED_CONTROL_SAMPLER_H_

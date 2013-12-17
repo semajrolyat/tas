@@ -1,5 +1,5 @@
-#ifndef _GAZEBO_SHIP_INTEGRATOR_H_
-#define _GAZEBO_SHIP_INTEGRATOR_H_
+#ifndef _INTEGRATOR_H_
+#define _INTEGRATOR_H_
 
 #include "command.h"
 #include "state.h"
@@ -14,9 +14,6 @@
 
 //-----------------------------------------------------------------------------
 
-//class ship_c;           // forward declaration
-
-//-----------------------------------------------------------------------------
 template<typename F>
 class euler_integrator_c {
 private:
@@ -61,13 +58,13 @@ public:
 template<typename F>
 class pp_integrator_c {
 private:
-  const ompl::base::StateSpace *statespace;
+  ompl::base::StateSpace *statespace;
   double time_step;
   F      ode;
 
   //---------------------------------------------------------------------------
 public:
-  pp_integrator_c( const ompl::base::StateSpace *_statespace, const double& _time_step ) : 
+  pp_integrator_c( ompl::base::StateSpace *_statespace, const double& _time_step ) : 
     statespace( _statespace ), 
     time_step( _time_step), 
     ode( _statespace )
@@ -80,26 +77,21 @@ public:
     statespace->copyState( result, start );
 
     // get the predator and prey states
-    //pp_state_c q( statespace, start );
-
-    // *TODO: get the predator and prey states
-    from_state( statespace, start, state_pred );
-    from_state( statespace, start, state_prey, ship_state_c::size() );
+    pp_state_c qi( statespace, start );
+    state_pred = qi.pred_vector();
+    state_prey = qi.prey_vector();
 
     // get the commands for the predator and prey
     ship_command_c u( control );
     u_pred = u.as_vector();
-    //std::vector<double> u_prey;
     ship_c::compute_prey_command(state_pred, state_prey, u_prey, pred->time, pred->dtime, &pred->space);
 
     // get the ODEs for the predator and prey
-    // NOTE: Incomplete Type
     ship_c::ode( state_pred, u_pred, dstate_pred, pred );
     ship_c::ode( state_prey, u_prey, dstate_prey, prey );
 
     // update the predator and prey states
-    for (unsigned i=0; i< state_pred.size(); i++)
-    {
+    for (unsigned i=0; i< state_pred.size(); i++) {
       state_pred[i] += dstate_pred[i] * time_step;
       state_prey[i] += dstate_prey[i] * time_step;
     }
@@ -109,18 +101,19 @@ public:
     gazebo::math::Quaternion ey(state_prey[6], state_prey[3], state_prey[4], state_prey[5]);
     ed.Normalize();
     ey.Normalize();
-    state_pred[6] = ed.x;
-    state_pred[3] = ed.y;
-    state_pred[4] = ed.z;
-    state_pred[5] = ed.w;
-    state_prey[6] = ey.x;
-    state_prey[3] = ey.y;
-    state_prey[4] = ey.z;
-    state_prey[5] = ey.w;
+    state_pred[3] = ed.x;
+    state_pred[4] = ed.y;
+    state_pred[5] = ed.z;
+    state_pred[6] = ed.w;
+    state_prey[3] = ey.x;
+    state_prey[4] = ey.y;
+    state_prey[5] = ey.z;
+    state_prey[6] = ey.w;
 
-    // *TODO: convert back to the state space
-    to_state( statespace, state_pred, result );
-    to_state( statespace, state_prey, result, ship_state_c::size() );
+    // convert back to the state space
+    pp_state_c qf( state_pred, state_prey );
+    qf.write_ompl_state( statespace, result );
+
     statespace->enforceBounds( result );
   }
 
@@ -136,5 +129,5 @@ public:
 };
 
 
-#endif // _GAZEBO_SHIP_INTEGRATOR_H_
+#endif // _INTEGRATOR_H_
 

@@ -19,6 +19,7 @@ set( SHIP_HEADERS
     ${CMAKE_CURRENT_SOURCE_DIR}/directed_control_sampler.h
     ${CMAKE_CURRENT_SOURCE_DIR}/plane.h 
     ${CMAKE_CURRENT_SOURCE_DIR}/space.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/maze.h
 )
 
 set( SHIP_SOURCES
@@ -39,8 +40,8 @@ set( SHIP_LIBRARIES
 
 include_directories( ${SHIP_INCLUDE_DIRS} )
 
-add_executable( maze space.cpp ${SHIP_HEADERS} ${SHIP_SOURCES} )
-target_link_libraries( maze ${SHIP_LIBRARIES} )
+#add_executable( maze space.cpp ${SHIP_HEADERS} ${SHIP_SOURCES} )
+#target_link_libraries( maze ${SHIP_LIBRARIES} )
 
 add_library( ship_controller SHARED ship.cpp space.cpp ${SHIP_HEADERS} ${SHIP_SOURCES} )
 target_link_libraries( ship_controller ${SHIP_LIBRARIES} )
