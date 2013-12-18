@@ -16,23 +16,51 @@ GZ_REGISTER_MODEL_PLUGIN( ship_c )
 //-----------------------------------------------------------------------------
 /// Default Constructor
 ship_c::ship_c( void ) { 
+  capture = false;
 
 }
 
 //-----------------------------------------------------------------------------
 /// Constructs a temporary for ompl planning
 ship_c::ship_c( ompl::base::StateSpace *_statespace ) : statespace(_statespace) {
+  capture = false;
 
 }
 
 //-----------------------------------------------------------------------------
 /// Constructs a ship reference based on player type for predator/prey scenario
-ship_c::ship_c( const player_type_e& player_type ) {
+ship_c::ship_c( ship_c* owner, const player_type_e& player_type ) {
   if( player_type == PREY ) {
     ADVERSARY_TYPE = PREDATOR;
   } else {
     ADVERSARY_TYPE = PREY;
   }
+  capture = false;
+  CAPTURE_DISTANCE = owner->CAPTURE_DISTANCE;
+  FLEE_DISTANCE = owner->FLEE_DISTANCE;
+  PREY_MAX_FORCE = owner->PREY_MAX_FORCE;
+  PREY_MAX_TORQUE = owner->PREY_MAX_TORQUE;
+  PREY_PREDATOR_FORCE_WEIGHT = owner->PREY_PREDATOR_FORCE_WEIGHT;
+  PREY_COMBINED_FORCE_WEIGHT = owner->PREY_COMBINED_FORCE_WEIGHT;
+  PREY_BOUNDARY_FORCE_WEIGHT = owner->PREY_BOUNDARY_FORCE_WEIGHT;
+
+  PLANNER_STEP_SIZE = owner->PLANNER_STEP_SIZE;
+  PLANNER_MAX_PLANNING_TIME = owner->PLANNER_MAX_PLANNING_TIME;
+  PLANNER_MAX_DERIVATIVE = owner->PLANNER_MAX_DERIVATIVE;
+  PLANNER_MAX_FORCE = owner->PLANNER_MAX_FORCE;
+  PLANNER_GOAL_BIAS = owner->PLANNER_GOAL_BIAS;
+
+  FEEDBACK_GAIN_PROPORTIONAL_POSITION = owner->FEEDBACK_GAIN_PROPORTIONAL_POSITION;
+  FEEDBACK_GAIN_DERIVATIVE_POSITION = owner->FEEDBACK_GAIN_DERIVATIVE_POSITION;
+  FEEDBACK_GAIN_PROPORTIONAL_ROTATION = owner->FEEDBACK_GAIN_PROPORTIONAL_ROTATION;
+  FEEDBACK_GAIN_DERIVATIVE_ROTATION = owner->FEEDBACK_GAIN_DERIVATIVE_ROTATION;
+
+  DRAG = owner->DRAG;
+  REPULSIVE_FORCE_ALPHA = owner->REPULSIVE_FORCE_ALPHA;
+
+  GAUSSIAN_MEAN = owner->GAUSSIAN_MEAN;
+  GAUSSIAN_VARIANCE = owner->GAUSSIAN_VARIANCE;
+  GAUSSIAN_STDDEV = sqrt(GAUSSIAN_VARIANCE);
 }
 
 //-----------------------------------------------------------------------------
@@ -75,11 +103,39 @@ void ship_c::Load(gazebo::physics::ModelPtr _model, sdf::ElementPtr _sdf) {
       return;
     }
   } else {
-      // bad configuration
-      GAME_TYPE = UNDEFINED;
-      gzerr << "Bad Configuration\n";
-      return;
+    // bad configuration
+    GAME_TYPE = UNDEFINED;
+    gzerr << "Bad Configuration\n";
+    return;
   }
+
+  capture = false;
+
+  CAPTURE_DISTANCE = 1.0;
+  FLEE_DISTANCE = 4.0;
+  PREY_MAX_FORCE = 1e-5;
+  PREY_MAX_TORQUE = 1e-5;
+  PREY_PREDATOR_FORCE_WEIGHT = 1.0;
+  PREY_COMBINED_FORCE_WEIGHT = 1.0;
+  PREY_BOUNDARY_FORCE_WEIGHT = 1.0;
+
+  PLANNER_STEP_SIZE = 0.1;
+  PLANNER_MAX_PLANNING_TIME = 0.1;
+  PLANNER_MAX_DERIVATIVE = 2e1;
+  PLANNER_MAX_FORCE = 1e2;
+  PLANNER_GOAL_BIAS = 0.05;
+
+  FEEDBACK_GAIN_PROPORTIONAL_POSITION = 100.0;
+  FEEDBACK_GAIN_DERIVATIVE_POSITION = 10.0;
+  FEEDBACK_GAIN_PROPORTIONAL_ROTATION = 10.0;
+  FEEDBACK_GAIN_DERIVATIVE_ROTATION = 1.0;
+
+  DRAG = 0.1;
+  REPULSIVE_FORCE_ALPHA = 1e1;
+
+  GAUSSIAN_MEAN = 0.0;
+  GAUSSIAN_VARIANCE = 35.0;
+  GAUSSIAN_STDDEV = sqrt(GAUSSIAN_VARIANCE);
 
   //---------------------------------------------------------------------------
   // Call Init Function (Note: target function subject to inheritance)
@@ -183,6 +239,26 @@ void ship_c::init( void ) {
 /// Encapsulates the sense phase of robot execution
 void ship_c::sense( void ) {
 
+  if( GAME_TYPE == SOLO ) return;
+
+  if( !capture ) {
+    std::vector<double> pred_q, prey_q;
+    ship_state_c predator, prey;
+    if( PLAYER_TYPE == PREY ) {
+      predator = adversary->state();
+      prey = state();
+    } else {
+      predator = state();
+      prey = adversary->state();
+    }
+    pred_q = predator.as_vector();
+    prey_q = prey.as_vector();
+    capture = has_captured( pred_q, prey_q );
+    if( capture ) {
+      stopped = true;
+      std::cout << "Prey is captured!" << std::endl; 
+    } 
+  }
 }
 
 //-----------------------------------------------------------------------------
@@ -198,7 +274,7 @@ bool ship_c::plan( void ) {
 
     pred_q = predator.as_vector();
     prey_q = prey.as_vector();
-    compute_prey_command( pred_q, prey_q, prey_u, time, dtime, &space );
+    compute_prey_command( pred_q, prey_q, prey_u, time, dtime, &space, this );
 
     command_current = ship_command_c( prey_u );
   } else if( GAME_TYPE == PURSUIT ) {
@@ -209,7 +285,8 @@ bool ship_c::plan( void ) {
 
       pred_q = predator.as_vector();
       prey_q = prey.as_vector();
-      compute_prey_command( pred_q, prey_q, prey_u, time, dtime, &space );
+      compute_prey_command( pred_q, prey_q, prey_u, time, dtime, &space, this );
+      std::cout << prey_u << std::endl;
 
       command_current = ship_command_c( prey_u );
     } else if( PLAYER_TYPE == PREDATOR ) {
@@ -291,6 +368,20 @@ void ship_c::renormalize_state_quat(std::vector<double>& q)
 }
 
 //-----------------------------------------------------------------------------
+bool ship_c::has_captured( const std::vector<double>& pred_state, const std::vector<double>& prey_state ) {
+  // get the predator and prey positions
+  Vector3d pred_x( pred_state[0], pred_state[1], pred_state[2] );
+  Vector3d prey_x( prey_state[0], prey_state[1], prey_state[2] );
+
+  Vector3d pp_vec = prey_x - pred_x;
+  double dist = pp_vec.norm();
+  std::cout << "dist:" << dist << ", CAPTURE_DISTANCE:" << CAPTURE_DISTANCE << std::endl;
+
+  if( dist <= CAPTURE_DISTANCE ) return true;
+  return false;
+}
+
+//-----------------------------------------------------------------------------
 // Gazebo Queries
 //-----------------------------------------------------------------------------
 /// Read a model definition from the gazebo system
@@ -357,7 +448,7 @@ bool ship_c::read_adversary( void ) {
     return false;
   }
   // Create the adversary reference
-  adversary = ship_p( new ship_c( ADVERSARY_TYPE ) ); 
+  adversary = ship_p( new ship_c( this, ADVERSARY_TYPE ) ); 
   if( !adversary ) {
     // Could not create pointer to an adversary ship.  Bail out.
     gzerr << "Failed to create (" << adversary_name << ") adversary in " << my_name << "\n";
@@ -565,8 +656,6 @@ ship_state_c ship_c::interpolate_linear( const ship_state_c& q0, const ship_stat
 /// Computes the differential equations of motion for a ship
 void ship_c::ode( const std::vector<double>& q, const std::vector<double>& u, std::vector<double>& dq, const ship_c* ship ) {
 
-  const double DRAG = 0.1;
-
   dq.resize( ship_state_c::size() );
 
   // - Newton-Euler -
@@ -698,16 +787,7 @@ void ship_c::inv_dyn( const std::vector<double>& q, const std::vector<double>& q
 
 //------------------------------------------------------------------------------
 // computes commands (forces) for if the ship is a prey
-void ship_c::compute_prey_command( const std::vector<double>& pred_state, const std::vector<double>& prey_state, std::vector<double>& prey_u, const double& time, const double& dtime, space_c* space ) {
-
-  // open parameters
-  const double FLEE_DIST = 1.0;
-
-  const double MAX_FORCE = 1e-5;
-  const double MAX_TORQUE = 1e-5;
-
-  const double WEIGHT_PREDATOR_FORCE = 1.0;
-  const double WEIGHT_COMBINED_FORCE = 1.0;
+void ship_c::compute_prey_command( const std::vector<double>& pred_state, const std::vector<double>& prey_state, std::vector<double>& prey_u, const double& time, const double& dtime, space_c* space, ship_c* prey ) {
 
   // get the predator and prey positions
   Vector3d pred_x( pred_state[0], pred_state[1], pred_state[2] );
@@ -718,7 +798,7 @@ void ship_c::compute_prey_command( const std::vector<double>& pred_state, const 
   double dist = pp_vec.norm();
 
   // case 1: (semi) random walk
-  if( dist > FLEE_DIST ) {
+  if( dist > prey->FLEE_DISTANCE ) {
     //std::cout << "pred:" << pred_x << ", prey:" << prey_x << std::endl;
 
     // determine a desired position/orientation and velocities
@@ -739,8 +819,8 @@ void ship_c::compute_prey_command( const std::vector<double>& pred_state, const 
     gsl_rng_set( r, seed );
 
     // generate command values from gaussian
-    const double SIGMA = GAUSSIAN_STDDEV;
-    const double MU = GAUSSIAN_MEAN;
+    const double SIGMA = prey->GAUSSIAN_STDDEV;
+    const double MU = prey->GAUSSIAN_MEAN;
     std::vector<double> u( ship_command_c::size() );
     for( unsigned i = 0; i < ship_command_c::size(); i++ )
       if( i < 3 )
@@ -756,17 +836,17 @@ void ship_c::compute_prey_command( const std::vector<double>& pred_state, const 
 
     // NOTE: make sure command is limited to max force/torque
     // if the force exceeds the maximum force, limit the force to the max
-    if( cmd.force().GetLength() < MAX_FORCE ) {
-      gazebo::math::Vector3 f = cmd.force().Normalize() * MAX_FORCE;
+    if( cmd.force().GetLength() < prey->PREY_MAX_FORCE ) {
+      gazebo::math::Vector3 f = cmd.force().Normalize() * prey->PREY_MAX_FORCE;
       cmd.force( f );
     }
     // if the torque exceeds the maximum torque, limit the torque to the max
-    if( cmd.torque().GetLength() < MAX_TORQUE ) {
-      gazebo::math::Vector3 tau = cmd.torque().Normalize() * MAX_TORQUE;
+    if( cmd.torque().GetLength() < prey->PREY_MAX_TORQUE ) {
+      gazebo::math::Vector3 tau = cmd.torque().Normalize() * prey->PREY_MAX_TORQUE;
       cmd.torque( tau );
     }
 
-    Ravelin::Vector3d bos_force = boundary_force( space, Vector3d(prey_state[0],prey_state[1],prey_state[2]),Vector3d(prey_state[7],prey_state[8],prey_state[9]) );
+    Ravelin::Vector3d bos_force = boundary_force( prey, space, Vector3d(prey_state[0],prey_state[1],prey_state[2]),Vector3d(prey_state[7],prey_state[8],prey_state[9]) );
     Ravelin::Vector3d f( cmd.force().x, cmd.force().y, cmd.force().z );
     f += bos_force;
     cmd.force( f );
@@ -781,16 +861,19 @@ void ship_c::compute_prey_command( const std::vector<double>& pred_state, const 
 
     // treat the predator to prey (p2p) vector as a repulsive force (i.e. pushing the prey)
     // scale the p2p force
-    double mag_predator_force = repulsive_force( dist ) * WEIGHT_PREDATOR_FORCE;
+    double mag_predator_force = repulsive_force( prey, dist ) * prey->PREY_PREDATOR_FORCE_WEIGHT;
     Ravelin::Vector3d p2p_force = pp_vec * mag_predator_force; 
 
-    Ravelin::Vector3d bos_force = boundary_force( space, Vector3d(prey_state[0],prey_state[1],prey_state[2]),Vector3d(prey_state[7],prey_state[8],prey_state[9]) );
+    Ravelin::Vector3d bos_force = boundary_force( prey, space, Vector3d(prey_state[0],prey_state[1],prey_state[2]),Vector3d(prey_state[7],prey_state[8],prey_state[9]) );
+
+    // scale the bos force
+    bos_force *= prey->PREY_BOUNDARY_FORCE_WEIGHT;
 
     // add the two vectors together
     Ravelin::Vector3d force = p2p_force + bos_force;
 
     // scale the summed force
-    force *= WEIGHT_COMBINED_FORCE;
+    force *= prey->PREY_COMBINED_FORCE_WEIGHT;
 
     // use scaled summed force as the prey command.
     
@@ -811,8 +894,7 @@ void ship_c::compute_prey_command( const std::vector<double>& pred_state, const 
 //------------------------------------------------------------------------------
 /// Computes a force to repel the ship away from the spatial boundary if the 
 /// ship gets too close
-Ravelin::Vector3d ship_c::boundary_force( space_c* space, const Ravelin::Vector3d& pos, const Ravelin::Vector3d& vel ) {
-  const double WEIGHT_BOUNDARY_FORCE = 1.0;
+Ravelin::Vector3d ship_c::boundary_force( ship_c* ship, space_c* space, const Ravelin::Vector3d& pos, const Ravelin::Vector3d& vel ) {
 
   // compute the repulsive force from the boundary of space (bos)
   Ravelin::Vector3d bos_force(0,0,0);
@@ -827,21 +909,19 @@ Ravelin::Vector3d ship_c::boundary_force( space_c* space, const Ravelin::Vector3
       if( aabb_c::inside( intersect, space->bounds ) ) {
         Ravelin::Vector3d v = intersect - pos;
         double dist_to_plane = v.norm();
-        double repulsion = repulsive_force( dist_to_plane );
+        double repulsion = repulsive_force( ship, dist_to_plane );
         bos_force += space->planes[i].normal * repulsion;
         //std::cout << "dist: " << dist_to_plane << ", f:" << bos_force << std::endl;
       }
     }
   }
-  // scale the bos force
-  bos_force *= WEIGHT_BOUNDARY_FORCE;
   return bos_force; 
 }
 
 //------------------------------------------------------------------------------
 // computes a repulsive force for a given distance
-double ship_c::repulsive_force( double dist ) {
-  const double ALPHA = 1e1;  // this constant will likely need to be changed
+double ship_c::repulsive_force( ship_c* ship, double dist ) {
+  const double ALPHA = ship->REPULSIVE_FORCE_ALPHA;
 
   // logarithmic function will produce negative values for inputs in [0,1] and
   // positive values for inputs > 1
@@ -873,11 +953,11 @@ ship_command_c ship_c::compute_feedback( void ) {
 
   ship_state_c deltaq = qx - q;
 
-  const double K_pl = 100.0;
-  const double K_vl = 10.0;
+  const double K_pl = FEEDBACK_GAIN_PROPORTIONAL_POSITION;
+  const double K_vl = FEEDBACK_GAIN_DERIVATIVE_POSITION;
 
-  const double K_pr = 10.0;
-  const double K_vr = 1.0;
+  const double K_pr = FEEDBACK_GAIN_PROPORTIONAL_ROTATION;
+  const double K_vr = FEEDBACK_GAIN_DERIVATIVE_ROTATION;
 
   Vector3d pos_err( deltaq.value(0), deltaq.value(1), deltaq.value(2) );
   Vector3d vel_err( deltaq.value(7), deltaq.value(8), deltaq.value(9) );
@@ -1009,10 +1089,6 @@ bool ship_c::plan_simple( void ) {
 /// Plans motion for the ship using an rrt planner
 bool ship_c::plan_rrt( void ) {
  if( GAME_TYPE == PURSUIT ) {
-    const double MAX_PLANNING_TIME = 0.1;
-    PLANNER_STEP_SIZE = 0.1;
-    //const double GOAL_THRESHOLD = 1e-5; 
-    const double MAX_COMMAND = 100.0;
 
     ompl::base::StateSpacePtr sspace( new ompl::base::RealVectorStateSpace( pp_state_c::size() ) );
     statespace = sspace.get();
@@ -1022,8 +1098,8 @@ bool ship_c::plan_rrt( void ) {
     // -Set Predator Bounds
     for( unsigned i = 0; i < 3; i++ )  {
       // x, y, z extens
-      bounds.setLow(i, -25.0);
-      bounds.setHigh(i, 25.0);
+      bounds.setLow(i, -spatial_bound.extens[i]);
+      bounds.setHigh(i, spatial_bound.extens[i]);
     }
     for( unsigned i = 3; i < 7; i++ ) {
     // quaternion extens 
@@ -1032,25 +1108,28 @@ bool ship_c::plan_rrt( void ) {
     }
     for( unsigned i = 7; i < ship_state_c::size(); i++ )  {
       // all other extens
-      bounds.setLow(i, -2.0e1);
-      bounds.setHigh(i, 2.0e1);
+      bounds.setLow(i, -PLANNER_MAX_DERIVATIVE);
+      bounds.setHigh(i, PLANNER_MAX_DERIVATIVE);
     }
 
     // -Set Prey Bounds
-    for( unsigned i = ship_state_c::size(); i < ship_state_c::size() + 3; i++ )  {
+    for( unsigned i = 0; i < 3; i++ )  {
       // x, y, z extens
-      bounds.setLow(i, -25.0);
-      bounds.setHigh(i, 25.0);
+      unsigned j = i + ship_state_c::size();
+      bounds.setLow(j, -spatial_bound.extens[i]);
+      bounds.setHigh(j, spatial_bound.extens[i]);
     }
-    for( unsigned i = ship_state_c::size() + 3; i < ship_state_c::size() + 7; i++ ) {
+    for( unsigned i = 3; i < 7; i++ ) {
       // quaternion extens 
-      bounds.setLow(i, -1.0);
-      bounds.setHigh(i, 1.0);
+      unsigned j = i + ship_state_c::size();
+      bounds.setLow(j, -1.0);
+      bounds.setHigh(j, 1.0);
     }
-    for( unsigned i = 7 + ship_state_c::size(); i < pp_state_c::size(); i++ )  {
+    for( unsigned i = 7; i < ship_state_c::size(); i++ )  {
       // all other extens
-      bounds.setLow(i, -2.0e1);
-      bounds.setHigh(i, 2.0e1);
+      unsigned j = i + ship_state_c::size();
+      bounds.setLow(j, -PLANNER_MAX_DERIVATIVE);
+      bounds.setHigh(j, PLANNER_MAX_DERIVATIVE);
     }
     sspace->as<ompl::base::RealVectorStateSpace>()->setBounds( bounds );
 
@@ -1061,11 +1140,9 @@ bool ship_c::plan_rrt( void ) {
     ompl::base::RealVectorBounds cbounds( ship_command_c::size() );
     for( unsigned i = ship_state_c::size(); i < ship_command_c::size(); i++ )  {
       // x, y, z extens
-      cbounds.setLow(i, -100.0);
-      cbounds.setHigh(i, 100.0);
+      cbounds.setLow(i, -PLANNER_MAX_FORCE);
+      cbounds.setHigh(i, PLANNER_MAX_FORCE);
     }
-    //cbounds.setLow( -MAX_COMMAND );
-    //cbounds.setHigh( MAX_COMMAND );
     cspace->as<control_space_c>()->setBounds( cbounds );
 
     // define a simple setup class
@@ -1111,7 +1188,7 @@ bool ship_c::plan_rrt( void ) {
     ss.setGoal( pgoal );
 
     ompl::control::RRT* rrt = new ompl::control::RRT(si);
-    rrt->setGoalBias( 0.05 );
+    rrt->setGoalBias( PLANNER_GOAL_BIAS );
     ompl::base::PlannerPtr planner( rrt );
 
     ss.setPlanner( planner );
@@ -1122,7 +1199,7 @@ bool ship_c::plan_rrt( void ) {
     static_cast<state_propagator_c*>(ss.getStatePropagator().get())->setIntegrationTimeStep(ss.getSpaceInformation()->getPropagationStepSize());
 
     ompl::base::PlannerStatus solved;
-    solved = ss.solve( MAX_PLANNING_TIME );
+    solved = ss.solve( PLANNER_MAX_PLANNING_TIME );
 
     if( solved ) {
       std::cout << "Found solution:" << std::endl;
@@ -1187,10 +1264,6 @@ bool ship_c::plan_rrt( void ) {
       return false;
     }
   } else if( GAME_TYPE == SOLO ) {
-    const double MAX_PLANNING_TIME = 10.0;
-    PLANNER_STEP_SIZE = .1;
-    //const double GOAL_THRESHOLD = 1e-5; 
-    const double MAX_COMMAND = 100.0;
 
     /// construct the state space we are planning in
     ompl::base::StateSpacePtr sspace( new ompl::base::RealVectorStateSpace( ship_state_c::size() ) );
@@ -1200,8 +1273,8 @@ bool ship_c::plan_rrt( void ) {
     ompl::base::RealVectorBounds bounds( ship_state_c::size() );
     for (unsigned i = 0; i < 3; i++)  {
       // x, y, z extens
-      bounds.setLow(i, -25.0);
-      bounds.setHigh(i, 25.0);
+      bounds.setLow(i, -spatial_bound.extens[i]);
+      bounds.setHigh(i, spatial_bound.extens[i]);
     }
     for (unsigned i=3; i< 7; i++)
     {
@@ -1211,8 +1284,8 @@ bool ship_c::plan_rrt( void ) {
     }
     for (unsigned i = 7; i < ship_state_c::size(); i++)  {
       // all other extens
-      bounds.setLow(i, -1e1);
-      bounds.setHigh(i, 1e1);
+      bounds.setLow(i, -PLANNER_MAX_DERIVATIVE);
+      bounds.setHigh(i, PLANNER_MAX_DERIVATIVE);
     }
     sspace->as<ompl::base::RealVectorStateSpace>()->setBounds( bounds );
 
@@ -1221,8 +1294,8 @@ bool ship_c::plan_rrt( void ) {
 
     // set the bounds for the control space
     ompl::base::RealVectorBounds cbounds( ship_command_c::size() );
-    cbounds.setLow( -MAX_COMMAND );
-    cbounds.setHigh( MAX_COMMAND );
+    cbounds.setLow( -PLANNER_MAX_FORCE );
+    cbounds.setHigh( PLANNER_MAX_FORCE );
     cspace->as<control_space_c>()->setBounds( cbounds );
 
     // define a simple setup class
@@ -1279,7 +1352,7 @@ bool ship_c::plan_rrt( void ) {
     ss.setGoal( pgoal );
 
     ompl::control::RRT* rrt = new ompl::control::RRT(si);
-    rrt->setGoalBias( 0.05 );
+    rrt->setGoalBias( PLANNER_GOAL_BIAS );
     ompl::base::PlannerPtr planner( rrt );
 
     ss.setPlanner( planner );
@@ -1290,7 +1363,7 @@ bool ship_c::plan_rrt( void ) {
     static_cast<state_propagator_c*>(ss.getStatePropagator().get())->setIntegrationTimeStep(ss.getSpaceInformation()->getPropagationStepSize());
 
     ompl::base::PlannerStatus solved;
-    solved = ss.solve( MAX_PLANNING_TIME );
+    solved = ss.solve( PLANNER_MAX_PLANNING_TIME );
 
     if( solved ) {
       std::cout << "Found solution:" << std::endl;

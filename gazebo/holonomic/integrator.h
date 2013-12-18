@@ -84,7 +84,7 @@ public:
     // get the commands for the predator and prey
     ship_command_c u( control );
     u_pred = u.as_vector();
-    ship_c::compute_prey_command(state_pred, state_prey, u_prey, pred->time, pred->dtime, &pred->space);
+    ship_c::compute_prey_command(state_pred, state_prey, u_prey, pred->time, pred->dtime, &pred->space, prey);
 
     // get the ODEs for the predator and prey
     ship_c::ode( state_pred, u_pred, dstate_pred, pred );

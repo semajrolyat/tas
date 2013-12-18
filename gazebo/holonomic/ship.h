@@ -52,10 +52,6 @@
 #include <Ravelin/SpatialRBInertiad.h>
 #include <Ravelin/MatrixNd.h>
 
-// Variables for the Random Walk planning
-const double GAUSSIAN_MEAN = 0.0;
-const double GAUSSIAN_VARIANCE = 35.0;
-const double GAUSSIAN_STDDEV = sqrt(GAUSSIAN_VARIANCE);
 
 //-----------------------------------------------------------------------------
 
@@ -67,6 +63,40 @@ typedef boost::shared_ptr<ship_c> ship_p;
 class ship_c : public gazebo::ModelPlugin {
 public:
 
+  //---------------------------------------------------------------------------
+  // Open Parameters
+  //---------------------------------------------------------------------------
+  double FLEE_DISTANCE;
+  double CAPTURE_DISTANCE;
+  double PREY_MAX_FORCE;
+  double PREY_MAX_TORQUE;
+  double PREY_PREDATOR_FORCE_WEIGHT;
+  double PREY_COMBINED_FORCE_WEIGHT;
+  double PREY_BOUNDARY_FORCE_WEIGHT;
+
+  // the time step used by the planner
+  double PLANNER_STEP_SIZE;
+  double PLANNER_MAX_PLANNING_TIME;
+  double PLANNER_MAX_DERIVATIVE;
+  double PLANNER_MAX_FORCE;
+  double PLANNER_GOAL_BIAS;
+
+  double FEEDBACK_GAIN_PROPORTIONAL_POSITION;
+  double FEEDBACK_GAIN_DERIVATIVE_POSITION;
+  double FEEDBACK_GAIN_PROPORTIONAL_ROTATION;
+  double FEEDBACK_GAIN_DERIVATIVE_ROTATION;
+
+  double DRAG;
+  double REPULSIVE_FORCE_ALPHA;
+
+  // Variables for the Random Walk planning
+  double GAUSSIAN_MEAN;
+  double GAUSSIAN_VARIANCE;
+  double GAUSSIAN_STDDEV;
+
+  //---------------------------------------------------------------------------
+  // Members
+  //---------------------------------------------------------------------------
   // the reference so that this ship is inserted into gazebo's callback system
   gazebo::event::ConnectionPtr updateConnection;
   // the gazebo reference to the world in which the ship is located
@@ -133,6 +163,9 @@ public:
   // the list of all obstacles in the world
   aabb_list_t obstacles;
 
+  // whether or not a capture event has occurred
+  bool capture;
+
 protected:
   // the type of planner this ship uses
   enum planner_type_e {
@@ -143,8 +176,6 @@ protected:
   // what planner is being used (defunct as of now)
   planner_type_e PLANNER;
 public:
-  // the time step used by the planner
-  double PLANNER_STEP_SIZE;
 
   // the current step between two states when interpolating
   unsigned int state_step;
@@ -192,7 +223,7 @@ public:
   //---------------------------------------------------------------------------
   ship_c( void );
   ship_c( ompl::base::StateSpace *_statespace );
-  ship_c( const player_type_e& player_type );
+  ship_c( ship_c* owner, const player_type_e& player_type );
     
   //---------------------------------------------------------------------------
   // Destructor
@@ -269,9 +300,11 @@ protected:
   // interpolates state given two states
   ship_state_c interpolate_linear( const ship_state_c& q0, const ship_state_c& qf, const double& deltat, const int& step ) const; 
 
+  bool has_captured( const std::vector<double>& pred_state, const std::vector<double>& prey_state );
+
 public:
   // computes commands (forces) if the ship is prey
-  static void compute_prey_command( const std::vector<double>& pred_state, const std::vector<double>& prey_state, std::vector<double>& prey_u, const double& time, const double& dtime, space_c* space );
+  static void compute_prey_command( const std::vector<double>& pred_state, const std::vector<double>& prey_state, std::vector<double>& prey_u, const double& time, const double& dtime, space_c* space, ship_c* prey );
 
   // normalizes the quaternion components of the state
   static void renormalize_state_quat(std::vector<double>& q);
@@ -294,10 +327,10 @@ public:
   static void ode( const std::vector<double>& q, const std::vector<double>& u, std::vector<double>& dq, const ship_c* ship );
 
   // compute any force(field) that the boundary contributes to repel collision
-  static Ravelin::Vector3d boundary_force( space_c* space, const Ravelin::Vector3d& pos, const Ravelin::Vector3d& vel );
+  static Ravelin::Vector3d boundary_force( ship_c* ship, space_c* space, const Ravelin::Vector3d& pos, const Ravelin::Vector3d& vel );
 
   // computes a repulsive force for a given distance
-  static double repulsive_force( double dist );
+  static double repulsive_force( ship_c* ship, double dist );
 
   //---------------------------------------------------------------------------
   // Testing Method

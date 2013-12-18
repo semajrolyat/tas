@@ -216,7 +216,7 @@ public:
     // only need to be tried if the planner has a really hard time planning. 
     double time_input = (double) rand();
     std::vector<double> u_prey;
-    ship_c::compute_prey_command(q0_pred, q0_prey, u_prey, time_input, DT, &pred->space);
+    ship_c::compute_prey_command(q0_pred, q0_prey, u_prey, time_input, DT, &pred->space, prey);
 
     // copy u to control
     double *ctl = control->as<ompl::control::RealVectorControlSpace::ControlType>()->values;
