@@ -1,5 +1,5 @@
-#ifndef _GAZEBO_SHIP_GOAL_H_
-#define _GAZEBO_SHIP_GOAL_H_
+#ifndef _GOAL_H_
+#define _GOAL_H_
 
 //-----------------------------------------------------------------------------
 
@@ -133,5 +133,5 @@ public:
 
 //-----------------------------------------------------------------------------
 
-#endif // _GAZEBO_SHIP_GOAL_H_
+#endif // _GOAL_H_
 

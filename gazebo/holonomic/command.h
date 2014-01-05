@@ -1,12 +1,10 @@
-#ifndef _GAZEBO_SHIP_COMMAND_H_
-#define _GAZEBO_SHIP_COMMAND_H_
+#ifndef _COMMAND_H_
+#define _COMMAND_H_
 
 #include <vector>
 #include <valarray>
 #include <string>
 #include <iostream>
-
-#include <gazebo/math/Vector3.hh>
 
 #include <ompl/control/Control.h>
 #include <ompl/control/spaces/RealVectorControlSpace.h>
@@ -69,7 +67,7 @@ public:
   }
 
   //---------------------------------------------------------------------------
-  ship_command_c( gazebo::math::Vector3 F, gazebo::math::Vector3 tau ) { 
+  ship_command_c( Ravelin::Vector3d F, Ravelin::Vector3d tau ) { 
     _values.resize( size() );
     force( F );
     torque( tau );
@@ -92,12 +90,6 @@ public:
   //---------------------------------------------------------------------------
   //
   //---------------------------------------------------------------------------
-  void force( const gazebo::math::Vector3& v ) {
-    _values[0] = v.x;
-    _values[1] = v.y;
-    _values[2] = v.z;
-  }
-
   void force( const Ravelin::Vector3d& v ) {
     _values[0] = v[0];
     _values[1] = v[1];
@@ -105,17 +97,11 @@ public:
   }
 
   //---------------------------------------------------------------------------
-  gazebo::math::Vector3 force( void ) const {
-    return gazebo::math::Vector3( _values[0], _values[1], _values[2] );
+  Ravelin::Vector3d force( void ) const {
+    return Ravelin::Vector3d( _values[0], _values[1], _values[2] );
   }
 
   //---------------------------------------------------------------------------
-  void torque( const gazebo::math::Vector3& v ) {
-    _values[3] = v.x;
-    _values[4] = v.y;
-    _values[5] = v.z;
-  }
-
   void torque( const Ravelin::Vector3d& v ) {
     _values[3] = v[0];
     _values[4] = v[1];
@@ -124,8 +110,8 @@ public:
 
 
   //---------------------------------------------------------------------------
-  gazebo::math::Vector3 torque( void ) const {
-    return gazebo::math::Vector3( _values[3], _values[4], _values[5] );
+  Ravelin::Vector3d torque( void ) const {
+    return Ravelin::Vector3d( _values[3], _values[4], _values[5] );
   }
 
   //---------------------------------------------------------------------------
@@ -228,5 +214,5 @@ bool write_audit_data( const std::string& filename, const ship_command_list_t& l
 
 //------------------------------------------------------------------------------
 
-#endif // _GAZEBO_SHIP_COMMAND_H_
+#endif // _COMMAND_H_
 

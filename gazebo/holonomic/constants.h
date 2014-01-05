@@ -1,5 +1,5 @@
-#ifndef _GAZEBO_SHIP_CONSTANTS_H_
-#define _GAZEBO_SHIP_CONSTANTS_H_
+#ifndef _CONSTANTS_H_
+#define _CONSTANTS_H_
 
 //-----------------------------------------------------------------------------
 
@@ -7,5 +7,5 @@
 
 //-----------------------------------------------------------------------------
 
-#endif // _GAZEBO_SHIP_CONSTANTS_H_
+#endif // _CONSTANTS_H_
 

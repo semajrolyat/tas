@@ -67,30 +67,33 @@ bool space_c::read( void ) {
     return false;
   }
 
-  gazebo::math::Vector3 c( 0.0, 0.0, 0.0 );
-  gazebo::math::Vector3 e( 0.0, 0.0, 0.0 );
+  gazebo::math::Vector3 gc( 0.0, 0.0, 0.0 );
+  gazebo::math::Vector3 ge( 0.0, 0.0, 0.0 );
   for( unsigned i = 0; i < space_links.size(); i++ ) {
     gazebo::physics::LinkPtr link = space_links[i];
     gazebo::math::Box gzbb = link->GetBoundingBox();
-    c += gzbb.GetCenter();
+    gc += gzbb.GetCenter();
     // Note:: following assumes centered at (0,0,0) and symmetric.  Dirty but works.
-    e = gazebo::math::Vector3( std::max(gzbb.GetCenter().x, e.x), std::max(gzbb.GetCenter().y, e.y),std::max(gzbb.GetCenter().z, e.z) );
+    ge = gazebo::math::Vector3( std::max(gzbb.GetCenter().x, ge.x), std::max(gzbb.GetCenter().y, ge.y),std::max(gzbb.GetCenter().z, ge.z) );
   }
+  
+  Ravelin::Vector3d c( gc.x, gc.y, gc.z );
+  Ravelin::Vector3d e( ge.x, ge.y, ge.z );
   bounds = aabb_c( c, e );
 
   planes.resize(6);
   // east
-  planes[0]=plane_c(Ravelin::Vector3d(c.x+e.x,0,0),Ravelin::Vector3d(-1,0,0));
+  planes[0]=plane_c(Ravelin::Vector3d(c.x()+e.x(),0,0),Ravelin::Vector3d(-1,0,0));
   // west
-  planes[1]=plane_c(Ravelin::Vector3d(c.x-e.x,0,0),Ravelin::Vector3d(1,0,0));
+  planes[1]=plane_c(Ravelin::Vector3d(c.x()-e.x(),0,0),Ravelin::Vector3d(1,0,0));
   // north
-  planes[2]=plane_c(Ravelin::Vector3d(0,c.y+e.y,0),Ravelin::Vector3d(0,-1,0));
+  planes[2]=plane_c(Ravelin::Vector3d(0,c.y()+e.y(),0),Ravelin::Vector3d(0,-1,0));
   // south
-  planes[3]=plane_c(Ravelin::Vector3d(0,c.y-e.y,0),Ravelin::Vector3d(0,1,0));
+  planes[3]=plane_c(Ravelin::Vector3d(0,c.y()-e.y(),0),Ravelin::Vector3d(0,1,0));
   // up
-  planes[4]=plane_c(Ravelin::Vector3d(0,0,c.z+e.z),Ravelin::Vector3d(0,0,-1));
+  planes[4]=plane_c(Ravelin::Vector3d(0,0,c.z()+e.z()),Ravelin::Vector3d(0,0,-1));
   // down
-  planes[5]=plane_c(Ravelin::Vector3d(0,0,c.z-e.z),Ravelin::Vector3d(0,0,1));
+  planes[5]=plane_c(Ravelin::Vector3d(0,0,c.z()-e.z()),Ravelin::Vector3d(0,0,1));
 
   return true;
 }
@@ -110,7 +113,7 @@ sdf::SDF space_c::make_maze( void ) {
  
   const double MAX_DIM = 5.0;
 
-  const int OBSTACLES = 100;
+  const unsigned OBSTACLES = 100;
 
   boost::shared_ptr <sdf::Element> obstacle( new sdf::Element() );
   obssdf.root->InsertElement( obstacle );

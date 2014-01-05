@@ -1,7 +1,8 @@
-#ifndef _GAZEBO_SHIP_STATE_PROPAGATOR_H_
-#define _GAZEBO_SHIP_STATE_PROPAGATOR_H_
+#ifndef _STATE_PROPAGATOR_H_
+#define _STATE_PROPAGATOR_H_
 
-#include "ship.h"
+#include "common.h"
+//#include "ship.h"
 #include "integrator.h"
 
 #include <ompl/base/State.h>
@@ -10,23 +11,26 @@
 #include <ompl/control/SpaceInformation.h>
 
 //-----------------------------------------------------------------------------
+
 class state_propagator_c : public ompl::control::StatePropagator {
 public:
-  euler_integrator_c< ship_c > integrator;
+  integrator_c integrator;
   const ompl::base::StateSpace *space;
-  ship_c* ship;
+  ship_p pred;
+  ship_p prey;
 
   //---------------------------------------------------------------------------
-  state_propagator_c( const ompl::control::SpaceInformationPtr &si, ship_c* _ship) : 
+  state_propagator_c( const ompl::control::SpaceInformationPtr &si, ship_p _pred, ship_p _prey, ode_f _ode, prey_command_f _pc ) : 
     ompl::control::StatePropagator(si),
-    integrator( si->getStateSpace().get(), 0.0 ),
+    integrator( si->getStateSpace().get(), 0.0, _ode, _pc ),
     space( si->getStateSpace().get() ),
-    ship(_ship)
+    pred( _pred ),
+    prey( _prey )
   { }
 
   //---------------------------------------------------------------------------
-  virtual void propagate( const ompl::base::State* state, const ompl::control::Control* control, const double duration, ompl::base::State* result ) const {
-    integrator.propagate( state, control, duration, result, ship );
+  virtual void propagate( const ompl::base::State* state, const ompl::control::Control* control, double duration, ompl::base::State* result ) const {
+    integrator.propagate( state, control, result, pred, prey );
   }
 
   //---------------------------------------------------------------------------
@@ -42,39 +46,5 @@ public:
 
 //-----------------------------------------------------------------------------
 
-class pp_state_propagator_c : public ompl::control::StatePropagator {
-public:
-  pp_integrator_c< ship_c > integrator;
-  const ompl::base::StateSpace *space;
-  ship_c* pred;
-  ship_c* prey;
-
-  //---------------------------------------------------------------------------
-  pp_state_propagator_c( const ompl::control::SpaceInformationPtr &si, ship_c* _pred, ship_c* _prey) : 
-    ompl::control::StatePropagator(si),
-    integrator( si->getStateSpace().get(), 0.0 ),
-    space( si->getStateSpace().get() ),
-    pred(_pred),
-    prey(_prey)
-  { }
-
-  //---------------------------------------------------------------------------
-  virtual void propagate( const ompl::base::State* state, const ompl::control::Control* control, const double duration, ompl::base::State* result ) const {
-    integrator.propagate( state, control, duration, result, pred, prey );
-  }
-
-  //---------------------------------------------------------------------------
-  void setIntegrationTimeStep( const double& time_step ) {
-    integrator.set_time_step( time_step );
-  }
-
-  //---------------------------------------------------------------------------
-  double getIntegrationTimeStep( void ) const {
-    return integrator.get_time_step();
-  }
-};
-
-//-----------------------------------------------------------------------------
-
-#endif // _GAZEBO_SHIP_STATE_PROPAGATOR_H_
+#endif // _STATE_PROPAGATOR_H_
 

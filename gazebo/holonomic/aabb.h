@@ -3,7 +3,6 @@
 
 #include <vector>
 #include <iostream>
-#include <gazebo/math/Vector3.hh>
 #include <Ravelin/Origin3d.h>
 #include <Ravelin/Vector3d.h>
 
@@ -16,8 +15,8 @@ typedef std::vector<aabb_c> aabb_list_t;
 /// Class encapsulating Axis-Aligned bounding boxes
 class aabb_c {
 public:
-  gazebo::math::Vector3 center;
-  gazebo::math::Vector3 extens;
+  Ravelin::Vector3d center;
+  Ravelin::Vector3d extens;
 
   //---------------------------------------------------------------------------
   aabb_c( void ) : center( 0.0, 0.0, 0.0 ), extens( 0.0, 0.0, 0.0 ) {
@@ -25,17 +24,18 @@ public:
   }
 
   //---------------------------------------------------------------------------
-  aabb_c( const gazebo::math::Vector3& _center, const gazebo::math::Vector3& _extens ) : 
+  aabb_c( const Ravelin::Vector3d& _center, const Ravelin::Vector3d& _extens ) :
     center( _center ), 
     extens( _extens ) 
   {
-    
-  }
 
+  }
   //---------------------------------------------------------------------------
-  aabb_c( const Ravelin::Origin3d& _center, const Ravelin::Origin3d& _extens ) {
-    center = gazebo::math::Vector3( (double)_center.x(), (double)_center.y(), (double)_center.z() );
-    extens = gazebo::math::Vector3( (double)_extens.x(), (double)_extens.y(), (double)_extens.z() );
+  aabb_c( const Ravelin::Origin3d& _center, const Ravelin::Origin3d& _extens ) :
+    center( Ravelin::Vector3d( _center[0], _center[1], _center[2] ) ), 
+    extens( Ravelin::Vector3d( _extens[0], _extens[1], _extens[2] ) ) 
+  {
+
   }
  
   //---------------------------------------------------------------------------
@@ -43,26 +43,21 @@ public:
 
   //---------------------------------------------------------------------------
   static bool intersects( const aabb_c& a, const aabb_c& b ) {
-    gazebo::math::Vector3 p = a.center - b.center;
+    Ravelin::Vector3d p = a.center - b.center;
 
-    return fabs( p.x ) <= ( a.extens.x + b.extens.x) &&
-           fabs( p.y ) <= ( a.extens.y + b.extens.y) &&
-           fabs( p.z ) <= ( a.extens.z + b.extens.z);
+    return fabs( p[0] ) <= ( a.extens[0] + b.extens[0] ) &&
+           fabs( p[1] ) <= ( a.extens[1] + b.extens[1] ) &&
+           fabs( p[2] ) <= ( a.extens[2] + b.extens[2] );
   }
 
   //---------------------------------------------------------------------------
   static bool inside( const Ravelin::Vector3d& point, const aabb_c& box ) {
-    gazebo::math::Vector3 p( point.x(), point.y(), point.z() );
-    return inside( p, box );
-  }
-  //---------------------------------------------------------------------------
-  static bool inside( const gazebo::math::Vector3& point, const aabb_c& box ) {
-    gazebo::math::Vector3 p = point - box.center;
+    Ravelin::Vector3d p = point - box.center;
 
     const double EPSILON = 1e-5;
-    return fabs( p.x ) <= box.extens.x + EPSILON &&
-           fabs( p.y ) <= box.extens.y + EPSILON &&
-           fabs( p.z ) <= box.extens.z + EPSILON;
+    return fabs( p[0] ) <= box.extens[0] + EPSILON &&
+           fabs( p[1] ) <= box.extens[1] + EPSILON &&
+           fabs( p[2] ) <= box.extens[2] + EPSILON;
   }
   //---------------------------------------------------------------------------
   //friend std::ostream& operator<<(std::ostream& ostr, const aabb_c& bb);

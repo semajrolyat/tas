@@ -1,5 +1,5 @@
-#ifndef _GAZEBO_SHIP_CONTROL_SPACE_H_
-#define _GAZEBO_SHIP_CONTROL_SPACE_H_
+#ifndef _CONTROL_SPACE_H_
+#define _CONTROL_SPACE_H_
 
 #include <ompl/base/StateSpace.h>
 #include <ompl/control/spaces/RealVectorControlSpace.h>
@@ -15,5 +15,5 @@ public:
 
 //-----------------------------------------------------------------------------
 
-#endif // _GAZEBO_SHIP_CONTROL_SPACE_H_
+#endif // _CONTROL_SPACE_H_
 

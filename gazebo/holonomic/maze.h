@@ -63,7 +63,7 @@ public:
  
     const double MAX_DIM = 5.0;
 
-    const int OBSTACLES = 100;
+    const unsigned OBSTACLES = 100;
 
     boost::shared_ptr <sdf::Element> obstacle( new sdf::Element() );
     obssdf.root->InsertElement( obstacle );

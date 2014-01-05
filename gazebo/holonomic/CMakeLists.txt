@@ -7,6 +7,7 @@ project( tas_gazebo_holonomic_ship )
 
 set( SHIP_HEADERS
     ${TAS_HEADERS}
+    ${CMAKE_CURRENT_SOURCE_DIR}/common.h
     ${CMAKE_CURRENT_SOURCE_DIR}/constants.h
     ${CMAKE_CURRENT_SOURCE_DIR}/utilities.h
     ${CMAKE_CURRENT_SOURCE_DIR}/state.h
@@ -16,10 +17,13 @@ set( SHIP_HEADERS
     ${CMAKE_CURRENT_SOURCE_DIR}/control_space.h
     ${CMAKE_CURRENT_SOURCE_DIR}/integrator.h
     ${CMAKE_CURRENT_SOURCE_DIR}/state_propagator.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/directed_control_sampler.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/control_sampler.h
     ${CMAKE_CURRENT_SOURCE_DIR}/plane.h 
     ${CMAKE_CURRENT_SOURCE_DIR}/space.h
     ${CMAKE_CURRENT_SOURCE_DIR}/maze.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/controller.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/sensor.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/planner.h
 )
 
 set( SHIP_SOURCES
@@ -32,7 +36,7 @@ set( SHIP_INCLUDE_DIRS
 
 set( SHIP_LIBRARIES
     ${GAZEBO_LIBRARIES}
-    ${RAVELIN_LIBRARIES}
+    #${RAVELIN_LIBRARIES}
     ${TAS_LIBRARIES}
     libboost_system.so
     libRavelin.so

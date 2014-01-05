@@ -1,15 +1,16 @@
-#ifndef _GAZEBO_SHIP_STATE_H_
-#define _GAZEBO_SHIP_STATE_H_
+#ifndef _STATE_H_
+#define _STATE_H_
 
 //-----------------------------------------------------------------------------
 
 #include <vector>
-#include <valarray>
+//#include <valarray>
 #include <string>
 #include <iostream>
+#include <fstream>
 
-#include <gazebo/math/Vector3.hh>
-#include <gazebo/math/Quaternion.hh>
+#include <Ravelin/Vector3d.h>
+#include <Ravelin/Quatd.h>
 
 #include <ompl/base/State.h>
 #include <ompl/base/StateSpace.h>
@@ -48,13 +49,14 @@ public:
   }
 
   //---------------------------------------------------------------------------
-  ship_state_c( std::vector<double>& x ) { 
+  ship_state_c( const std::vector<double>& x ) { 
     assert( x.size() == size() );
     _values.resize( size() );
     for( unsigned i = 0; i < size(); i++ )
       _values[i] = x[i];
   }
 
+/*
   //---------------------------------------------------------------------------
   ship_state_c( std::valarray<double>& x ) { 
     assert( x.size() == size() );
@@ -62,16 +64,15 @@ public:
     for( unsigned i = 0; i < size(); i++ )
       _values[i] = x[i];
   }
-
+*/
   //---------------------------------------------------------------------------
-  ship_state_c( gazebo::math::Vector3 x, gazebo::math::Quaternion theta, gazebo::math::Vector3 dx, gazebo::math::Vector3 dtheta ) { 
+  ship_state_c( const Ravelin::Vector3d& x, const Ravelin::Quatd& theta, const Ravelin::Vector3d& dx, const Ravelin::Vector3d& dtheta ) { 
     _values.resize( size() );
     position( x );
     rotation( theta );
     dposition( dx );
     drotation( dtheta );
   }
-
   //---------------------------------------------------------------------------
   ship_state_c( const ompl::base::StateSpace* space, const ompl::base::State* x ) { 
     //assert( x.size() == size() );
@@ -89,19 +90,19 @@ public:
   //---------------------------------------------------------------------------
   //
   //---------------------------------------------------------------------------
-  void position( const gazebo::math::Vector3& v ) {
-    _values[0] = v.x;
-    _values[1] = v.y;
-    _values[2] = v.z;
+  void position( const Ravelin::Vector3d& v ) {
+    _values[0] = v.x();
+    _values[1] = v.y();
+    _values[2] = v.z();
   }
 
   //---------------------------------------------------------------------------
-  gazebo::math::Vector3 position( void ) const {
-    return gazebo::math::Vector3( _values[0], _values[1], _values[2] );
+  Ravelin::Vector3d position( void ) const {
+    return Ravelin::Vector3d( _values[0], _values[1], _values[2] );
   }
 
   //---------------------------------------------------------------------------
-  void rotation( const gazebo::math::Quaternion& q ) {
+  void rotation( const Ravelin::Quatd& q ) {
     _values[3] = q.x;
     _values[4] = q.y;
     _values[5] = q.z;
@@ -109,32 +110,32 @@ public:
   }
 
   //---------------------------------------------------------------------------
-  gazebo::math::Quaternion rotation( void ) const {
-    return gazebo::math::Quaternion( _values[6], _values[3], _values[4], _values[5] );
+  Ravelin::Quatd rotation( void ) const {
+    return Ravelin::Quatd( _values[3], _values[4], _values[5], _values[6] );
   }
 
   //---------------------------------------------------------------------------
-  void dposition( const gazebo::math::Vector3& v ) {
-    _values[7] = v.x;
-    _values[8] = v.y;
-    _values[9] = v.z;
+  void dposition( const Ravelin::Vector3d& v ) {
+    _values[7] = v.x();
+    _values[8] = v.y();
+    _values[9] = v.z();
   }
 
   //---------------------------------------------------------------------------
-  gazebo::math::Vector3 dposition( void ) const {
-    return gazebo::math::Vector3( _values[7], _values[8], _values[9] );
+  Ravelin::Vector3d dposition( void ) const {
+    return Ravelin::Vector3d( _values[7], _values[8], _values[9] );
   }
 
   //---------------------------------------------------------------------------
-  void drotation( const gazebo::math::Vector3& v ) {
-    _values[10] = v.x;
-    _values[11] = v.y;
-    _values[12] = v.z;
+  void drotation( const Ravelin::Vector3d& v ) {
+    _values[10] = v.x();
+    _values[11] = v.y();
+    _values[12] = v.z();
   }
 
   //---------------------------------------------------------------------------
-  gazebo::math::Vector3 drotation( void ) const {
-    return gazebo::math::Vector3( _values[10], _values[11], _values[12] );
+  Ravelin::Vector3d drotation( void ) const {
+    return Ravelin::Vector3d( _values[10], _values[11], _values[12] );
   }
 
   //---------------------------------------------------------------------------
@@ -287,13 +288,14 @@ public:
   }
 
   //---------------------------------------------------------------------------
-  pp_state_c( std::vector<double>& x ) { 
+  pp_state_c( const std::vector<double>& x ) { 
     assert( x.size() == size() );
     _values.resize( size() );
     for( unsigned i = 0; i < size(); i++ )
       _values[i] = x[i];
   }
 
+/*
   //---------------------------------------------------------------------------
   pp_state_c( std::valarray<double>& x ) { 
     assert( x.size() == size() );
@@ -301,19 +303,7 @@ public:
     for( unsigned i = 0; i < size(); i++ )
       _values[i] = x[i];
   }
-
-  //---------------------------------------------------------------------------
-  // this is disabled b/c it would take too many arguments
-  /*
-  pp_state_c( gazebo::math::Vector3 x, gazebo::math::Quaternion theta, gazebo::math::Vector3 dx, gazebo::math::Vector3 dtheta ) { 
-    _values.resize( size() );
-    position( x );
-    rotation( theta );
-    dposition( dx );
-    drotation( dtheta );
-  }
-  */
-
+*/
   //---------------------------------------------------------------------------
   pp_state_c( const ompl::base::StateSpace* space, const ompl::base::State* x ) { 
     //assert( x.size() == size() );
@@ -331,36 +321,36 @@ public:
   //---------------------------------------------------------------------------
   //
   //---------------------------------------------------------------------------
-  void position_pred( const gazebo::math::Vector3& v ) {
-    _values[0] = v.x;
-    _values[1] = v.y;
-    _values[2] = v.z;
+  void position_pred( const Ravelin::Vector3d& v ) {
+    _values[0] = v.x();
+    _values[1] = v.y();
+    _values[2] = v.z();
   }
 
-  void position_prey( const gazebo::math::Vector3& v ) {
-    _values[13] = v.x;
-    _values[14] = v.y;
-    _values[15] = v.z;
-  }
-
-  //---------------------------------------------------------------------------
-  gazebo::math::Vector3 position_pred( void ) const {
-    return gazebo::math::Vector3( _values[0], _values[1], _values[2] );
-  }
-
-  gazebo::math::Vector3 position_prey( void ) const {
-    return gazebo::math::Vector3( _values[13], _values[14], _values[15] );
+  void position_prey( const Ravelin::Vector3d& v ) {
+    _values[13] = v.x();
+    _values[14] = v.y();
+    _values[15] = v.z();
   }
 
   //---------------------------------------------------------------------------
-  void rotation_pred( const gazebo::math::Quaternion& q ) {
+  Ravelin::Vector3d position_pred( void ) const {
+    return Ravelin::Vector3d( _values[0], _values[1], _values[2] );
+  }
+
+  Ravelin::Vector3d position_prey( void ) const {
+    return Ravelin::Vector3d( _values[13], _values[14], _values[15] );
+  }
+
+  //---------------------------------------------------------------------------
+  void rotation_pred( const Ravelin::Quatd& q ) {
     _values[3] = q.x;
     _values[4] = q.y;
     _values[5] = q.z;
     _values[6] = q.w;
   }
 
-  void rotation_prey( const gazebo::math::Quaternion& q ) {
+  void rotation_prey( const Ravelin::Quatd& q ) {
     _values[16] = q.x;
     _values[17] = q.y;
     _values[18] = q.z;
@@ -368,57 +358,57 @@ public:
   }
 
   //---------------------------------------------------------------------------
-  gazebo::math::Quaternion rotation_pred( void ) const {
-    return gazebo::math::Quaternion( _values[6], _values[3], _values[4], _values[5] );
+  Ravelin::Quatd rotation_pred( void ) const {
+    return Ravelin::Quatd( _values[3], _values[4], _values[5], _values[6] );
   }
 
-  gazebo::math::Quaternion rotation_prey( void ) const {
-    return gazebo::math::Quaternion( _values[19], _values[16], _values[17], _values[18] );
-  }
-
-  //---------------------------------------------------------------------------
-  void dposition_pred( const gazebo::math::Vector3& v ) {
-    _values[7] = v.x;
-    _values[8] = v.y;
-    _values[9] = v.z;
-  }
-
-  void dposition_prey( const gazebo::math::Vector3& v ) {
-    _values[20] = v.x;
-    _values[21] = v.y;
-    _values[22] = v.z;
+  Ravelin::Quatd rotation_prey( void ) const {
+    return Ravelin::Quatd( _values[16], _values[17], _values[18], _values[19] );
   }
 
   //---------------------------------------------------------------------------
-  gazebo::math::Vector3 dposition_pred( void ) const {
-    return gazebo::math::Vector3( _values[7], _values[8], _values[9] );
+  void dposition_pred( const Ravelin::Vector3d& v ) {
+    _values[7] = v.x();
+    _values[8] = v.y();
+    _values[9] = v.z();
   }
 
-  gazebo::math::Vector3 dposition_prey( void ) const {
-    return gazebo::math::Vector3( _values[20], _values[21], _values[22] );
+  void dposition_prey( const Ravelin::Vector3d& v ) {
+    _values[20] = v.x();
+    _values[21] = v.y();
+    _values[22] = v.z();
   }
 
   //---------------------------------------------------------------------------
-  void drotation_pred( const gazebo::math::Vector3& v ) {
-    _values[10] = v.x;
-    _values[11] = v.y;
-    _values[12] = v.z;
+  Ravelin::Vector3d dposition_pred( void ) const {
+    return Ravelin::Vector3d( _values[7], _values[8], _values[9] );
   }
 
-  void drotation_prey( const gazebo::math::Vector3& v ) {
-    _values[23] = v.x;
-    _values[24] = v.y;
-    _values[25] = v.z;
+  Ravelin::Vector3d dposition_prey( void ) const {
+    return Ravelin::Vector3d( _values[20], _values[21], _values[22] );
+  }
+
+  //---------------------------------------------------------------------------
+  void drotation_pred( const Ravelin::Vector3d& v ) {
+    _values[10] = v.x();
+    _values[11] = v.y();
+    _values[12] = v.z();
+  }
+
+  void drotation_prey( const Ravelin::Vector3d& v ) {
+    _values[23] = v.x();
+    _values[24] = v.y();
+    _values[25] = v.z();
   }
 
 
   //---------------------------------------------------------------------------
-  gazebo::math::Vector3 drotation_pred( void ) const {
-    return gazebo::math::Vector3( _values[10], _values[11], _values[12] );
+  Ravelin::Vector3d drotation_pred( void ) const {
+    return Ravelin::Vector3d( _values[10], _values[11], _values[12] );
   }
 
-  gazebo::math::Vector3 drotation_prey( void ) const {
-    return gazebo::math::Vector3( _values[23], _values[24], _values[25] );
+  Ravelin::Vector3d drotation_prey( void ) const {
+    return Ravelin::Vector3d( _values[23], _values[24], _values[25] );
   }
 
   //---------------------------------------------------------------------------
@@ -453,6 +443,30 @@ public:
       *statespace->getValueAddressAtIndex(state, i) = _values[i];
   }
 
+  //---------------------------------------------------------------------------
+  ship_state_c pred_state( void ) const {
+    return ship_state_c( pred_vector() );
+  }
+
+  //---------------------------------------------------------------------------
+  ship_state_c prey_state( void ) const {
+    return ship_state_c( prey_vector() );
+  }
+
+  //---------------------------------------------------------------------------
+  void pred_state( const ship_state_c& q ) {
+    for( unsigned i = 0; i < ship_state_c::size(); i++ ) {
+      _values[i] = q.value(i);
+    }
+  }
+
+  //---------------------------------------------------------------------------
+  void prey_state( const ship_state_c& q ) {
+    for( unsigned i = 0; i < ship_state_c::size(); i++ ) {
+      _values[i + ship_state_c::size()] = q.value(i);
+    }
+  }
+ 
   //---------------------------------------------------------------------------
   // Get the predator state components as a vector
   std::vector<double> pred_vector( void ) const {
@@ -597,5 +611,5 @@ bool write_audit_data( const std::string& filename, const ship_state_list_t& lis
 
 //-----------------------------------------------------------------------------
 
-#endif // _GAZEBO_SHIP_STATE_H_
+#endif // _STATE_H_
 

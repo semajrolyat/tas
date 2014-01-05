@@ -1,12 +1,11 @@
 #ifndef _INTEGRATOR_H_
 #define _INTEGRATOR_H_
 
+#include "common.h"
 #include "command.h"
 #include "state.h"
 #include "utilities.h"
-#include "ship.h"
-
-#include <valarray>
+//#include "ship.h"
 
 #include <ompl/base/State.h>
 #include <ompl/base/StateSpace.h>
@@ -14,64 +13,25 @@
 
 //-----------------------------------------------------------------------------
 
-template<typename F>
-class euler_integrator_c {
-private:
-  ompl::base::StateSpace *statespace;
-  double time_step;
-  F      ode;
-
-  //---------------------------------------------------------------------------
-public:
-  euler_integrator_c( ompl::base::StateSpace *_statespace, const double& _time_step ) : 
-    statespace( _statespace ), 
-    time_step( _time_step), 
-    ode( _statespace )
-  { }
-
-  //---------------------------------------------------------------------------
-  void propagate( const ompl::base::State *start, const ompl::control::Control *control, const double duration, ompl::base::State *result, ship_c* ship ) const {
-    std::vector<double> dstate;
-    statespace->copyState( result, start );
-
-    ship_state_c q( statespace, start );
-    ship_command_c u( control );
-
-    ode( result, control, dstate, ship );
-    ode.update( result, time_step * dstate );
-  }
-
-  //---------------------------------------------------------------------------
-  double get_time_step( void ) const {
-    return time_step;
-  }
-
-  //---------------------------------------------------------------------------
-  void set_time_step( const double& _time_step ) {
-    time_step = _time_step;
-  }
-};
-
-//-----------------------------------------------------------------------------
-
 // the integrator for the predator and the prey
-template<typename F>
-class pp_integrator_c {
+class integrator_c {
 private:
   ompl::base::StateSpace *statespace;
   double time_step;
-  F      ode;
+  ode_f ode;
+  prey_command_f prey_command;
 
   //---------------------------------------------------------------------------
 public:
-  pp_integrator_c( ompl::base::StateSpace *_statespace, const double& _time_step ) : 
+  integrator_c( ompl::base::StateSpace *_statespace, const double& _time_step, ode_f _ode, prey_command_f _pc ) : 
     statespace( _statespace ), 
-    time_step( _time_step), 
-    ode( _statespace )
+    time_step( _time_step),
+    ode( _ode ),
+    prey_command( _pc )
   { }
 
   //---------------------------------------------------------------------------
-  void propagate( const ompl::base::State *start, const ompl::control::Control *control, const double duration, ompl::base::State *result, ship_c* pred, ship_c* prey ) const {
+  void propagate( const ompl::base::State *start, const ompl::control::Control *control, ompl::base::State *result, ship_p pred, ship_p prey ) const {
     std::vector<double> state_pred, state_prey, dstate_pred, dstate_prey;
     std::vector<double> u_pred, u_prey;
     statespace->copyState( result, start );
@@ -84,11 +44,11 @@ public:
     // get the commands for the predator and prey
     ship_command_c u( control );
     u_pred = u.as_vector();
-    ship_c::compute_prey_command(state_pred, state_prey, u_prey, pred->time, pred->dtime, &pred->space, prey);
+    prey_command(state_pred, state_prey, u_prey, pred, prey, 0);
 
     // get the ODEs for the predator and prey
-    ship_c::ode( state_pred, u_pred, dstate_pred, pred );
-    ship_c::ode( state_prey, u_prey, dstate_prey, prey );
+    ode( state_pred, u_pred, dstate_pred, pred );
+    ode( state_prey, u_prey, dstate_prey, prey );
 
     // update the predator and prey states
     for (unsigned i=0; i< state_pred.size(); i++) {
@@ -97,18 +57,17 @@ public:
     }
 
     // renormalize the quaternions
-    gazebo::math::Quaternion ed(state_pred[6], state_pred[3], state_pred[4], state_pred[5]);
-    gazebo::math::Quaternion ey(state_prey[6], state_prey[3], state_prey[4], state_prey[5]);
-    ed.Normalize();
-    ey.Normalize();
-    state_pred[3] = ed.x;
-    state_pred[4] = ed.y;
-    state_pred[5] = ed.z;
-    state_pred[6] = ed.w;
-    state_prey[3] = ey.x;
-    state_prey[4] = ey.y;
-    state_prey[5] = ey.z;
-    state_prey[6] = ey.w;
+    double md = 0, my = 0;
+    for( unsigned i = 0; i < 4; i++ ) {
+      md += state_pred[i] * state_pred[i];
+      my += state_prey[i] * state_prey[i];
+    }
+    md = sqrt( md );
+    my = sqrt( my );
+    for( unsigned i = 0; i < 4; i++ ) {
+      state_pred[i] /= md;
+      state_prey[i] /= my;
+    }
 
     // convert back to the state space
     pp_state_c qf( state_pred, state_prey );
@@ -128,6 +87,7 @@ public:
   }
 };
 
+//-----------------------------------------------------------------------------
 
 #endif // _INTEGRATOR_H_
 

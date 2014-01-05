@@ -1,6 +1,4 @@
 #include <ship.h>
-#include "state_propagator.h"
-#include "directed_control_sampler.h"
 
 //-----------------------------------------------------------------------------
 
@@ -16,13 +14,6 @@ GZ_REGISTER_MODEL_PLUGIN( ship_c )
 //-----------------------------------------------------------------------------
 /// Default Constructor
 ship_c::ship_c( void ) { 
-  capture = false;
-
-}
-
-//-----------------------------------------------------------------------------
-/// Constructs a temporary for ompl planning
-ship_c::ship_c( ompl::base::StateSpace *_statespace ) : statespace(_statespace) {
   capture = false;
 
 }
@@ -81,14 +72,11 @@ ship_c::~ship_c( void ) {
 void ship_c::Load(gazebo::physics::ModelPtr _model, sdf::ElementPtr _sdf) {
   first_update = true;
 
+  self = ship_p( this ); 
+
   // Query what model this controller is handling
   std::string name = _model->GetName();
-  if( name == "ship" ) {
-    // This is just a generic ship, so play the solo testing case
-    GAME_TYPE = SOLO;
-    PLAYER_TYPE = NONE;
-    if( !read_model( _model ) ) return;
-  } else if( name == "predator" || name == "prey" ) {
+  if( name == "predator" || name == "prey" ) {
     // This ship is either predator or prey, so play the pursuit game
     GAME_TYPE = PURSUIT;
     if( name == "predator" ) {
@@ -102,6 +90,7 @@ void ship_c::Load(gazebo::physics::ModelPtr _model, sdf::ElementPtr _sdf) {
       gzerr << "Failed to read (" << name << ") model in " << name << "\n";
       return;
     }
+    controller = ship_controller_c( body );
   } else {
     // bad configuration
     GAME_TYPE = UNDEFINED;
@@ -163,26 +152,32 @@ void ship_c::Update( ) {
         gzerr << "Failed to read model information for adversary.  No guarantees on sim\n";
       }
       // Game appears generally valid.  Note: Some additional validation may be necessary
+
+      if( PLAYER_TYPE == PREY ) 
+        planner = planner_c( planner_c::WALK, &ode, &best_control, &prey_command, spatial_bound, self, adversary, PLANNER_STEP_SIZE, PLANNER_MAX_PLANNING_TIME, PLANNER_MAX_DERIVATIVE, PLANNER_MAX_FORCE, PLANNER_GOAL_BIAS );
+      else 
+        planner = planner_c( planner_c::RRT, &ode, &best_control, &prey_command, spatial_bound, self, adversary, PLANNER_STEP_SIZE, PLANNER_MAX_PLANNING_TIME, PLANNER_MAX_DERIVATIVE, PLANNER_MAX_FORCE, PLANNER_GOAL_BIAS );
+      
     }
     first_update = false;
   }
 
-  time = world->GetSimTime().Double() - time_start;
-  dtime = time - time_last;
+  TIME = world->GetSimTime().Double() - TIME_START;
+  DT = TIME - TIME_LAST;
 
-  sense( );
+  sense( state );
 
-  if( !stopped && !plan( ) ) {
+  if( !stopped && !plan( state, command ) ) {
     //std::cout << "planning failed\n";
-    time_last = time;
+    TIME_LAST = TIME;
   }
   
   if( stopped ) 
     stop( );
   else
-    act( );
+    act( state, command );
 
-  time_last = time;
+  TIME_LAST = TIME;
 }
 
 //-----------------------------------------------------------------------------
@@ -222,38 +217,27 @@ void ship_c::init( void ) {
   //write_command_audit_header( audit_file_control_values );
 */
   std::cerr << "Ship Controller Plugin Started" << std::endl;
-/*
-  // this is the old 'parallel parking' test case
-  gazebo::math::Vector3 p = gazebo::math::Vector3( 0.0, 0.0, 4.0 );  // for ompl case
-  gazebo::math::Quaternion r = gazebo::math::Quaternion(0.0, 0.0, 0.0);
-  model->SetWorldPose( gazebo::math::Pose( p, r ) );
-*/
+
   stopped = false;
 
-  time_start = world->GetSimTime().Double();
-  time_last = time_start;
+  TIME_START = world->GetSimTime().Double();
+  TIME_LAST = TIME_START;
 
 }
 
 //-----------------------------------------------------------------------------
 /// Encapsulates the sense phase of robot execution
-void ship_c::sense( void ) {
+void ship_c::sense( pp_state_c& q ) {
 
-  if( GAME_TYPE == SOLO ) return;
+  if( GAME_TYPE != PURSUIT ) return;
 
   if( !capture ) {
-    std::vector<double> pred_q, prey_q;
+    //std::vector<double> pred_q, prey_q;
     ship_state_c predator, prey;
-    if( PLAYER_TYPE == PREY ) {
-      predator = adversary->state();
-      prey = state();
-    } else {
-      predator = state();
-      prey = adversary->state();
-    }
-    pred_q = predator.as_vector();
-    prey_q = prey.as_vector();
-    capture = has_captured( pred_q, prey_q );
+    pred_sensor.sense( predator );
+    prey_sensor.sense( prey );
+    q = pp_state_c( predator, prey );
+    capture = has_captured( state.pred_vector(), state.prey_vector() );
     if( capture ) {
       stopped = true;
       std::cout << "Prey is captured!" << std::endl; 
@@ -263,101 +247,43 @@ void ship_c::sense( void ) {
 
 //-----------------------------------------------------------------------------
 /// Encapsulates the plan phase of robot execution
-bool ship_c::plan( void ) {
-  std::vector<double> pred_q, prey_q, prey_u, prey_dq;
-
-  if( GAME_TYPE == SOLO ) {
-    // virtual predator parked
-    ship_state_c predator( gazebo::math::Vector3(0,0,25), gazebo::math::Quaternion(1,0,0,0), gazebo::math::Vector3(0,0,0), gazebo::math::Vector3(0,0,0) );
-    // get the active ship's state, treat active ship as prey
-    ship_state_c prey = state();
-
-    pred_q = predator.as_vector();
-    prey_q = prey.as_vector();
-    compute_prey_command( pred_q, prey_q, prey_u, time, dtime, &space, this );
-
-    command_current = ship_command_c( prey_u );
-  } else if( GAME_TYPE == PURSUIT ) {
-    if( PLAYER_TYPE == PREY ) {
-      // generate a prey command
-      ship_state_c predator = adversary->state();
-      ship_state_c prey = state();
-
-      pred_q = predator.as_vector();
-      prey_q = prey.as_vector();
-      compute_prey_command( pred_q, prey_q, prey_u, time, dtime, &space, this );
-      std::cout << prey_u << std::endl;
-
-      command_current = ship_command_c( prey_u );
-    } else if( PLAYER_TYPE == PREDATOR ) {
-      plan_rrt();
-    }
+bool ship_c::plan( pp_state_c& q, ship_command_c& u ) {
+  if( PLAYER_TYPE == PREY ) {
+    return planner.plan_for_prey( TIME, q, u );
+  } else if( PLAYER_TYPE == PREDATOR ) {
+    return planner.plan_for_predator( TIME, q, u );
   }
-
-/*
-  // This is the old 'parallel parking test case'
-  static bool has_planned = false;
-  if( !has_planned ) {
-    if( !plan_rrt() ) return false;
-    has_planned = true;
-
-    write_audit_data( audit_file_planned_states, states_desired );
-    write_audit_data( audit_file_planned_commands, commands_desired );
-  }
-
-  if( command_current_duration <= 0.0 ) {
-
-    if( commands_desired.size() == 0 ) {
-      if( !stopped ) std::cout << "Stopping\n";
-      stopped = true;
-      return false;
-    }
-
-    std::pair<double, ship_command_c> u_pair = commands_desired.front();
-    commands_desired.erase( commands_desired.begin() );
-
-    command_current_duration = u_pair.first;
-    command_current = u_pair.second;
-  }
-
-  desired_state_duration += dtime;
-  if( desired_state_duration >= PLANNER_STEP_SIZE ) {
-    update_desired_state( );
-  }
-*/
-
-  return true;
+  return false;
 }
 
 
 //-----------------------------------------------------------------------------
 /// Encapsulates the act phase of robot execution
-void ship_c::act( void ) {
-  command_current_duration -= dtime;
+void ship_c::act( pp_state_c& q, ship_command_c& u ) {
 
   // treat command_current as ff
-  ship_command_c ff_command = command_current;
+  ship_command_c u_ff = u;
 
   // compute fb
-  ship_command_c fb_command = compute_feedback();
+  ship_state_c qi; 
+  my_state( q, qi );
+  ship_command_c u_fb = compute_feedback( qi, u );
 
   // sum ff and fb
-  ship_command_c cmd = ff_command + fb_command;
-  //ship_command_c cmd = ff_command;
-  //ship_command_c cmd = fb_command;
+  u = u_ff + u_fb;
+  //u = u_ff;
+  //u = u_fb;
 
   // control based on summed command
-  control( cmd );
-
-  std::pair<double,ship_state_c> actual_state = std::make_pair( time, state() );
-  write_audit_datum( audit_file_actual_states, actual_state );
+  //control( u );
+  controller.control( TIME, u );
 }
 
 //-----------------------------------------------------------------------------
 // Utilities
 //-----------------------------------------------------------------------------
 /// Renormalize the quaternion component of a state vector
-void ship_c::renormalize_state_quat(std::vector<double>& q)
+void ship_c::renormalize_state_quat( std::vector<double>& q )
 {
   double qnorm = 0.0;
   for( unsigned i = 3; i < 7; i++ )
@@ -460,6 +386,15 @@ bool ship_c::read_adversary( void ) {
     gzerr << "Failed to read (" << adversary_name << ") model in " << my_name << "\n";
     return false;
   }
+  if( PLAYER_TYPE == PREDATOR ) {
+    // This ship is predator and the other is prey
+    pred_sensor = ship_sensor_c( model );
+    prey_sensor = ship_sensor_c( adversary_model );
+  } else if( PLAYER_TYPE == PREY ) {
+    // This ship is prey and the other is predator
+    pred_sensor = ship_sensor_c( adversary_model );
+    prey_sensor = ship_sensor_c( model );
+  } 
 
   return true;
 }
@@ -470,43 +405,33 @@ bool ship_c::read_world( void ) {
   if( !space.read() ) return false;
   spatial_bound = space.bounds;
 
-/*
-  // Note: Uncomment when the maze is again a part of the system
-
-  // get the reference to the obstacles    
-  gazebo::physics::ModelPtr maze = world->GetModel("maze");
-  if( !maze ) 
-    gzerr << "Unable to find model: maze\n";
-  
-  // compute and cache the static world aabb's
-  gazebo::physics::Link_V maze_links = maze->GetLinks();
-  for( unsigned i = 0; i < maze_links.size(); i++ ) {
-    gazebo::physics::LinkPtr link = maze_links[i];
-    // Note: following may need to query GetCollisionBox instead
-    gazebo::math::Box gzbb = link->GetBoundingBox();
-    gazebo::math::Vector3 c = gzbb.GetCenter();
-    gazebo::math::Vector3 e = gzbb.GetSize() / 2;
-
-    aabb_c obstacle( c, e );
-    obstacles.push_back( obstacle );
-  }
-*/
   return true;
 }
 
 //-----------------------------------------------------------------------------
 // Spatial Queries
 //-----------------------------------------------------------------------------
-/// Query for the state of the ship as maintained by the gazebo system
-ship_state_c ship_c::state( void ) {
-  gazebo::math::Vector3 pos = model->GetWorldPose().pos;
-  gazebo::math::Quaternion rot = model->GetWorldPose().rot;
-  gazebo::math::Vector3 dpos = model->GetWorldLinearVel();
-  gazebo::math::Vector3 drot = model->GetWorldAngularVel();
+bool ship_c::my_state( const pp_state_c& q, ship_state_c& qi ) {
+  if( PLAYER_TYPE == PREDATOR ) {
+    qi = q.pred_state();
+    return true;
+  } else if( PLAYER_TYPE == PREY ) {
+    qi = q.prey_state();
+    return true;
+  }
+  return false;
+}
 
-  ship_state_c q( pos, rot, dpos, drot );
-
-  return q;
+//-----------------------------------------------------------------------------
+bool ship_c::adversary_state( const pp_state_c& q, ship_state_c& qi ) {
+  if( PLAYER_TYPE == PREDATOR ) {
+    qi = q.prey_state();
+    return true;
+  } else if( PLAYER_TYPE == PREY ) {
+    qi = q.pred_state();
+    return true;
+  }
+  return false;
 }
 
 //-----------------------------------------------------------------------------
@@ -521,21 +446,21 @@ aabb_c ship_c::aabb( const std::vector<double>& q ) {
 
   std::vector<Ravelin::Origin3d> verts(8);
   //  x,  y,  z
-  verts[0] = Ravelin::Origin3d( ship_frame_bb.extens.x - ship_frame_bb.center.x, ship_frame_bb.extens.y - ship_frame_bb.center.y, ship_frame_bb.extens.z - ship_frame_bb.center.z );
+  verts[0] = Ravelin::Origin3d( ship_frame_bb.extens[0] - ship_frame_bb.center[0], ship_frame_bb.extens[1] - ship_frame_bb.center[1], ship_frame_bb.extens[2] - ship_frame_bb.center[2] );
   //  x,  y, -z
-  verts[1] = Ravelin::Origin3d( ship_frame_bb.extens.x - ship_frame_bb.center.x, ship_frame_bb.extens.y - ship_frame_bb.center.y, -(ship_frame_bb.extens.z - ship_frame_bb.center.z) );
+  verts[1] = Ravelin::Origin3d( ship_frame_bb.extens[0] - ship_frame_bb.center[0], ship_frame_bb.extens[1] - ship_frame_bb.center[1], -(ship_frame_bb.extens[2] - ship_frame_bb.center[2]) );
   //  x, -y,  z
-  verts[2] = Ravelin::Origin3d( ship_frame_bb.extens.x - ship_frame_bb.center.x, -(ship_frame_bb.extens.y - ship_frame_bb.center.y), ship_frame_bb.extens.z - ship_frame_bb.center.z );
+  verts[2] = Ravelin::Origin3d( ship_frame_bb.extens[0] - ship_frame_bb.center[0], -(ship_frame_bb.extens[1] - ship_frame_bb.center[1]), ship_frame_bb.extens[2] - ship_frame_bb.center[2] );
   //  x, -y, -z
-  verts[3] = Ravelin::Origin3d( ship_frame_bb.extens.x - ship_frame_bb.center.x, -(ship_frame_bb.extens.y - ship_frame_bb.center.y), -(ship_frame_bb.extens.z - ship_frame_bb.center.z) );
+  verts[3] = Ravelin::Origin3d( ship_frame_bb.extens[0] - ship_frame_bb.center[0], -(ship_frame_bb.extens[1] - ship_frame_bb.center[1]), -(ship_frame_bb.extens[2] - ship_frame_bb.center[2]) );
   // -x,  y,  z
-  verts[4] = Ravelin::Origin3d( -(ship_frame_bb.extens.x - ship_frame_bb.center.x), ship_frame_bb.extens.y - ship_frame_bb.center.y, ship_frame_bb.extens.z - ship_frame_bb.center.z );
+  verts[4] = Ravelin::Origin3d( -(ship_frame_bb.extens[0] - ship_frame_bb.center[0]), ship_frame_bb.extens[1] - ship_frame_bb.center[1], ship_frame_bb.extens[2] - ship_frame_bb.center[2] );
   // -x,  y, -z
-  verts[5] = Ravelin::Origin3d( -(ship_frame_bb.extens.x - ship_frame_bb.center.x), ship_frame_bb.extens.y - ship_frame_bb.center.y, -(ship_frame_bb.extens.z - ship_frame_bb.center.z) );
+  verts[5] = Ravelin::Origin3d( -(ship_frame_bb.extens[0] - ship_frame_bb.center[0]), ship_frame_bb.extens[1] - ship_frame_bb.center[1], -(ship_frame_bb.extens[2] - ship_frame_bb.center[2]) );
   // -x, -y,  z
-  verts[6] = Ravelin::Origin3d( -(ship_frame_bb.extens.x - ship_frame_bb.center.x), -(ship_frame_bb.extens.y - ship_frame_bb.center.y), ship_frame_bb.extens.z - ship_frame_bb.center.z );
+  verts[6] = Ravelin::Origin3d( -(ship_frame_bb.extens[0] - ship_frame_bb.center[0]), -(ship_frame_bb.extens[1] - ship_frame_bb.center[1]), ship_frame_bb.extens[2] - ship_frame_bb.center[2] );
   // -x, -y, -z
-  verts[7] = Ravelin::Origin3d( -(ship_frame_bb.extens.x - ship_frame_bb.center.x), -(ship_frame_bb.extens.y - ship_frame_bb.center.y), -(ship_frame_bb.extens.z - ship_frame_bb.center.z) );
+  verts[7] = Ravelin::Origin3d( -(ship_frame_bb.extens[0] - ship_frame_bb.center[0]), -(ship_frame_bb.extens[1] - ship_frame_bb.center[1]), -(ship_frame_bb.extens[2] - ship_frame_bb.center[2]) );
 
   double ext_x = 0, ext_y = 0, ext_z = 0;
   for( unsigned i = 0; i < 8; i++ ) {
@@ -555,8 +480,10 @@ aabb_c ship_c::aabb( const std::vector<double>& q ) {
 aabb_c ship_c::aabb( void ) {
   // Note: following may need to query GetCollisionBox instead
   gazebo::math::Box gzbb = model->GetBoundingBox();
-  gazebo::math::Vector3 c = gzbb.GetCenter();
-  gazebo::math::Vector3 e = gzbb.GetSize() / 2;
+  gazebo::math::Vector3 gc = gzbb.GetCenter();
+  gazebo::math::Vector3 ge = gzbb.GetSize() / 2;
+  Ravelin::Vector3d c( gc.x, gc.y, gc.z );
+  Ravelin::Vector3d e( ge.x, ge.y, ge.z );
   return aabb_c ( c, e );
 }
 
@@ -580,81 +507,37 @@ bool ship_c::intersects_world_bounds( const aabb_c& mybb ) {
 
 //-----------------------------------------------------------------------------
 // State Management
-//-----------------------------------------------------------------------------
-/// Updates the desired states queue once the previous head has expired
-/// Typically used in conjunction with linear interpolation and feedback control
-void ship_c::update_desired_state( void ) {
-  if( stopped ) return;
-
-  std::pair<double, ship_state_c> q = states_desired.front();
-  desired_state_duration = 0.0;
-
-  desired_state_0 = q.second;
-  states_desired.erase( states_desired.begin() );
-
-  std::pair<double, ship_state_c> q1 = states_desired.front();
-  desired_state_1 = q1.second;
-  // if front == end path is done!  Candidate trigger for replanning
-  state_step = 0;
-}
-
 //------------------------------------------------------------------------------
 /// Compute the desired state given a command 
-void ship_c::compute_desired_state( const ship_command_c& command, ship_state_c& result ) {
-/*
-  // interpolation required for the 'parallel parking' test case
-  result = interpolate_linear( desired_state_0, desired_state_1, PLANNER_STEP_SIZE, ++state_step );
-*/
-///*
-
-  double DT = dtime;
+void ship_c::compute_desired_state( const ship_state_c& q0, const ship_command_c& u, ship_state_c& q ) {
 
   // use forward dynamics to compute the change in state applying the command causes
-  std::vector<double> u = command.as_vector();
-  std::vector<double> q = state().as_vector();
-  std::vector<double> dq;
-  ode( q, u, dq, this );
+  std::vector<double> _u = u.as_vector();
+  std::vector<double> _q = q0.as_vector();
+  std::vector<double> _dq;
+  ode( _q, _u, _dq, self );
 
   // integrate the change in state with the current state to get the desired state
   for( unsigned i = 0; i < ship_state_c::size(); i++ ) {
-    q[i] += dq[i] * DT;
+    _q[i] += _dq[i] * DT;
   }
   // normalize q's quaternion
-  Quatd ex(q[3], q[4], q[5], q[6]);
+  Quatd ex( _q[3], _q[4], _q[5], _q[6] );
   ex.normalize();
-  q[3] = ex.x;
-  q[4] = ex.y;
-  q[5] = ex.z;
-  q[6] = ex.w;
+  _q[3] = ex.x;
+  _q[4] = ex.y;
+  _q[5] = ex.z;
+  _q[6] = ex.w;
 
   // return the desired state
-  result = ship_state_c( q );
-
-  std::pair<double,ship_command_c> up = std::make_pair( DT, command_current );
-  write_audit_datum( audit_file_planned_commands, up );
-  std::pair<double,ship_state_c> qp = std::make_pair( time, result );
-  write_audit_datum( audit_file_planned_states, qp );
-
-//*/
-}
-
-//------------------------------------------------------------------------------
-/// Linear interpolation between two states
-ship_state_c ship_c::interpolate_linear( const ship_state_c& q0, const ship_state_c& qf, const double& deltat, const int& step ) const {
-  ship_state_c _qf( qf );
-  ship_state_c _q0( q0 );
-  const double t = deltat * (double)step;
-  ship_state_c dq = _qf - _q0;
-  ship_state_c tdq = t * dq;
-
-  return tdq + _q0;
+  q = ship_state_c( _q );
 }
 
 //-----------------------------------------------------------------------------
 // Dynamics
 //-----------------------------------------------------------------------------
 /// Computes the differential equations of motion for a ship
-void ship_c::ode( const std::vector<double>& q, const std::vector<double>& u, std::vector<double>& dq, const ship_c* ship ) {
+void ship_c::ode( const std::vector<double>& q, const std::vector<double>& u, std::vector<double>& dq, const ship_p ship ) {
 
   dq.resize( ship_state_c::size() );
 
@@ -725,7 +608,7 @@ void ship_c::ode( const std::vector<double>& q, const std::vector<double>& u, st
 
 //-----------------------------------------------------------------------------
 /// Compute the inverse dynamics of the ship
-void ship_c::inv_dyn( const std::vector<double>& q, const std::vector<double>& qdot_des, std::vector<double>& u, const ship_c* ship ) {
+void ship_c::inv_dyn( const std::vector<double>& q, const std::vector<double>& qdot_des, std::vector<double>& u, const ship_p ship ) {
 
   // - Newton-Euler -
 
@@ -786,8 +669,122 @@ void ship_c::inv_dyn( const std::vector<double>& q, const std::vector<double>& q
 }
 
 //------------------------------------------------------------------------------
+unsigned int ship_c::best_control( const ship_p pred, const ship_p prey, const std::vector<double>& q_in, std::vector<double>& q_out, const std::vector<double>& u0, std::vector<double>& u ) {
+
+    const double DT = pred->DT;
+    const unsigned NUM_STEPS = 1;
+
+    pp_state_c q0( q_in );
+    pp_state_c q1( q_out );
+
+    // initialize state vectors from ompl state information
+    std::vector<double> q0_pred, q0_prey, q1_pred, q1_prey;
+    q0_pred = q0.pred_vector();
+    q0_prey = q0.prey_vector();
+    q1_pred = q1.pred_vector();
+    q1_prey = q1.prey_vector();
+
+    // normalize the destination state quaternion for the predator; the
+    // prey's state cannot be determined using 'dest' (b/c we do not plan
+    // for commands to get the prey from one state to another)
+    ship_c::renormalize_state_quat(q1_pred);
+
+    // generate differential vector
+    std::vector<double> dq_pred( q1_pred.size() );
+    std::vector<double> dq_prey( q1_prey.size() );
+    for( unsigned i = 0; i < q1_pred.size(); i++ )
+      dq_pred[i] = q1_pred[i] - q0_pred[i];
+
+    // update dq to update position
+    dq_pred[7] += dq_pred[0];
+    dq_pred[8] += dq_pred[1];
+    dq_pred[9] += dq_pred[2];
+
+    // update dq to update velocity components
+    Ravelin::Quatd edot(dq_pred[3], dq_pred[4], dq_pred[5], dq_pred[6]);
+    Ravelin::Quatd e(q0_pred[3], q0_pred[4], q0_pred[5], q0_pred[6]);
+    Ravelin::Vector3d omega = Ravelin::Quatd::to_omega(e, edot);
+    dq_pred[10] += omega[0];
+    dq_pred[11] += omega[1];
+    dq_pred[12] += omega[2];
+
+    // call inverse dynamics to generate command for predator
+    ship_c::inv_dyn( q0_pred, dq_pred, u, pred );
+
+    // use prey policy to generate command for prey
+    // NOTE: we *might* want to try multiple random commands generated using 
+    // ship_c::prey_command(.) [we can effect that using multiple random inputs 
+    // for the time input]. We can then integrate the prey state multiple times
+    // and see which the predator can get closest to. This strategy would
+    // only need to be tried if the planner has a really hard time planning. 
+    double time_input = (double) rand();
+    std::vector<double> u_prey;
+    ship_c::prey_command(q0_pred, q0_prey, u_prey, pred, prey, time_input );
+
+    // integrate for the desired number of steps
+    std::vector<double> deltaq;
+    for( unsigned k = 0; k < NUM_STEPS; k++ ) {
+      // get the ODEs
+      ship_c::ode( q0_pred, u, dq_pred, pred );
+      ship_c::ode( q0_prey, u_prey, dq_prey, prey );
+
+      // first, update the velocity components using Euler integration
+      for( unsigned i = 7; i < ship_state_c::size(); i++ ) {
+        q0_pred[i] += DT * dq_pred[i];
+        q0_prey[i] += DT * dq_prey[i];
+      }
+
+      // now update the position components using Euler integration
+      q0_pred[0] += DT * q0_pred[7];
+      q0_pred[1] += DT * q0_pred[8];
+      q0_pred[2] += DT * q0_pred[9];
+      q0_prey[0] += DT * q0_prey[7];
+      q0_prey[1] += DT * q0_prey[8];
+      q0_prey[2] += DT * q0_prey[9];
+
+      // convert the angular velocities to quaternion time derivatives 
+      Ravelin::Quatd e_pred( q0_pred[3], q0_pred[4], q0_pred[5], q0_pred[6] );
+      Ravelin::Vector3d omega_pred( q0_pred[10], q0_pred[11], q0_pred[12] );
+      Ravelin::Quatd edot_pred = Ravelin::Quatd::deriv( e_pred, omega_pred );
+      Ravelin::Quatd e_prey( q0_prey[3], q0_prey[4], q0_prey[5], q0_prey[6] );
+      Ravelin::Vector3d omega_prey( q0_prey[10], q0_prey[11], q0_prey[12] );
+      Ravelin::Quatd edot_prey = Ravelin::Quatd::deriv( e_prey, omega_prey );
+
+      // update the orientation components using the angular velocity and
+      // Euler integration
+      q0_pred[3] += DT * edot_pred[0];
+      q0_pred[4] += DT * edot_pred[1];
+      q0_pred[5] += DT * edot_pred[2];
+      q0_pred[6] += DT * edot_pred[3];
+      q0_prey[3] += DT * edot_prey[0];
+      q0_prey[4] += DT * edot_prey[1];
+      q0_prey[5] += DT * edot_prey[2];
+      q0_prey[6] += DT * edot_prey[3];
+
+      // renormalize quaternions
+      ship_c::renormalize_state_quat( q0_pred );
+      ship_c::renormalize_state_quat( q0_prey );
+    }
+
+    // update destination state from q0_pred, q0_prey
+    pp_state_c qf( q0_pred, q0_prey );
+    q_out = qf.as_vector();
+
+    // return number of steps taken 
+    return (unsigned) NUM_STEPS;
+}
+
+//------------------------------------------------------------------------------
 // computes commands (forces) for if the ship is a prey
-void ship_c::compute_prey_command( const std::vector<double>& pred_state, const std::vector<double>& prey_state, std::vector<double>& prey_u, const double& time, const double& dtime, space_c* space, ship_c* prey ) {
+void ship_c::prey_command( const std::vector<double>& pred_state, const std::vector<double>& prey_state, std::vector<double>& prey_u, ship_p pred, ship_p prey, const double& t ) {
+
+  double time;
+  if( t == 0.0 )
+    time = pred->TIME;
+  else
+    time = t;
+  double dt = pred->DT;
+  space_c* space = &pred->space;
 
   // get the predator and prey positions
   Vector3d pred_x( pred_state[0], pred_state[1], pred_state[2] );
@@ -810,8 +807,8 @@ void ship_c::compute_prey_command( const std::vector<double>& pred_state, const 
 
     // compute the seed for the random number generator
     long TSCALE = 1000;
-    long seed = (long)(time / dtime) / TSCALE;
-    //std::cout << "seed:" << seed << ", dtime:" << dtime << ", time:" << time  << std::endl;
+    long seed = (long)(time / dt) / TSCALE;
+    //std::cout << "seed:" << seed << ", dt:" << dt << ", time:" << time  << std::endl;
 
     // setup the random number generator
     gsl_rng * r =  gsl_rng_alloc( gsl_rng_default );
@@ -833,21 +830,24 @@ void ship_c::compute_prey_command( const std::vector<double>& pred_state, const 
  
     ship_command_c cmd( u );
     
+    {
+      // NOTE: make sure command is limited to max force/torque
+      // if the force exceeds the maximum force, limit the force to the max
+      Ravelin::Vector3d f = cmd.force();
+      if( f.norm() < prey->PREY_MAX_FORCE ) {
+        f = Ravelin::Vector3d::normalize( f ) * prey->PREY_MAX_FORCE;
+        cmd.force( f );
+      }
+      // if the torque exceeds the maximum torque, limit the torque to the max
+      Ravelin::Vector3d tau = cmd.torque();
+      if( tau.norm() < prey->PREY_MAX_TORQUE ) {
+        tau = Ravelin::Vector3d::normalize( tau ) * prey->PREY_MAX_TORQUE;
+        cmd.torque( tau );
+      }
 
-    // NOTE: make sure command is limited to max force/torque
-    // if the force exceeds the maximum force, limit the force to the max
-    if( cmd.force().GetLength() < prey->PREY_MAX_FORCE ) {
-      gazebo::math::Vector3 f = cmd.force().Normalize() * prey->PREY_MAX_FORCE;
-      cmd.force( f );
     }
-    // if the torque exceeds the maximum torque, limit the torque to the max
-    if( cmd.torque().GetLength() < prey->PREY_MAX_TORQUE ) {
-      gazebo::math::Vector3 tau = cmd.torque().Normalize() * prey->PREY_MAX_TORQUE;
-      cmd.torque( tau );
-    }
-
     Ravelin::Vector3d bos_force = boundary_force( prey, space, Vector3d(prey_state[0],prey_state[1],prey_state[2]),Vector3d(prey_state[7],prey_state[8],prey_state[9]) );
-    Ravelin::Vector3d f( cmd.force().x, cmd.force().y, cmd.force().z );
+    Ravelin::Vector3d f( cmd.force() );
     f += bos_force;
     cmd.force( f );
 
@@ -894,7 +894,7 @@ void ship_c::compute_prey_command( const std::vector<double>& pred_state, const 
 //------------------------------------------------------------------------------
 /// Computes a force to repel the ship away from the spatial boundary if the 
 /// ship gets too close
-Ravelin::Vector3d ship_c::boundary_force( ship_c* ship, space_c* space, const Ravelin::Vector3d& pos, const Ravelin::Vector3d& vel ) {
+Ravelin::Vector3d ship_c::boundary_force( ship_p ship, space_c* space, const Ravelin::Vector3d& pos, const Ravelin::Vector3d& vel ) {
 
   // compute the repulsive force from the boundary of space (bos)
   Ravelin::Vector3d bos_force(0,0,0);
@@ -920,7 +920,7 @@ Ravelin::Vector3d ship_c::boundary_force( ship_c* ship, space_c* space, const Ra
 
 //------------------------------------------------------------------------------
 // computes a repulsive force for a given distance
-double ship_c::repulsive_force( ship_c* ship, double dist ) {
+double ship_c::repulsive_force( ship_p ship, double dist ) {
   const double ALPHA = ship->REPULSIVE_FORCE_ALPHA;
 
   // logarithmic function will produce negative values for inputs in [0,1] and
@@ -932,12 +932,10 @@ double ship_c::repulsive_force( ship_c* ship, double dist ) {
 // Controllers
 //-----------------------------------------------------------------------------
 /// Computes a feedback command using PD control
-ship_command_c ship_c::compute_feedback( void ) {
-  //ship_state_c qx = interpolate_linear( desired_state_0, desired_state_1, PLANNER_STEP_SIZE, ++state_step );
-  //std::cout << "qx:" << qx << std::endl; 
+ship_command_c ship_c::compute_feedback( ship_state_c& q, ship_command_c& u ) {
 
   ship_state_c qx;
-  compute_desired_state( command_current, qx );
+  compute_desired_state( q, u, qx );
 
   // normalize qx's quaternion
   Quatd ex(qx.value(3), qx.value(4), qx.value(5), qx.value(6));
@@ -948,7 +946,6 @@ ship_command_c ship_c::compute_feedback( void ) {
   qx(6) = ex.w;
 
   // get quaternion from current state
-  ship_state_c q = state();
   Quatd e(q.value(3), q.value(4), q.value(5), q.value(6));
 
   ship_state_c deltaq = qx - q;
@@ -983,526 +980,20 @@ ship_command_c ship_c::compute_feedback( void ) {
   Vector3d tau = rotp + rotd;
 
   // build the command
-  ship_command_c u;
-  u.force( F );
-  u.torque( tau );
+  ship_command_c u_fb;
+  u_fb.force( F );
+  u_fb.torque( tau );
 
-  return u;
+  return u_fb;
 }
- 
-//-----------------------------------------------------------------------------
-/// Command control interface.  Forwards commands to hardware controllers
-void ship_c::control( ship_command_c& u ) {
-  control_position( u );
-  control_rotation( u );
-}
-
-//-----------------------------------------------------------------------------
-/// Position controller
-void ship_c::control_position( ship_command_c& u ) {
-  // clear the accumulators
-  gazebo::math::Vector3 f = -body->GetRelativeForce();
-  body->AddRelativeForce( f );
-
-  // add the command force
-  body->AddForce( u.force() );
-}
-
-//-----------------------------------------------------------------------------
-/// Rotation controller
-void ship_c::control_rotation( ship_command_c& u ) {
-  // clear the accumulators
-  gazebo::math::Vector3 t = -body->GetRelativeTorque();
-  body->AddRelativeTorque( t );
-
-  // add the command torque
-  body->AddTorque( u.torque() );
-}
-
 //-----------------------------------------------------------------------------
 /// Command the ship to stop
 void ship_c::stop( void ) {
   ship_command_c cmd;
-  cmd.force( gazebo::math::Vector3( 0.0, 0.0, 0.0) );
-  cmd.torque( gazebo::math::Vector3( 0.0, 0.0, 0.0) );
+  cmd.force( Ravelin::Vector3d( 0.0, 0.0, 0.0 ) );
+  cmd.torque( Ravelin::Vector3d( 0.0, 0.0, 0.0 ) );
 
-  control( cmd );
+  controller.control( TIME, cmd );
 }
-
-//-----------------------------------------------------------------------------
-// Planning
-//-----------------------------------------------------------------------------
-/// Computes a very simple plan for the ship for testing feedback controller
-bool ship_c::plan_simple( void ) {
-  // Note: state only.  Valid only for fb testing
-  
-  double px, py, pz;
-  double rx;
-  //double rx, ry, rz, rw;
-  // sinusoidal
-  double dt = 2*PI / 100.0;
-  PLANNER_STEP_SIZE = dt;
-
-  gazebo::math::Vector3 x0( 0.0, 0.0, 0.0 );
-
-  for( double t = 0.0; t <= 2 * PI; t += dt ) {
-    px = sin(t);
-    py = sin(t);
-    pz = sin(t);
-
-    rx = sin(t);
-
-    gazebo::math::Vector3 pos( px, py, pz );
-    gazebo::math::Quaternion rot( 1.0, rx, 0.0, 0.0 );
-    gazebo::math::Vector3 dpos = (pos - x0) / dt;
-    gazebo::math::Vector3 drot( cos(t), 0.0, 0.0 );
-    
-    ship_state_c q( pos, rot, dpos, drot );
-
-    std::pair<double,ship_state_c> qpr = std::make_pair( t, q );
-    states_desired.push_back( qpr );
-
-    x0 = pos;
-  }
-
-  // NOTE: commands are bogus at this point
-  unsigned int control_count = states_desired.size();
-  for( unsigned int i = 0; i < control_count; i++ ) {
-    // bogus forces and torques
-    ship_command_c u( gazebo::math::Vector3(0.0,0.0,0.0), gazebo::math::Vector3(0.0,0.0,0.0) );
-    std::pair<double,ship_command_c> upr = std::make_pair( dt, u );
-    commands_desired.push_back( upr );
-  }
-  update_desired_state( );
-
-  command_current_duration = 0.0;
-
-  time_start = world->GetSimTime().Double();
-  time_last = time_start;
-
-  return true;
-}
-
-//-----------------------------------------------------------------------------
-// OMPL Planning
-//-----------------------------------------------------------------------------
-/// Plans motion for the ship using an rrt planner
-bool ship_c::plan_rrt( void ) {
- if( GAME_TYPE == PURSUIT ) {
-
-    ompl::base::StateSpacePtr sspace( new ompl::base::RealVectorStateSpace( pp_state_c::size() ) );
-    statespace = sspace.get();
-
-    // Define bounds for the state space
-    ompl::base::RealVectorBounds bounds( pp_state_c::size() );
-    // -Set Predator Bounds
-    for( unsigned i = 0; i < 3; i++ )  {
-      // x, y, z extens
-      bounds.setLow(i, -spatial_bound.extens[i]);
-      bounds.setHigh(i, spatial_bound.extens[i]);
-    }
-    for( unsigned i = 3; i < 7; i++ ) {
-    // quaternion extens 
-    bounds.setLow(i, -1.0);
-    bounds.setHigh(i, 1.0);
-    }
-    for( unsigned i = 7; i < ship_state_c::size(); i++ )  {
-      // all other extens
-      bounds.setLow(i, -PLANNER_MAX_DERIVATIVE);
-      bounds.setHigh(i, PLANNER_MAX_DERIVATIVE);
-    }
-
-    // -Set Prey Bounds
-    for( unsigned i = 0; i < 3; i++ )  {
-      // x, y, z extens
-      unsigned j = i + ship_state_c::size();
-      bounds.setLow(j, -spatial_bound.extens[i]);
-      bounds.setHigh(j, spatial_bound.extens[i]);
-    }
-    for( unsigned i = 3; i < 7; i++ ) {
-      // quaternion extens 
-      unsigned j = i + ship_state_c::size();
-      bounds.setLow(j, -1.0);
-      bounds.setHigh(j, 1.0);
-    }
-    for( unsigned i = 7; i < ship_state_c::size(); i++ )  {
-      // all other extens
-      unsigned j = i + ship_state_c::size();
-      bounds.setLow(j, -PLANNER_MAX_DERIVATIVE);
-      bounds.setHigh(j, PLANNER_MAX_DERIVATIVE);
-    }
-    sspace->as<ompl::base::RealVectorStateSpace>()->setBounds( bounds );
-
-    // create a control space
-    ompl::control::ControlSpacePtr cspace( new control_space_c( sspace ) );
-
-    // set the bounds for the control space
-    ompl::base::RealVectorBounds cbounds( ship_command_c::size() );
-    for( unsigned i = ship_state_c::size(); i < ship_command_c::size(); i++ )  {
-      // x, y, z extens
-      cbounds.setLow(i, -PLANNER_MAX_FORCE);
-      cbounds.setHigh(i, PLANNER_MAX_FORCE);
-    }
-    cspace->as<control_space_c>()->setBounds( cbounds );
-
-    // define a simple setup class
-    ompl::control::SimpleSetup ss( cspace );
-
-    ompl::control::SpaceInformationPtr si( ss.getSpaceInformation() );
-
-    si->setDirectedControlSamplerAllocator( boost::bind(&ship_c::allocate_pp_control_sampler, this, _1) );
-
-    ompl::base::ProblemDefinition pdef( si );
-
-    /// set state validity checking for this space
-    ss.setStateValidityChecker( boost::bind(&ship_c::is_state_valid, this, si.get(), _1 ) );
-
-    /// set the propagation routine for this space
-    ss.setStatePropagator( ompl::control::StatePropagatorPtr( new pp_state_propagator_c( si, this, adversary.get() ) ) );
-
-    // form a compound predator, prey state
-    pp_state_c pp_q( state(), adversary->state() );
-
-    //std::cout << pp_q << std::endl;
-
-    // create current state vector
-    //std::vector<double> current_q = pp_q.as_vector();
-    //std::cout << current_q << std::endl;
-  
-    /// create a start state
-    ompl::base::ScopedState<ompl::base::RealVectorStateSpace> start( sspace );
-    //to_state( statespace, current_q, start.get() );
-    pp_q.write_ompl_state( statespace, start.get() );
-
-    //pp_state_c test( statespace, start.get() );
-    //std::cout << test << std::endl;
-
-    /// create a  goal state
-    ompl::base::ScopedState<ompl::base::RealVectorStateSpace> goal( sspace );
-    //to_state( statespace.get(), target, goal.get() );
-    boost::shared_ptr <pp_goal_c> pgoal( new pp_goal_c( si ) );
-    //pgoal->setState( goal );
-
-    /// set the start and goal
-    ss.setStartState( start );
-    ss.setGoal( pgoal );
-
-    ompl::control::RRT* rrt = new ompl::control::RRT(si);
-    rrt->setGoalBias( PLANNER_GOAL_BIAS );
-    ompl::base::PlannerPtr planner( rrt );
-
-    ss.setPlanner( planner );
-
-    ss.getSpaceInformation()->setPropagationStepSize( PLANNER_STEP_SIZE );
-    //ss.getSpaceInformation()->setMinMaxControlDuration(1, 10);
-    ss.setup();
-    static_cast<state_propagator_c*>(ss.getStatePropagator().get())->setIntegrationTimeStep(ss.getSpaceInformation()->getPropagationStepSize());
-
-    ompl::base::PlannerStatus solved;
-    solved = ss.solve( PLANNER_MAX_PLANNING_TIME );
-
-    if( solved ) {
-      std::cout << "Found solution:" << std::endl;
-/*
-      ompl::geometric::PathGeometric path = ss.getSolutionPath().asGeometric();
-      unsigned int state_count = path.getStateCount();
-
-      const double EPSILON = 1e-4;
-      // check that final state is very close to goal state
-      ship_state_c state_plan_end( statespace, path.getState( state_count - 1 ) );
-
-      if( fabs( state_plan_end(0) - statef(0) ) > EPSILON || fabs( state_plan_end(1) - statef(1) ) > EPSILON || fabs( state_plan_end(2) - statef(2) ) > EPSILON ) {
-        std::cout << "Planning Failed: final state diverged significantly from goal state\n";
-        if( fabs( state_plan_end(0) - statef(0) ) > EPSILON ) {
-          std::cout << "x diff: " << state_plan_end(0) - statef(0) << std::endl;
-        }
-        if( fabs( state_plan_end(1) - statef(1) ) > EPSILON ) {
-          std::cout << "y diff: " << state_plan_end(1) - statef(1) << std::endl;
-        }
-        if( fabs( state_plan_end(2) - statef(2) ) > EPSILON ) {
-          std::cout << "z diff: " << state_plan_end(2) - statef(2) << std::endl;
-        }    
-        return false;
-      }
-
-      for( unsigned int i = 0; i < state_count; i++ ) {
-        ship_state_c q( statespace, path.getState( i ) );
-        double t = (double)i * PLANNER_STEP_SIZE;
-        std::pair<double,ship_state_c> qp = std::make_pair( t, q );
-        states_desired.push_back( qp );
-      }
-
-      unsigned int control_count = ss.getSolutionPath().getControlCount();
-      for( unsigned int i = 0; i < control_count; i++ ) {
-        ship_command_c u( ss.getSolutionPath().getControl(i) );
-        double t = ss.getSolutionPath().getControlDuration( i );
-
-        std::pair<double,ship_command_c> up = std::make_pair( t, u );
-        commands_desired.push_back( up );
-      }
-      update_desired_state( );
-
-      command_current_duration = 0.0;
-*/
-/*
-      unsigned int control_count = ss.getSolutionPath().getControlCount();
-      for( unsigned int i = 0; i < control_count; i++ ) {
-        ship_command_c u( ss.getSolutionPath().getControl(i) );
-        double t = ss.getSolutionPath().getControlDuration( i );
-
-        std::pair<double,ship_command_c> up = std::make_pair( t, u );
-        std::cout << up << std::endl;
-      }
-*/
-      command_current = ship_command_c( ss.getSolutionPath().getControl(0) );
-      command_current_duration = dtime;      
-      std::cout << "command:" << command_current << std::endl;
-
-      return true;
-    } else {
-      std::cout << "No solution found" << std::endl;
-      return false;
-    }
-  } else if( GAME_TYPE == SOLO ) {
-
-    /// construct the state space we are planning in
-    ompl::base::StateSpacePtr sspace( new ompl::base::RealVectorStateSpace( ship_state_c::size() ) );
-    statespace = sspace.get();
-
-    // Set the bounds for the state space
-    ompl::base::RealVectorBounds bounds( ship_state_c::size() );
-    for (unsigned i = 0; i < 3; i++)  {
-      // x, y, z extens
-      bounds.setLow(i, -spatial_bound.extens[i]);
-      bounds.setHigh(i, spatial_bound.extens[i]);
-    }
-    for (unsigned i=3; i< 7; i++)
-    {
-      // quaternion extents 
-      bounds.setLow(i, -1.0);
-      bounds.setHigh(i, 1.0);
-    }
-    for (unsigned i = 7; i < ship_state_c::size(); i++)  {
-      // all other extens
-      bounds.setLow(i, -PLANNER_MAX_DERIVATIVE);
-      bounds.setHigh(i, PLANNER_MAX_DERIVATIVE);
-    }
-    sspace->as<ompl::base::RealVectorStateSpace>()->setBounds( bounds );
-
-    // create a control space
-    ompl::control::ControlSpacePtr cspace( new control_space_c( sspace ) );
-
-    // set the bounds for the control space
-    ompl::base::RealVectorBounds cbounds( ship_command_c::size() );
-    cbounds.setLow( -PLANNER_MAX_FORCE );
-    cbounds.setHigh( PLANNER_MAX_FORCE );
-    cspace->as<control_space_c>()->setBounds( cbounds );
-
-    // define a simple setup class
-    ompl::control::SimpleSetup ss( cspace );
-
-    ompl::control::SpaceInformationPtr si( ss.getSpaceInformation() );
-
-    si->setDirectedControlSamplerAllocator( boost::bind(&ship_c::allocate_directed_control_sampler, this, _1) );
-
-    ompl::base::ProblemDefinition pdef( si );
-
-    /// set state validity checking for this space
-    ss.setStateValidityChecker( boost::bind( &ship_c::is_state_valid, this, si.get(), _1 ) );
-
-    /// set the propagation routine for this space
-    ss.setStatePropagator( ompl::control::StatePropagatorPtr( new state_propagator_c( si, this ) ) );
-
-    // create initial and goal states
-    std::vector<double> initial( ship_state_c::size() ), target( ship_state_c::size() );
-
-    gazebo::math::Vector3 posf( 0.0, 0.0, 0.0 );
-    gazebo::math::Quaternion rotf( PI, 0.0, 0.0 );
-    gazebo::math::Vector3 dposf( 0.0, 0.0, 0.0 );
-    gazebo::math::Vector3 drotf( 0.0, 0.0, 0.0 );
-
-    ship_state_c state0, statef;
-
-    state0 = state();
-    std::cout << state0 << std::endl;
-
-    statef.position( posf );
-    statef.rotation( rotf );
-    statef.dposition( dposf );
-    statef.drotation( drotf );
-
-    for( unsigned i = 0; i < ship_state_c::size(); i++ ) {
-      initial[i] = state0(i);
-      target[i] = statef(i);
-    }
-  
-    /// create a start state
-    ompl::base::ScopedState<ompl::base::RealVectorStateSpace> start( sspace );
-    to_state( statespace, initial, start.get() );
-
-    /// create a  goal state; use the hard way to set the elements
-    ompl::base::ScopedState<ompl::base::RealVectorStateSpace> goal( sspace );
-    to_state( statespace, target, goal.get() );
-
-    boost::shared_ptr <ship_goal_c> pgoal( new ship_goal_c(si) );
-    pgoal->setState( goal );
-
-    /// set the start and goal states
-    ss.setStartState( start );
-    ss.setGoal( pgoal );
-
-    ompl::control::RRT* rrt = new ompl::control::RRT(si);
-    rrt->setGoalBias( PLANNER_GOAL_BIAS );
-    ompl::base::PlannerPtr planner( rrt );
-
-    ss.setPlanner( planner );
-
-    ss.getSpaceInformation()->setPropagationStepSize( PLANNER_STEP_SIZE );
-    //ss.getSpaceInformation()->setMinMaxControlDuration(1, 10);
-    ss.setup();
-    static_cast<state_propagator_c*>(ss.getStatePropagator().get())->setIntegrationTimeStep(ss.getSpaceInformation()->getPropagationStepSize());
-
-    ompl::base::PlannerStatus solved;
-    solved = ss.solve( PLANNER_MAX_PLANNING_TIME );
-
-    if( solved ) {
-      std::cout << "Found solution:" << std::endl;
-
-      ompl::geometric::PathGeometric path = ss.getSolutionPath().asGeometric();
-      unsigned int state_count = path.getStateCount();
-
-      const double EPSILON = 1e-4;
-      // check that final state is very close to goal state
-      ship_state_c state_plan_end( statespace, path.getState( state_count - 1 ) );
-///*
-      if( fabs( state_plan_end(0) - statef(0) ) > EPSILON || fabs( state_plan_end(1) - statef(1) ) > EPSILON || fabs( state_plan_end(2) - statef(2) ) > EPSILON ) {
-        std::cout << "Planning Failed: final state diverged significantly from goal state\n";
-        if( fabs( state_plan_end(0) - statef(0) ) > EPSILON ) {
-          std::cout << "x diff: " << state_plan_end(0) - statef(0) << std::endl;
-        }
-        if( fabs( state_plan_end(1) - statef(1) ) > EPSILON ) {
-          std::cout << "y diff: " << state_plan_end(1) - statef(1) << std::endl;
-        }
-        if( fabs( state_plan_end(2) - statef(2) ) > EPSILON ) {
-          std::cout << "z diff: " << state_plan_end(2) - statef(2) << std::endl;
-        }    
-        return false;
-      }
-//*/
-      for( unsigned int i = 0; i < state_count; i++ ) {
-        ship_state_c q( statespace, path.getState( i ) );
-        double t = (double)i * PLANNER_STEP_SIZE;
-        std::pair<double,ship_state_c> qp = std::make_pair( t, q );
-        states_desired.push_back( qp );
-      }
-
-      unsigned int control_count = ss.getSolutionPath().getControlCount();
-      for( unsigned int i = 0; i < control_count; i++ ) {
-        ship_command_c u( ss.getSolutionPath().getControl(i) );
-        double t = ss.getSolutionPath().getControlDuration( i );
-
-        std::pair<double,ship_command_c> up = std::make_pair( t, u );
-        commands_desired.push_back( up );
-      }
-      update_desired_state( );
-
-      command_current_duration = 0.0;
-
-      time_start = world->GetSimTime().Double();
-      time_last = time_start;
-
-      return true;
-    } else {
-      std::cout << "No solution found" << std::endl;
-      return false;
-    }
-  }
-}
-
-//-----------------------------------------------------------------------------
-/// Determines whether the a state is a valid configuration for a ship
-bool ship_c::is_state_valid(const ompl::control::SpaceInformation *si, const ompl::base::State *state) {
-
-  std::vector<double> values( ship_state_c::size() );
-  from_state( si->getStateSpace().get(), state, values );
- 
-  aabb_c bb = aabb( values );
-  aabb_c obstacle;
-  
-  if( intersects_world_bounds( bb ) )
-    return false;
-  if( intersects_any_obstacle( bb, obstacle ) )
-    return false;
-
-  return true;
-}
-
-//-----------------------------------------------------------------------------
-/// Computes the differential equations of motion for a ship when called by
-/// the state propagator
-void ship_c::operator()( const ompl::base::State* ompl_q, const ompl::control::Control* ompl_u, std::vector<double>& dq, const ship_c* ship ) const {
-
-  std::vector<double> q( ship_state_c::size() );
-  from_state( statespace, ompl_q, q );
-
-  std::vector<double> u( ship_command_c::size() );
-  const double *_u = ompl_u->as<ompl::control::RealVectorControlSpace::ControlType>()->values;
-  for( unsigned i = 0; i < ship_command_c::size(); i++ ) {
-    u[i] = _u[i];
-  }
-
-  ode( q, u, dq, ship );
-}
-
-//-----------------------------------------------------------------------------
-/// Update the state of the ship after integration (Called by state propagator)
-void ship_c::update( ompl::base::State* ompl_q, const std::vector<double>& dq ) const {
-  static std::vector<double> q;
-
-  q.resize( ship_state_c::size() );
-  from_state( statespace, ompl_q, q );
-  for( unsigned i=0; i< ship_state_c::size(); i++ )
-    q[i] += dq[i];
-
-  // Renormalize quaternion
-  gazebo::math::Quaternion e( q[6], q[3], q[4], q[5] );
-  e.Normalize();
-  q[3] = e.x;
-  q[4] = e.y;
-  q[5] = e.z;
-  q[6] = e.w;
-
-  to_state( statespace, q, ompl_q );
-  statespace->enforceBounds( ompl_q );
- 
-}
-
-//------------------------------------------------------------------------------
-/// Allocates a solo ship scenario control sampler
-ompl::control::DirectedControlSamplerPtr ship_c::allocate_directed_control_sampler( const ompl::control::SpaceInformation* si ) {
-  int k = 1;
-  return ompl::control::DirectedControlSamplerPtr( new directed_control_sampler_c( si, this, k ) );
-}
-
-//------------------------------------------------------------------------------
-/// Allocates a predator/prey scenario control sampler
-ompl::control::DirectedControlSamplerPtr ship_c::allocate_pp_control_sampler( const ompl::control::SpaceInformation* si ) {
-  int k = 1;
-  return ompl::control::DirectedControlSamplerPtr( new pp_control_sampler_c( si, this, adversary.get(), k ) );
-}
-
-//------------------------------------------------------------------------------
-// Testing 
-//------------------------------------------------------------------------------
-/// Test whether intersection of aabb's works
-void ship_c::test_intersection_detection( void ) {
-  aabb_c mybb = aabb();
-  aabb_c obstacle;
-  if( intersects_any_obstacle( mybb, obstacle ) )
-    std::cout << "obstacle intersection" << std::endl;
-  if( intersects_world_bounds( mybb ) )
-    std::cout << "world intersection" << std::endl;
-}
-
 //------------------------------------------------------------------------------
 //------------------------------------------------------------------------------
