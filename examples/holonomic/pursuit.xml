@@ -1,0 +1,39 @@
+<XML>
+  <DRIVER>
+    <camera position="0 0 5" target="0 0 0" up="0 1 0" />
+    <window location="0 0" size="640 480" />
+  </DRIVER>
+
+  <MOBY>
+    <Box id="ship_box" xlen="0.4" ylen="0.2" zlen="0.1" density="10.0" />
+    <Box id="space_box" xlen="50.0" ylen="50.0" zlen="50.0" density="10.0" />
+
+    <EulerIntegrator id="euler" type="VectorN" />
+    <EulerIntegrator id="euler-quat" type="Quat" />
+
+    <!-- <FSABAlgorithm id="fsab" /> -->
+    <CRBAlgorithm id="crb" />
+
+    <Simulator id="simulator" integrator-id="euler" >
+      <!-- <RecurrentForce recurrent-force-id="gravity" enabled="true" />  -->
+      <DynamicBody dynamic-body-id="predator" />
+      <DynamicBody dynamic-body-id="prey" />
+      <!-- <DynamicBody dynamic-body-id="space" /> -->
+    </Simulator>
+
+    <RigidBody id="predator" enabled="true" position="0" global-position="5 0 0" linear-velocity="0 0 0" angular-velocity="0 0 0" visualization-id="ship_box"/>
+      <InertiaFromPrimitive primitive-id="ship_box" />
+      <CollisionGeometry primitive-id="ship_box" />
+    </RigidBody>
+
+    <RigidBody id="prey" enabled="true" position="0" global-position="-5 0 0" linear-velocity="0 0 0" angular-velocity="0 0 0" visualization-id="ship_box"/>
+      <InertiaFromPrimitive primitive-id="ship_box" />
+      <CollisionGeometry primitive-id="ship_box" />
+    </RigidBody>
+    <RigidBody id="space" enabled="true" position="0" global-position="0 0 0" linear-velocity="0 0 0" angular-velocity="0 0 0" visualization-id="space_box"/>
+      <InertiaFromPrimitive primitive-id="space_box" />
+      <CollisionGeometry primitive-id="space_box" />
+    </RigidBody>
+  </MOBY>
+</XML>
+
