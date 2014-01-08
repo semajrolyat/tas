@@ -490,7 +490,8 @@ extern "C" {
 boost::shared_ptr<Simulator> sim;
 osgViewer::Viewer viewer;
 const Real DYNAMICS_FREQ = 0.001;
-RCArticulatedBodyPtr pendulum;
+RigidBodyPtr predator;
+RigidBodyPtr prey;
 
 //-----------------------------------------------------------------------------
 
@@ -713,19 +714,32 @@ void init( int argc, char** argv ) {
 
     // custom implementation follows
 
-    // Get reference to the pendulum for usage in the command publish and response
-    if( READ_MAP.find("pendulum") == READ_MAP.end() ) {
-        sprintf( strbuffer, "(dynamics.cpp) init(argc,argv) failed- unable to find pendulum in xml!\n" );
+    // Get reference to the predator
+    if( READ_MAP.find("predator") == READ_MAP.end() ) {
+        sprintf( strbuffer, "(dynamics.cpp) init(argc,argv) failed- unable to find predator in xml!\n" );
         dyn_error_log.write( strbuffer );
         // TODO : return error condition
     }
-    pendulum = dynamic_pointer_cast<Moby::RCArticulatedBody>( READ_MAP.find("pendulum")->second  );
-    if( !pendulum ) {
-        sprintf( strbuffer, "(dynamics.cpp) init(argc,argv)- unable to cast pendulum to type RCArticulatedBody\n" );
+    predator = dynamic_pointer_cast<Moby::RigidBody>( READ_MAP.find("predator")->second  );
+    if( !predator ) {
+        sprintf( strbuffer, "(dynamics.cpp) init(argc,argv)- unable to cast predator to type RigidBody\n" );
         dyn_error_log.write( strbuffer );
         // TODO : return error condition
     }
 
+    // Get reference to the prey
+    if( READ_MAP.find("prey") == READ_MAP.end() ) {
+        sprintf( strbuffer, "(dynamics.cpp) init(argc,argv) failed- unable to find prey in xml!\n" );
+        dyn_error_log.write( strbuffer );
+        // TODO : return error condition
+    }
+    prey = dynamic_pointer_cast<Moby::RigidBody>( READ_MAP.find("prey")->second  );
+    if( !prey ) {
+        sprintf( strbuffer, "(dynamics.cpp) init(argc,argv)- unable to cast prey to type RigidBody\n" );
+        dyn_error_log.write( strbuffer );
+        // TODO : return error condition
+    }
+/*
     // open the command buffer
     dyn_amsgbuffer = actuator_msg_buffer_c( ACTUATOR_MSG_BUFFER_NAME, ACTUATOR_MSG_BUFFER_MUTEX_NAME, false );
     if( dyn_amsgbuffer.open( ) != BUFFER_ERROR_NONE) {
@@ -733,7 +747,7 @@ void init( int argc, char** argv ) {
         dyn_error_log.write( strbuffer );
         // TODO : return error condition
     }
-
+*/
     printf( "(dynamics::initialized)\n" );
 }
 
@@ -747,53 +761,63 @@ void shutdown( void ) {
 
 // write the actuator state to the actuator buffer
 void write_state( void ) {
-    //if( VERBOSE ) printf( "(dynamics::write_state)\n" );
+  pp_state_c state;
 
-    // get a reference to the actuator
-    JointPtr pivot = pendulum->find_joint( "pivot" );
+  // Copy the state from the system into structure
+  state.position_pred( predator->get_position() );
+  state.rotation_pred( predator->get_orientation() );
+  state.dposition_pred( predator->get_lvel() );
+  state.drotation_pred( predator->get_avel() );
 
-    // write the actuator state out to the command buffer
-    actuator_msg_c msg = actuator_msg_c( );
-    msg.header.type = ACTUATOR_MSG_REPLY;
-    msg.state.position = pivot->q[0];
-    msg.state.velocity = pivot->qd[0];
-    msg.state.time = sim->current_time;
+  state.position_prey( prey->get_position() );
+  state.rotation_prey( prey->get_orientation() );
+  state.dposition_prey( prey->get_lvel() );
+  state.drotation_prey( prey->get_avel() );
 
-    // this was a part of the Dynamic ode_both(.) procedure but if the accumulators are
-    // cleared there they can never change from zero as they were also originally added there.
-    // So, had to relocate the reset procedure here.
-    pendulum->reset_accumulators();
-    
-    // Note: will block on acquiring mutex
-    if( dyn_amsgbuffer.write( msg ) != BUFFER_ERROR_NONE ) {
-        sprintf( strbuffer, "(dynamics.cpp) write_state() failed calling actuator_msg_buffer_c.write(msg)\n" );
-        dyn_error_log.write( strbuffer );
-        // TODO : return error condition
-    }
+  // Reset all accumulators
+  predator->reset_accumulators();
+  prey->reset_accumulators();
+
+  // Generate a state message.
+  pp_state_msg_t msg = state.as_msg();
+  //msg.header.type = ACTUATOR_MSG_REPLY;
+  //msg.state.time = sim->current_time;
+  //msg.header.timestamp =;
+
+  // Note: will block on acquiring mutex
+  if( dyn_amsgbuffer.write( msg ) != BUFFER_ERROR_NONE ) {
+    sprintf( strbuffer, "(dynamics.cpp) write_state() failed calling actuator_msg_buffer_c.write(msg)\n" );
+     dyn_error_log.write( strbuffer );
+     // TODO : return error condition
+  }
 }
 //-----------------------------------------------------------------------------
 
-//  Read the command ( torque ) from the message buffer.
+//  Read the command from the message buffer.
 void read_command( void ) {
-    actuator_msg_c msg;
 
-    //if( VERBOSE ) printf( "(dynamics::read_command)\n" );
+  ship_command_msg_t msg;
 
-    // get the command from the controller
-    // Note: will block on acquiring mutex
-    if( dyn_amsgbuffer.read( msg ) != BUFFER_ERROR_NONE ) {
-        sprintf( strbuffer, "(dynamics.cpp) read_command() failed calling actuator_msg_buffer_c.read(msg)\n" );
-        dyn_error_log.write( strbuffer );
-        // TODO : return error condition
-    }
+  // get the command from the controller
+  // Note: will block on acquiring mutex
+  if( dyn_amsgbuffer.read( msg ) != BUFFER_ERROR_NONE ) {
+    sprintf( strbuffer, "(dynamics.cpp) read_command() failed calling actuator_msg_buffer_c.read(msg)\n" );
+    dyn_error_log.write( strbuffer );
+    // TODO : return error condition
+  }
 
-    //If( VERBOSE ) msg.print();
+  // Copy the command message into structure
+  ship_command_c cmd( msg );
 
-    // apply any force determined by the controller to the actuator
-    JointPtr pivot = pendulum->find_joint( "pivot" );
-    VectorN tau( 1 );
-    tau[0] = msg.command.torque;
-    pivot->add_force( tau );
+  // apply any force determined by the controller to the correct ship
+  if( msg.pid == predator_pid ) {
+    predator->add_force( cmd.force() );
+    predator->add_torque( cmd.torque() );
+  } else if( msg.pid == prey_pid ) {
+    prey->add_force( cmd.force() );
+    prey->add_torque( cmd.torque() );
+
+  }
 }
 
 //-----------------------------------------------------------------------------
