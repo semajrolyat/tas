@@ -1,0 +1,172 @@
+<?xml version="1.0" ?>
+<sdf version="1.4">
+  <model name="pen">
+    <static>true</static>
+    <link name="wall_east">
+      <pose>25.0 0 0 0 0 0</pose>
+      <collision name="wall_east_col">
+        <pose>0 0 0 0 0 0</pose>
+        <geometry>
+          <box>
+            <size>0.1 50.0 50.0</size>
+          </box>
+        </geometry>
+      </collision>
+<!--
+      <visual name="wall_east_vis">
+        <pose>0 0 0 0 0 0</pose>
+        <geometry>
+          <box>
+            <size>0.1 50.0 50.0</size>
+          </box>
+        </geometry>
+        <material>
+          <script>
+            <uri>file://media/materials/scripts/gazebo.material</uri>
+            <name>Gazebo/Yellow</name>
+          </script>
+        </material>
+      </visual>
+-->
+    </link>
+    <link name="wall_west">
+      <pose>-25.0 0 0 0 0 0</pose>
+      <collision name="wall_west_col">
+        <pose>0 0 0 0 0 0</pose>
+        <geometry>
+          <box>
+            <size>0.1 50.0 50.0</size>
+          </box>
+        </geometry>
+      </collision>
+<!--
+      <visual name="wall_west_vis">
+        <pose>0 0 0 0 0 0</pose>
+        <geometry>
+          <box>
+            <size>0.1 50.0 50.0</size>
+          </box>
+        </geometry>
+        <material>
+          <script>
+            <uri>file://media/materials/scripts/gazebo.material</uri>
+            <name>Gazebo/Yellow</name>
+          </script>
+        </material>
+      </visual>
+-->
+    </link>
+    <link name="wall_north">
+      <pose>0 25.0 0 0 0 0</pose>
+      <collision name="wall_north_col">
+        <pose>0 0 0 0 0 0</pose>
+        <geometry>
+          <box>
+            <size>50.0 0.1 50.0</size>
+          </box>
+        </geometry>
+      </collision>
+<!--
+      <visual name="wall_north_vis">
+        <pose>0 0 0 0 0 0</pose>
+        <geometry>
+          <box>
+            <size>50.0 0.1 50.0</size>
+          </box>
+        </geometry>
+        <material>
+          <script>
+            <uri>file://media/materials/scripts/gazebo.material</uri>
+            <name>Gazebo/Yellow</name>
+          </script>
+        </material>
+      </visual>
+-->
+    </link>
+    <link name="wall_south">
+      <pose>0 -25.0 0 0 0 0</pose>
+      <collision name="wall_south_col">
+        <pose>0 0 0 0 0 0</pose>
+        <geometry>
+          <box>
+            <size>50.0 0.1 50.0</size>
+          </box>
+        </geometry>
+      </collision>
+<!--
+      <visual name="wall_south_vis">
+        <pose>0 0 0 0 0 0</pose>
+        <geometry>
+          <box>
+            <size>50.0 0.1 50.0</size>
+          </box>
+        </geometry>
+        <material>
+          <script>
+            <uri>file://media/materials/scripts/gazebo.material</uri>
+            <name>Gazebo/Yellow</name>
+          </script>
+        </material>
+      </visual>
+-->
+    </link>
+    <link name="wall_up">
+      <pose>0 0 25.0 0 0 0</pose>
+      <collision name="wall_up_col">
+        <pose>0 0 0 0 0 0</pose>
+        <geometry>
+          <box>
+            <size>50.0 50.0 0.1</size>
+          </box>
+        </geometry>
+      </collision>
+<!--
+      <visual name="wall_up_vis">
+        <pose>0 0 0 0 0 0</pose>
+        <geometry>
+          <box>
+            <size>50.0 50.0 0.1</size>
+          </box>
+        </geometry>
+        <material>
+          <script>
+            <uri>file://media/materials/scripts/gazebo.material</uri>
+            <name>Gazebo/Yellow</name>
+          </script>
+        </material>
+      </visual>
+-->
+    </link>
+    <link name="wall_down">
+      <pose>0.0 0 -25.0 0 0 0</pose>
+      <collision name="wall_down_col">
+        <pose>0 0 0 0 0 0</pose>
+        <geometry>
+          <box>
+            <size>50.0 50.0 0.1</size>
+          </box>
+        </geometry>
+      </collision>
+<!--
+      <visual name="wall_down_vis">
+        <pose>0 0 0 0 0 0</pose>
+        <geometry>
+          <box>
+            <size>50.0 50.0 0.1</size>
+          </box>
+        </geometry>
+        <material>
+          <script>
+            <uri>file://media/materials/scripts/gazebo.material</uri>
+            <name>Gazebo/Yellow</name>
+          </script>
+        </material>
+      </visual>
+-->
+    </link>
+<!--
+    <plugin name='space_controller' filename='libspace_controller.so'>
+    </plugin>
+-->
+  </model>
+</sdf>
