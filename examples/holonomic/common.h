@@ -3,6 +3,12 @@
 
 //-----------------------------------------------------------------------------
 
+// Dynamics 
+#define MOBY_DYNAMICS
+//#define GAZEBO_DYNAMICS 
+
+//-----------------------------------------------------------------------------
+
 #include <ostream>
 #include <fstream>
 #include <vector>
@@ -20,6 +26,7 @@ class ship_c;
 typedef boost::shared_ptr<ship_c> ship_p;
 
 class space_c;
+typedef boost::shared_ptr<space_c> space_p;
 //-----------------------------------------------------------------------------
 
 typedef void (*ode_f)( const std::vector<double>& q, const std::vector<double>& u, std::vector<double>& dq, const ship_p ship );

@@ -4,6 +4,10 @@
 //-----------------------------------------------------------------------------
 
 #include <vector>
+#include <sstream>
+#include <string.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <Ravelin/Vector3d.h>
 
 //-----------------------------------------------------------------------------
@@ -31,7 +35,47 @@ public:
   }
 
   //---------------------------------------------------------------------------
+  plane_c( std::string serial ) {
+
+    char* delim = ",";
+    char* s = new char[ serial.length()+1 ];
+    strcpy( s, serial.c_str() );
+
+    char* tok = strtok( s, delim );
+
+    int i = 0;
+    while( tok != NULL ) {
+      i++;
+      if( i == 1 ) point[0] = atof( tok );
+      if( i == 2 ) point[1] = atof( tok );
+      if( i == 3 ) point[2] = atof( tok );
+      if( i == 4 ) normal[0] = atof( tok );
+      if( i == 5 ) normal[1] = atof( tok );
+      if( i == 6 ) normal[2] = atof( tok );
+
+      tok = strtok( NULL, delim );
+    }
+
+    delete s;
+  }
+
+  //---------------------------------------------------------------------------
   virtual ~plane_c( void ) {
+
+  }
+
+  //---------------------------------------------------------------------------
+  std::string serialize( void ) {
+    std::stringstream ss;
+
+    char* delim = ",";
+  
+    ss << point[0] << delim;                   //  1
+    ss << point[1] << delim;                   //  2
+    ss << point[2] << delim;                   //  3
+    ss << normal[0] << delim;                  //  4
+    ss << normal[1] << delim;                  //  5
+    ss << normal[2] << delim;                  //  6
 
   }
 

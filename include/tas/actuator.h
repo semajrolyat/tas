@@ -4,8 +4,8 @@ author: James R. Taylor                                             jrt@gwu.edu
 actuator.h
 -----------------------------------------------------------------------------*/
 
-#ifndef _ACTUATOR_H_
-#define _ACTUATOR_H_
+#ifndef _ACTUATOR_MSG_H_
+#define _ACTUATOR_MSG_H_
 
 //-----------------------------------------------------------------------------
 
@@ -146,12 +146,15 @@ public:
 
 //-----------------------------------------------------------------------------
 
+#ifndef SYS_CLOSE_FD
+#define SYS_CLOSE_FD
 /// Aliasing the system close(2) function.  Necessary because the buffer has
 /// a close method and the compiler doesn't want to use the system function
 /// because they have the same name but different signatures
 void sys_close_fd( const int& fd ) {
     close( fd );
 }
+#endif
 
 //-----------------------------------------------------------------------------
 
@@ -432,4 +435,4 @@ public:
 
 //-----------------------------------------------------------------------------
 
-#endif // _ACTUATOR_H_
+#endif // _ACTUATOR_MSG_H_

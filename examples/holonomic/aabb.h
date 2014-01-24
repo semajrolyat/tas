@@ -3,6 +3,11 @@
 
 #include <vector>
 #include <iostream>
+#include <sstream>
+#include <string.h>
+#include <stdio.h>
+#include <stdlib.h>
+
 #include <Ravelin/Origin3d.h>
 #include <Ravelin/Vector3d.h>
 
@@ -39,7 +44,47 @@ public:
   }
  
   //---------------------------------------------------------------------------
+  aabb_c( std::string serial ) {
+    
+    char* delim = ",";
+    char* s = new char[ serial.length()+1 ];
+    strcpy( s, serial.c_str() );
+
+    char* tok = strtok( s, delim );
+    int i = 0;
+    while( tok != NULL ) {
+      i++;
+      if( i == 1 ) center[0] = atof( tok );
+      if( i == 2 ) center[1] = atof( tok );
+      if( i == 3 ) center[2] = atof( tok );
+      if( i == 4 ) extens[0] = atof( tok );
+      if( i == 5 ) extens[1] = atof( tok );
+      if( i == 6 ) extens[2] = atof( tok );
+
+      tok = strtok( NULL, delim );
+    }
+
+    delete s;
+  }
+
+  //---------------------------------------------------------------------------
   virtual ~aabb_c( void ) { }
+
+  //---------------------------------------------------------------------------
+  std::string serialize( void ) {
+    std::stringstream ss;
+
+    char* delim = ",";
+
+    ss << center[0] << delim;
+    ss << center[1] << delim;
+    ss << center[2] << delim;
+    ss << extens[0] << delim;
+    ss << extens[1] << delim;
+    ss << extens[2] << delim;
+
+    return ss.str();
+  }
 
   //---------------------------------------------------------------------------
   static bool intersects( const aabb_c& a, const aabb_c& b ) {

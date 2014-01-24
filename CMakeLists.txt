@@ -16,8 +16,16 @@ find_package( OMPL REQUIRED )
 find_package( GSL REQUIRED )
 find_package( Boost REQUIRED)
 
+include( FindPkgConfig )
+if( PKG_CONFIG_FOUND )
+  pkg_check_modules( RAVELIN ravelin )
+endif()
+include_directories( ${RAVELIN_INCLUDE_DIRS} )
+link_directories( ${RAVELIN_LIBRARY_DIRS} )
+
 set( TAS_HEADERS
     ${CMAKE_CURRENT_SOURCE_DIR}/include/tas/tas.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/tas/os.h
     ${CMAKE_CURRENT_SOURCE_DIR}/include/tas/error.h
     ${CMAKE_CURRENT_SOURCE_DIR}/include/tas/cpu.h
     ${CMAKE_CURRENT_SOURCE_DIR}/include/tas/time.h
@@ -46,6 +54,9 @@ set( TAS_LIBRARIES
     ${OMPL_LIBRARIES}
     ${GSL_LIBRARIES}
     ${BOOST_LIBRARIES}
+    ${RAVELIN_LIBRARIES}
+    libboost_system.so
+    libRavelin.so
 )
 
 include_directories( ${TAS_INCLUDE_DIRS} )

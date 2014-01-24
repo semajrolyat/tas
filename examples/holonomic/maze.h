@@ -3,6 +3,10 @@
 
 //-----------------------------------------------------------------------------
 
+#include "common.h"
+
+//-----------------------------------------------------------------------------
+
 #include <stdlib.h>
 #include <iostream>
 #include <fstream>
@@ -12,11 +16,13 @@
 #include <valarray>
 #include <limits>
 
+#if defined(GAZEBO_DYNAMICS)
 #include <gazebo/gazebo.hh>
 #include <gazebo/common/Plugin.hh>
 #include <gazebo/common/common.hh>
 #include <gazebo/common/Events.hh>
 #include <gazebo/physics/physics.hh>
+#endif
 
 #include <boost/shared_ptr.hpp>
 
@@ -24,10 +30,11 @@
 
 class maze_c {
 public:
+ #if defined(GAZEBO_DYNAMICS)
   // the gazebo reference to the world in which the maze is located
   gazebo::physics::WorldPtr world;
   gazebo::physics::ModelPtr model;
-
+ #endif
   //---------------------------------------------------------------------------
   // Constructors
   //---------------------------------------------------------------------------
@@ -35,11 +42,13 @@ public:
 
   }
 
+ #if defined(GAZEBO_DYNAMICS)
   maze_c( gazebo::physics::WorldPtr _world ) : world(_world) 
   {
 
   }
-    
+ #endif    
+
   //---------------------------------------------------------------------------
   // Destructor
   //---------------------------------------------------------------------------
@@ -52,6 +61,8 @@ public:
 
   //---------------------------------------------------------------------------
   void create( const unsigned& seed ) {
+
+   #if defined(GAZEBO_DYNAMICS)
     srand( seed );
 
     sdf::SDF obssdf;
@@ -253,6 +264,8 @@ public:
       infile.close();
     }
   */
+
+   #endif
   }
 };
 

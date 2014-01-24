@@ -2,6 +2,7 @@
 #define _CONTROLLER_H_
 
 //-----------------------------------------------------------------------------
+/*
 #include "common.h"
 #include "constants.h"
 #include "aabb.h"
@@ -9,73 +10,76 @@
 #include "state.h"
 #include "utilities.h"
 #include "space.h"
-
-//-----------------------------------------------------------------------------
-// Simulator
-#include <gazebo/gazebo.hh>
-#include <gazebo/common/Plugin.hh>
-#include <gazebo/common/common.hh>
-#include <gazebo/common/Events.hh>
-#include <gazebo/physics/physics.hh>
-/*
-//-----------------------------------------------------------------------------
-// PDF
-#include <gsl/gsl_rng.h>
-#include <gsl/gsl_randist.h>
-#include <gsl/gsl_vector.h>
-#include <gsl/gsl_multifit_nlin.h>
 */
-//-----------------------------------------------------------------------------
-// Math
-#include <Ravelin/Pose3d.h>
-#include <Ravelin/SVelocityd.h>
-#include <Ravelin/SAcceld.h>
-#include <Ravelin/SForced.h>
-#include <Ravelin/SpatialRBInertiad.h>
-#include <Ravelin/MatrixNd.h>
 
-//-----------------------------------------------------------------------------
+#include "memory.h"
+#include "message.h"
 //-----------------------------------------------------------------------------
 
-class ship_controller_c {
+#include <assert.h>
+#include <stdexcept>
+#include <stdio.h>
+#include <stdlib.h>
+#include <pthread.h>
+#include <errno.h>
+
+#include <Moby/Simulator.h>
+#include <Moby/RigidBody.h>
+
+#include "tas.h"
+#include "time.h"
+#include "log.h"
+#include "cpu.h"
+#include "experiment.h"
+#include "ipc.h"
+
+#include "error.h"
+
+#include "ship.h"
+#include "space.h"
+
+#include "thread.h"
+
+//-----------------------------------------------------------------------------
+
+class controller_c : public thread_c {
 public:
-  gazebo::physics::LinkPtr body;
+  double FEEDBACK_GAIN_PROPORTIONAL_POSITION;
+  double FEEDBACK_GAIN_DERIVATIVE_POSITION;
+  double FEEDBACK_GAIN_PROPORTIONAL_ROTATION;
+  double FEEDBACK_GAIN_DERIVATIVE_ROTATION;
 
-  ship_controller_c( void ) {}
-  ship_controller_c( gazebo::physics::LinkPtr _body ) {
-    body = _body;
-  }
-  virtual ~ship_controller_c( void ) {}
+  ship_p self;
+  ship_p adversary;
 
-  //---------------------------------------------------------------------------
-  /// Command control interface.  Forwards commands to hardware controllers
-  void control( const double& t, ship_command_c& u ) {
-    control_position( t, u );
-    control_rotation( t, u );
-  }
+  space_p space;
 
-  //---------------------------------------------------------------------------
-  /// Position controller
-  void control_position( const double& t, ship_command_c& u ) {
-    // clear the accumulators
-    gazebo::math::Vector3 f = -body->GetRelativeForce();
-    body->AddRelativeForce( f );
+  double DT;
+  simtime_t simtime;
 
-    // add the command force
-    body->AddForce( gazebo::math::Vector3( u.force().x(), u.force().y(), u.force().z() ) );
-  }
+  log_c error_log;
+  char err_buffer[256];
+  sharedbuffer_c msg_buffer;
+  cpuinfo_c cpuinfo;
+  unsigned long long cpu_speed_hz;
 
-  //---------------------------------------------------------------------------
-  /// Rotation controller
-  void control_rotation( const double& t, ship_command_c& u ) {
-    // clear the accumulators
-    gazebo::math::Vector3 tau = -body->GetRelativeTorque();
-    body->AddRelativeTorque( tau );
+  controller_c( void );
+  controller_c( char* argv[] );
+  virtual ~controller_c( void );
 
-    // add the command torque
-    body->AddTorque( gazebo::math::Vector3( u.torque().x(), u.torque().y(), u.torque().z() ) );
-  }
-};
+  virtual void shutdown( void );
+  virtual void init( void );
+  virtual error_e control( const act_msg_c& in, act_msg_c& out );
+  virtual error_e request( const simtime_t& time, act_msg_c& state );
+  virtual error_e publish( const act_msg_c& command );
+  virtual error_e activate( const simtime_t& time );
+
+  ship_command_c compute_feedback( const ship_state_c& q, ship_command_c& u, const double& Kp_position, const double& Kd_position, const double& Kp_rotation, const double& Kd_rotation );
+  void compute_desired_state( const ship_state_c& q0, const ship_command_c& u, ship_state_c& q, const double& dt );
+
+
+  virtual void execute( void );
+}; 
 
 //-----------------------------------------------------------------------------
 

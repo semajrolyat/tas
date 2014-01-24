@@ -1,6 +1,9 @@
-#include <space.h>
+#include "space.h"
 
-#include <maze.h>
+#include <stdio.h>
+#include <sstream>
+#include <string.h>
+#include "maze.h"
 
 //-----------------------------------------------------------------------------
 // Constructors
@@ -9,6 +12,7 @@ space_c::space_c( void ) {
 
 }
 
+#if defined(GAZEBO_DYNAMICS)
 //-----------------------------------------------------------------------------
 space_c::space_c( gazebo::physics::WorldPtr _world ) { 
   world = _world;
@@ -36,6 +40,34 @@ space_c::space_c( gazebo::physics::WorldPtr _world ) {
   }
 */
 }
+#endif
+
+//-----------------------------------------------------------------------------
+space_c::space_c( std::string serial ) {
+  
+  planes.resize(6);
+ 
+  char* delim = ";"; 
+  char* s = new char[ serial.length()+1 ];
+  strcpy( s, serial.c_str() );
+
+  char* tok = strtok( s, delim );
+  int i = 0;
+  while( tok != NULL ) {
+    i++;
+    if( i == 1 ) planes[0] = plane_c( tok );
+    if( i == 2 ) planes[1] = plane_c( tok );
+    if( i == 3 ) planes[2] = plane_c( tok );
+    if( i == 4 ) planes[3] = plane_c( tok );
+    if( i == 5 ) planes[4] = plane_c( tok );
+    if( i == 6 ) planes[5] = plane_c( tok );
+    if( i == 7 ) bounds = aabb_c( tok );
+
+    tok = strtok( NULL, delim );
+  }
+
+  delete s;
+}
 
 //-----------------------------------------------------------------------------
 // Destructor
@@ -49,6 +81,7 @@ space_c::~space_c( void ) {
 //-----------------------------------------------------------------------------
 bool space_c::read( void ) {
 
+#if defined(GAZEBO_DYNAMICS)
   // get the reference to the spatial bound
   gazebo::physics::ModelPtr space = world->GetModel("pen");
   if( !space ) {
@@ -94,10 +127,30 @@ bool space_c::read( void ) {
   planes[4]=plane_c(Ravelin::Vector3d(0,0,c.z()+e.z()),Ravelin::Vector3d(0,0,-1));
   // down
   planes[5]=plane_c(Ravelin::Vector3d(0,0,c.z()-e.z()),Ravelin::Vector3d(0,0,1));
+#endif
 
   return true;
 }
 
+//-----------------------------------------------------------------------------
+std::string space_c::serialize( void ) {
+  std::stringstream ss;
+
+  char* delim = ";";
+
+  ss << planes[0].serialize() << delim;                      //  1
+  ss << planes[1].serialize() << delim;                      //  2
+  ss << planes[2].serialize() << delim;                      //  3
+  ss << planes[3].serialize() << delim;                      //  4
+  ss << planes[4].serialize() << delim;                      //  5
+  ss << planes[5].serialize() << delim;                      //  6
+  ss << bounds.serialize() << delim;                         //  7
+
+
+  return ss.str();
+}
+
+#if defined(GAZEBO_DYNAMICS)
 //-----------------------------------------------------------------------------
 sdf::SDF space_c::make_maze( void ) {
 
@@ -291,11 +344,17 @@ sdf::SDF space_c::make_maze( void ) {
   }
 */
 }
+#endif
 
+/*
 //-----------------------------------------------------------------------------
 int main( void ) {
+ #if defined(GAZEBO_DYNAMICS)
   space_c::make_maze();
-}
+ #endif
 
+  return 0;
+}
+*/
 //-----------------------------------------------------------------------------
 

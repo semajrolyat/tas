@@ -1,9 +1,7 @@
-#ifndef _DYNAMICS_PLUGIN_H_
-#define _DYNAMICS_PLUGIN_H_
+#ifndef _DYNAMICS_H_
+#define _DYNAMICS_H_
 
-//-----------------------------------------------------------------------------
-
-typedef double Real;
+#include "thread.h"
 
 //-----------------------------------------------------------------------------
 
@@ -32,7 +30,7 @@ typedef void ( *init_f )( int argv, char** argc );
 typedef void ( *shutdown_f )( void );
 
 // dynamics run function signature
-typedef void ( *step_f )( const Real& dt );
+typedef void ( *step_f )( const double& dt );
 
 // dynamics write state function signature
 typedef void ( *write_state_f )( void );
@@ -43,7 +41,7 @@ typedef void ( *read_command_f )( void );
 
 //-----------------------------------------------------------------------------
 
-class dynamics_plugin_c {
+class dynamics_plugin_c : public thread_c {
 private:
 
   void* HANDLE; 	// plugin handle
@@ -59,6 +57,12 @@ public:
   step_f          step;
   write_state_f   write_state;
   read_command_f  read_command;
+
+  double step_size;
+
+  virtual void execute( void ) {
+    (*step)(step_size);
+  }
 
   //---------------------------------------------------------------------------
   plugin_err_e read( const char* filename ) {
@@ -142,4 +146,4 @@ private:
 
 //-----------------------------------------------------------------------------
 
-#endif // _DYNAMICS_PLUGIN_H_
+#endif // _DYNAMICS_H_

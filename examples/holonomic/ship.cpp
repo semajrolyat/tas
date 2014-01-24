@@ -1,13 +1,16 @@
-#include <ship.h>
+#include "ship.h"
 
 //-----------------------------------------------------------------------------
 
-using boost::shared_ptr;
+using namespace Moby;
 using namespace Ravelin;
+using boost::shared_ptr;
+using boost::dynamic_pointer_cast;
 
 //-----------------------------------------------------------------------------
-
+#if defined(GAZEBO_DYNAMICS)
 GZ_REGISTER_MODEL_PLUGIN( ship_c )
+#endif
 
 //-----------------------------------------------------------------------------
 // Constructors
@@ -16,12 +19,38 @@ GZ_REGISTER_MODEL_PLUGIN( ship_c )
 ship_c::ship_c( void ) { 
   capture = false;
 
+  CAPTURE_DISTANCE = 1.0;
+  FLEE_DISTANCE = 4.0;
+  PREY_MAX_FORCE = 1e-5;
+  PREY_MAX_TORQUE = 1e-5;
+  PREY_PREDATOR_FORCE_WEIGHT = 1.0;
+  PREY_COMBINED_FORCE_WEIGHT = 1.0;
+  PREY_BOUNDARY_FORCE_WEIGHT = 1.0;
+
+  PLANNER_STEP_SIZE = 0.1;
+  PLANNER_MAX_PLANNING_TIME = 0.1;
+  PLANNER_MAX_DERIVATIVE = 2e1;
+  PLANNER_MAX_FORCE = 1e2;
+  PLANNER_GOAL_BIAS = 0.05;
+
+  FEEDBACK_GAIN_PROPORTIONAL_POSITION = 100.0;
+  FEEDBACK_GAIN_DERIVATIVE_POSITION = 10.0;
+  FEEDBACK_GAIN_PROPORTIONAL_ROTATION = 10.0;
+  FEEDBACK_GAIN_DERIVATIVE_ROTATION = 1.0;
+
+  DRAG = 0.1;
+  REPULSIVE_FORCE_ALPHA = 1e1;
+
+  GAUSSIAN_MEAN = 0.0;
+  GAUSSIAN_VARIANCE = 35.0;
+  GAUSSIAN_STDDEV = sqrt(GAUSSIAN_VARIANCE);
 }
 
 //-----------------------------------------------------------------------------
 /// Constructs a ship reference based on player type for predator/prey scenario
 ship_c::ship_c( ship_c* owner, const player_type_e& player_type ) {
-  if( player_type == PREY ) {
+  PLAYER_TYPE = player_type;
+  if( PLAYER_TYPE == PREY ) {
     ADVERSARY_TYPE = PREDATOR;
   } else {
     ADVERSARY_TYPE = PREY;
@@ -55,12 +84,69 @@ ship_c::ship_c( ship_c* owner, const player_type_e& player_type ) {
 }
 
 //-----------------------------------------------------------------------------
+ship_c::ship_c( std::string serial ) {
+
+  char* delim = ";";
+  char* s = new char[ serial.length()+1 ];
+  std::strcpy( s, serial.c_str() );
+
+  char* tok = strtok( s, delim );
+  int i = 0;
+  while( tok != NULL ) {
+    i++;
+    if( i == 1 ) PLAYER_TYPE = (player_type_e)atoi( tok );
+    if( i == 2 ) ADVERSARY_TYPE = (player_type_e)atoi( tok );
+    if( i == 3 ) inertial.m = atof( tok );
+    if( i == 4 ) inertial.J(0,0) = atof( tok );
+    if( i == 5 ) inertial.J(0,1) = atof( tok );
+    if( i == 6 ) inertial.J(0,2) = atof( tok );
+    if( i == 7 ) inertial.J(1,0) = atof( tok );
+    if( i == 8 ) inertial.J(1,1) = atof( tok );
+    if( i == 9 ) inertial.J(1,2) = atof( tok );
+    if( i == 10 ) inertial.J(2,0) = atof( tok );
+    if( i == 11 ) inertial.J(2,1) = atof( tok );
+    if( i == 12 ) inertial.J(2,2) = atof( tok );
+    if( i == 13 ) FLEE_DISTANCE = atof( tok );
+    if( i == 14 ) CAPTURE_DISTANCE = atof( tok );
+    if( i == 15 ) PREY_MAX_FORCE = atof( tok );
+    if( i == 16 ) PREY_MAX_TORQUE = atof( tok );
+    if( i == 17 ) PREY_PREDATOR_FORCE_WEIGHT = atof( tok );
+    if( i == 18 ) PREY_COMBINED_FORCE_WEIGHT = atof( tok );
+    if( i == 19 ) PREY_BOUNDARY_FORCE_WEIGHT = atof( tok );
+    if( i == 20 ) PLANNER_STEP_SIZE = atof( tok );
+    if( i == 21 ) PLANNER_MAX_PLANNING_TIME = atof( tok );
+    if( i == 22 ) PLANNER_MAX_DERIVATIVE = atof( tok );
+    if( i == 23 ) PLANNER_MAX_FORCE = atof( tok );
+    if( i == 24 ) PLANNER_GOAL_BIAS = atof( tok );
+    if( i == 25 ) FEEDBACK_GAIN_PROPORTIONAL_POSITION = atof( tok );
+    if( i == 26 ) FEEDBACK_GAIN_DERIVATIVE_POSITION = atof( tok );
+    if( i == 27 ) FEEDBACK_GAIN_PROPORTIONAL_ROTATION = atof( tok );
+    if( i == 28 ) FEEDBACK_GAIN_DERIVATIVE_ROTATION = atof( tok );
+    if( i == 29 ) DRAG = atof( tok );
+    if( i == 30 ) REPULSIVE_FORCE_ALPHA = atof( tok );
+    if( i == 31 ) GAUSSIAN_MEAN = atof( tok );
+    if( i == 32 ) GAUSSIAN_VARIANCE = atof( tok );
+    if( i == 33 ) GAUSSIAN_STDDEV = atof( tok );
+    if( i == 34 ) ship_frame_bb = aabb_c( tok );
+
+    tok = strtok( NULL, delim );
+  }
+
+  delete s;
+  capture = false;
+}
+
+//-----------------------------------------------------------------------------
 // Destructor
 //-----------------------------------------------------------------------------
 ship_c::~ship_c( void ) {
-    gazebo::event::Events::DisconnectWorldUpdateBegin( this->updateConnection );
+ #if defined(GAZEBO_DYNAMICS)
+  gazebo::event::Events::DisconnectWorldUpdateBegin( this->updateConnection );
+ #elif defined(MOBY_DYNAMICS)
+ #endif
 }
 
+#if defined(GAZEBO_DYNAMICS)
 //-----------------------------------------------------------------------------
 // Gazebo Plugin Interface
 //-----------------------------------------------------------------------------
@@ -90,7 +176,8 @@ void ship_c::Load(gazebo::physics::ModelPtr _model, sdf::ElementPtr _sdf) {
       gzerr << "Failed to read (" << name << ") model in " << name << "\n";
       return;
     }
-    controller = ship_controller_c( body );
+    //controller = ship_controller_c( body );
+    actuator = actuator_c( body );
   } else {
     // bad configuration
     GAME_TYPE = UNDEFINED;
@@ -153,11 +240,12 @@ void ship_c::Update( ) {
       }
       // Game appears generally valid.  Note: Some additional validation may be necessary
 
+/*
       if( PLAYER_TYPE == PREY ) 
         planner = planner_c( planner_c::WALK, &ode, &best_control, &prey_command, spatial_bound, self, adversary, PLANNER_STEP_SIZE, PLANNER_MAX_PLANNING_TIME, PLANNER_MAX_DERIVATIVE, PLANNER_MAX_FORCE, PLANNER_GOAL_BIAS );
       else 
         planner = planner_c( planner_c::RRT, &ode, &best_control, &prey_command, spatial_bound, self, adversary, PLANNER_STEP_SIZE, PLANNER_MAX_PLANNING_TIME, PLANNER_MAX_DERIVATIVE, PLANNER_MAX_FORCE, PLANNER_GOAL_BIAS );
-      
+*/     
     }
     first_update = false;
   }
@@ -186,43 +274,26 @@ void ship_c::Reset( ) {
 
 }
 */
+#endif
 
 //-----------------------------------------------------------------------------
 // Robot Interface
 //-----------------------------------------------------------------------------
 /// Initialization of the robot
 void ship_c::init( void ) {
+ #if defined(GAZEBO_DYNAMICS)
   this->updateConnection = gazebo::event::Events::ConnectWorldUpdateBegin(
     boost::bind( &ship_c::Update, this ) );
+  
+  // initialize any auditing
 
-  audit_file_planned_commands = "ship_planned_commands.txt";
-  audit_file_planned_states = "ship_planned_states.txt";
-  audit_file_actual_commands = "ship_actual_commands.txt";
-  audit_file_actual_states = "ship_actual_states.txt";
-  audit_file_fb_commands = "ship_fb_commands.txt";
-  audit_file_ff_commands = "ship_ff_commands.txt";
-  audit_file_interp_states = "ship_interp_states.txt";
-  audit_file_fb_error = "ship_fb_error_states.txt";
-  audit_file_control_values = "ship_control_values.txt";
-
-  write_command_audit_header( audit_file_planned_commands );
-  write_state_audit_header( audit_file_planned_states );
-  write_command_audit_header( audit_file_actual_commands );
-  write_state_audit_header( audit_file_actual_states );
-  write_state_audit_header( audit_file_fb_error );
-/*
-  //write_command_audit_header( audit_file_ff_commands );
-  //write_command_audit_header( audit_file_fb_commands );
-  //write_state_audit_header( audit_file_interp_states );
-  //write_command_audit_header( audit_file_control_values );
-*/
   std::cerr << "Ship Controller Plugin Started" << std::endl;
 
   stopped = false;
 
   TIME_START = world->GetSimTime().Double();
   TIME_LAST = TIME_START;
-
+ #endif
 }
 
 //-----------------------------------------------------------------------------
@@ -236,14 +307,12 @@ void ship_c::sense( void ) {
   // 2. Write State to the Buffer
   act_msg_c msg;
   msg.body.state = q.as_msg();
-  if( !msg_buffer.write(msg) ) { /* buffer error */ }
+  //if( !msg_buffer.write(msg) ) { /* buffer error */ }
 }
 
 //-----------------------------------------------------------------------------
 /// Encapsulates the sense phase of robot execution
 void ship_c::sense( pp_state_c& q ) {
-
-  if( GAME_TYPE != PURSUIT ) return;
 
   if( !capture ) {
     //std::vector<double> pred_q, prey_q;
@@ -265,7 +334,7 @@ bool ship_c::plan( void ) {
 
   // 1. Read State from the buffer
   act_msg_c msg;
-  if( !msg_buffer.read(msg) ) { /* buffer error */ }
+  //if( !msg_buffer.read(msg) ) { /* buffer error */ }
   pp_state_c q = msg.state();
 
   // 2. Plan
@@ -276,7 +345,7 @@ bool ship_c::plan( void ) {
   // 3. Write State and Command to Buffer
   msg.state( q );
   msg.command( u );
-  result = msg_buffer.write(msg);
+  //result = msg_buffer.write(msg);
   if( !result ) { /* buffer error */ }
 
   return result;
@@ -287,13 +356,8 @@ bool ship_c::plan( void ) {
 /// Encapsulates the plan phase of robot execution
 bool ship_c::plan( const pp_state_c& q, ship_command_c& u ) {
 
-  bool result = false;
-  if( PLAYER_TYPE == PREY ) {
-    result = planner.plan_for_prey( TIME, q, u );
-  } else if( PLAYER_TYPE == PREDATOR ) {
-    result = planner.plan_for_predator( TIME, q, u );
-  }
-  return result;
+  //return planner.plan_for_predator( TIME, q, u );
+  return false;
 }
 
 
@@ -303,7 +367,7 @@ void ship_c::act( void ) {
   // 1. Read State from the buffer
   act_msg_c msg;
 
-  if( !msg_buffer.read(msg) ) { /* buffer error */ }
+  //if( !msg_buffer.read(msg) ) { /* buffer error */ }
   pp_state_c q = msg.state();
   ship_command_c u = msg.command();
 
@@ -316,6 +380,8 @@ void ship_c::act( void ) {
 //-----------------------------------------------------------------------------
 /// Encapsulates the act phase of robot execution
 void ship_c::act( const pp_state_c& q, const ship_command_c& u ) {
+
+  //*Note : this is the essence of controller
 
   ship_command_c _u = u;
 
@@ -332,13 +398,67 @@ void ship_c::act( const pp_state_c& q, const ship_command_c& u ) {
   //_u = u_ff;
   //_u = u_fb;
 
+  //* This is technically the end of controller.  The command is computed and 
+  // then should be put back into a buffer so that the dynamics can update the 
+  // actuator.
+
+  //* So this is on dynamics side
   // control based on summed command
-  controller.control( TIME, _u );
+  //controller.control( TIME, _u );
+  //actuator.clear_accumulators( );
+  //actuator.add_force( _u.force() );
+  //actuator.add_torque( _u.torque() );
 
 }
 
 //-----------------------------------------------------------------------------
 // Utilities
+//-----------------------------------------------------------------------------
+std::string ship_c::serialize( void ) {
+  std::stringstream ss;
+ 
+  char* delim = ",";
+
+  ss << (unsigned)PLAYER_TYPE << delim;                     //  1
+  ss << (unsigned)ADVERSARY_TYPE << delim;                  //  2
+  ss << inertial.m << delim;                                //  3
+  ss << inertial.J(0,0) << delim;                           //  4
+  ss << inertial.J(0,1) << delim;                           //  5
+  ss << inertial.J(0,2) << delim;                           //  6
+  ss << inertial.J(1,0) << delim;                           //  7
+  ss << inertial.J(1,1) << delim;                           //  8
+  ss << inertial.J(1,2) << delim;                           //  9
+  ss << inertial.J(2,0) << delim;                           // 10
+  ss << inertial.J(2,1) << delim;                           // 11
+  ss << inertial.J(2,2) << delim;                           // 12
+
+  ss << FLEE_DISTANCE << delim;                             // 13
+  ss << CAPTURE_DISTANCE << delim;                          // 14
+  ss << PREY_MAX_FORCE << delim;                            // 15
+  ss << PREY_MAX_TORQUE << delim;                           // 16
+  ss << PREY_PREDATOR_FORCE_WEIGHT << delim;                // 17
+  ss << PREY_COMBINED_FORCE_WEIGHT << delim;                // 18
+  ss << PREY_BOUNDARY_FORCE_WEIGHT << delim;                // 19
+  ss << PLANNER_STEP_SIZE << delim;                         // 20
+  ss << PLANNER_MAX_PLANNING_TIME << delim;                 // 21
+  ss << PLANNER_MAX_DERIVATIVE << delim;                    // 22
+  ss << PLANNER_MAX_FORCE << delim;                         // 23
+  ss << PLANNER_GOAL_BIAS << delim;                         // 24
+  ss << FEEDBACK_GAIN_PROPORTIONAL_POSITION << delim;       // 25
+  ss << FEEDBACK_GAIN_DERIVATIVE_POSITION << delim;         // 26
+  ss << FEEDBACK_GAIN_PROPORTIONAL_ROTATION << delim;       // 27
+  ss << FEEDBACK_GAIN_DERIVATIVE_ROTATION << delim;         // 28
+  ss << DRAG << delim;                                      // 29
+  ss << REPULSIVE_FORCE_ALPHA << delim;                     // 30
+  ss << GAUSSIAN_MEAN << delim;                             // 31
+  ss << GAUSSIAN_VARIANCE << delim;                         // 32
+  ss << GAUSSIAN_STDDEV << delim;                           // 33
+
+  ss << ship_frame_bb.serialize() << delim;                 // 34
+
+  return ss.str();
+}
+
 //-----------------------------------------------------------------------------
 /// Renormalize the quaternion component of a state vector
 void ship_c::renormalize_state_quat( std::vector<double>& q )
@@ -365,6 +485,7 @@ bool ship_c::has_captured( const std::vector<double>& pred_state, const std::vec
   return false;
 }
 
+#if defined(GAZEBO_DYNAMICS)
 //-----------------------------------------------------------------------------
 // Gazebo Queries
 //-----------------------------------------------------------------------------
@@ -456,6 +577,7 @@ bool ship_c::read_adversary( void ) {
 
   return true;
 }
+#endif
 
 //-----------------------------------------------------------------------------
 /// Read the world definition from the gazebo system
@@ -536,6 +658,7 @@ aabb_c ship_c::aabb( const std::vector<double>& q ) {
 //-----------------------------------------------------------------------------
 /// Query the current axis aligned bounding box of the ship
 aabb_c ship_c::aabb( void ) {
+ #if defined(GAZEBO_DYNAMICS)
   // Note: following may need to query GetCollisionBox instead
   gazebo::math::Box gzbb = model->GetBoundingBox();
   gazebo::math::Vector3 gc = gzbb.GetCenter();
@@ -543,6 +666,8 @@ aabb_c ship_c::aabb( void ) {
   Ravelin::Vector3d c( gc.x, gc.y, gc.z );
   Ravelin::Vector3d e( ge.x, ge.y, ge.z );
   return aabb_c ( c, e );
+ #elif defined(MOBY_DYNAMICS)
+ #endif
 }
 
 //-----------------------------------------------------------------------------
@@ -833,6 +958,21 @@ unsigned int ship_c::best_control( const ship_p pred, const ship_p prey, const s
 }
 
 //------------------------------------------------------------------------------
+bool ship_c::plan_for_prey( const double& t, const pp_state_c& q, ship_command_c& u ) {
+  std::vector<double> pred_q, prey_q, prey_u;
+
+  pred_q = q.pred_vector();
+  prey_q = q.prey_vector();
+
+  prey_command( pred_q, prey_q, prey_u, adversary, self, t );
+
+  u = ship_command_c( prey_u );
+
+  return true;
+}
+
+
+//------------------------------------------------------------------------------
 // computes commands (forces) for if the ship is a prey
 void ship_c::prey_command( const std::vector<double>& pred_state, const std::vector<double>& prey_state, std::vector<double>& prey_u, ship_p pred, ship_p prey, const double& t ) {
 
@@ -1050,389 +1190,13 @@ ship_command_c ship_c::compute_feedback( const ship_state_c& q, ship_command_c& 
 //-----------------------------------------------------------------------------
 /// Command the ship to stop
 void ship_c::stop( void ) {
-  ship_command_c cmd;
-  cmd.force( Ravelin::Vector3d( 0.0, 0.0, 0.0 ) );
-  cmd.torque( Ravelin::Vector3d( 0.0, 0.0, 0.0 ) );
+  ship_command_c u;
+  u.force( Ravelin::Vector3d( 0.0, 0.0, 0.0 ) );
+  u.torque( Ravelin::Vector3d( 0.0, 0.0, 0.0 ) );
 
-  controller.control( TIME, cmd );
+  //controller.control( TIME, cmd );
+  //actuator.clear_accumulators( );
+  //actuator.add_force( u.force() );
+  //actuator.add_torque( u.torque() );
 }
-//------------------------------------------------------------------------------
-//------------------------------------------------------------------------------
-/*----------------------THE GEORGE WASHINGTON UNIVERSITY-----------------------
-author: James R. Taylor                                             jrt@gwu.edu
-
-controller.cpp
------------------------------------------------------------------------------*/
-/*
-#include <assert.h>
-#include <stdexcept>
-#include <stdio.h>
-#include <stdlib.h>
-#include <pthread.h>
-#include <errno.h>
-
-#include <Moby/Simulator.h>
-#include <Moby/RCArticulatedBody.h>
-
-#include <tas/tas.h>
-#include <tas/time.h>
-#include <tas/actuator.h>
-#include <tas/log.h>
-#include <tas/cpu.h>
-#include <tas/experiment.h>
-#include <tas/ipc.h>
-
-//-----------------------------------------------------------------------------
-
-using namespace Moby;
-using boost::shared_ptr;
-using boost::dynamic_pointer_cast;
-
-//-----------------------------------------------------------------------------
-
-// really dependent on what Moby is using for a Real.  In the lab, it is a double
-// but Moby can be compliled to have a Real as a single.
-typedef double Real;
-
-#define PI 3.14159265359
-
-//-----------------------------------------------------------------------------
-// Trajectory Functions
-//-----------------------------------------------------------------------------
-
-/// The position trajectory function.  A cubic
-Real position_trajectory( Real t, Real tfinal, Real q0, Real qdes ) {
-
-    if( t > tfinal )
-        return qdes;
-    return -2 * (qdes - q0) / (tfinal*tfinal*tfinal) * (t*t*t) + 3 * (qdes - q0) / (tfinal*tfinal) * (t*t) + q0;
-}
-
-//-----------------------------------------------------------------------------
-
-/// The velocity trajectory function.  The first derivative of the cubic
-Real velocity_trajectory( Real t, Real tfinal, Real q0, Real qdes ) {
-
-    if( t > tfinal )
-        return 0.0;
-    return -6 * (qdes - q0) / (tfinal*tfinal*tfinal) * (t*t) + 6 * (qdes - q0) / (tfinal*tfinal) * (t);
-}
-
-//-----------------------------------------------------------------------------
-// Moby Control Functions
-//-----------------------------------------------------------------------------
-
-/// Controls the pendulum
-/// Note: Moby Plugin Code
-void control_PD( RCArticulatedBodyPtr pendulum, Real time ) {
-
-    const Real Kp = 1.0;
-    const Real Kv = 0.1;
-
-    JointPtr pivot = pendulum->find_joint( "pivot" );
-    if( !pivot )
-        std::cerr << "Could not find pivot joint\n";
-
-    Real measured_position = pivot->q[0];
-    Real measured_velocity = pivot->qd[0];
-
-    Real desired_position = position_trajectory( time, 0.5, 0.0, PI );
-    Real desired_velocity = velocity_trajectory( time, 0.5, 0.0, PI );
-
-    Real torque = Kp * ( desired_position - measured_position ) + Kv * ( desired_velocity - measured_velocity );
-
-    VectorN tau( 1 );
-    tau[0] = torque;
-    pivot->add_force( tau );
-}
-
-//-----------------------------------------------------------------------------
-
-/// The main control loop for Moby plugin controller
-/// Note: Moby Plugin Code
-void control( DynamicBodyPtr pendulum, Real time, void* data ) {
-
-    control_PD( dynamic_pointer_cast<RCArticulatedBody>(pendulum), time );
-}
-
-//-----------------------------------------------------------------------------
-// Mody Plugin Interface
-//-----------------------------------------------------------------------------
-
-// plugin must be "extern C"
-extern "C" {
-
-/// Note: Moby Plugin Code
-
-void init( void* separator, const std::map<std::string, BasePtr>& read_map, Real time ) {
-
-    if( read_map.find("simulator") == read_map.end() )
-        throw std::runtime_error( "controller.cpp:init()- unable to find simulator!" );
-
-    // find the pendulum
-    if( read_map.find("pendulum") == read_map.end() )
-        throw std::runtime_error( "controller.cpp:init()- unable to find pendulum!" );
-    DynamicBodyPtr pendulum = dynamic_pointer_cast<DynamicBody>( read_map.find("pendulum")->second );
-    if( !pendulum )
-        throw std::runtime_error( "controller.cpp:init()- unable to cast pendulum to type DynamicBody" );
-
-    // setup the control function
-    pendulum->controller = control;
-
-}
-
-} // end extern C
-
-//-----------------------------------------------------------------------------
-//-----------------------------------------------------------------------------
-
-//-----------------------------------------------------------------------------
-// Standalone Controller
-//----------------------------------------------------------------------------
-
-// error logging facilities
-log_c error_log;
-char strbuffer[256];
-
-//-----------------------------------------------------------------------------
-
-// shared buffer for actuator messages
-actuator_msg_buffer_c amsgbuffer;
-
-//-----------------------------------------------------------------------------
-
-cpuinfo_c cpuinfo;
-unsigned long long cpu_speed_hz;
-
-//-----------------------------------------------------------------------------
-
-/// Control function for Standalone Controller
-error_e control( const actuator_msg_c& input, actuator_msg_c& output ) {
-
-    output = actuator_msg_c( input );
-
-    const Real Kp = 1.0;
-    const Real Kv = 0.1;
-
-    Real time = input.state.time;
-    Real measured_position = input.state.position;
-    Real measured_velocity = input.state.velocity;
-
-    Real desired_position = position_trajectory( time, 0.5, 0.0, PI );
-    Real desired_velocity = velocity_trajectory( time, 0.5, 0.0, PI );
-
-    //Real desired_position = position_trajectory( time, 10.0, 0.0, PI );
-    //Real desired_velocity = velocity_trajectory( time, 10.0, 0.0, PI );
-
-    output.command.torque = Kp * ( desired_position - measured_position ) + Kv * ( desired_velocity - measured_velocity );
-
-    return ERROR_NONE;
-}
-
-//-----------------------------------------------------------------------------
-/// Send a message to the dynamics to publish a state to the actuator message
-/// buffer for given time
-error_e get_state( const Real& time, actuator_msg_c& state ) {
-
-    char buf = 0;
-    actuator_msg_c request;
-    controller_notification_c notification;
-
-    // build the request message
-    request.header.type = ACTUATOR_MSG_REQUEST;
-    request.state.time = time;
-
-    if( amsgbuffer.write( request ) != BUFFER_ERROR_NONE ) {
-        sprintf( strbuffer, "(controller.cpp) get_state(time) failed calling actuator_msg_buffer_c.write(request)\n" );
-        error_log.write( strbuffer );
-        return ERROR_FAILED;
-    }
-
-    notification.type = CONTROLLER_NOTIFICATION_ACTUATOR_EVENT;
-    notification.duration = 0.0;
-    rdtscll( notification.ts );
-
-    // send a notification to the coordinator that a message has been published
-    if( write( FD_CONTROLLER_TO_COORDINATOR_WRITE_CHANNEL, &notification, sizeof(controller_notification_c) ) == -1 ) {
-        std::string err_msg = "(controller.cpp) get_state(time) failed making system call write(...)";
-        error_log.write( error_string_bad_write( err_msg , errno ) );
-        return ERROR_FAILED;
-    }
-
-    // wait for the reply meaning the state request fulfilled and written to the buffer
-    // Note: controller blocks here on read
-    if( read( FD_COORDINATOR_TO_CONTROLLER_READ_CHANNEL, &buf, 1 ) == -1 ) {
-        std::string err_msg = "(controller.cpp) get_state(time) failed making system call read(...)";
-        error_log.write( error_string_bad_read( err_msg , errno ) );
-        return ERROR_FAILED;
-    }
-
-    // At this point a message was sent from the coordinator.  Attempt to read from buffer
-    // read the state out of the buffer
-    // Note: will block waiting to acquire mutex
-    if( amsgbuffer.read( state ) != BUFFER_ERROR_NONE ) {
-        sprintf( strbuffer, "(controller.cpp) get_state(time) failed calling actuator_msg_buffer_c.read(state)\n" );
-        error_log.write( strbuffer );
-        return ERROR_FAILED;
-    }
-
-    return ERROR_NONE;
-}
-
-//-----------------------------------------------------------------------------
-/// Send a command to the actuator message buffer
-error_e publish_command( const actuator_msg_c& cmd ) {
-
-    controller_notification_c notification;
-
-    // send the command message to the actuator
-    // Note: will block waiting to acquire mutex
-    if( amsgbuffer.write( cmd ) != BUFFER_ERROR_NONE) {
-        sprintf( strbuffer, "(controller.cpp) publish_command(cmd) failed calling actuator_msg_buffer_c.write(cmd)\n" );
-        error_log.write( strbuffer );
-        return ERROR_FAILED;
-    }
-
-    notification.type = CONTROLLER_NOTIFICATION_ACTUATOR_EVENT;
-    notification.duration = 0.0;
-    rdtscll( notification.ts );
-
-    // send a notification to the coordinator
-    if( write( FD_CONTROLLER_TO_COORDINATOR_WRITE_CHANNEL, &notification, sizeof(controller_notification_c) ) == -1 ) {
-        std::string err_msg = "(controller.cpp) publish_command(cmd) failed making system call write(...)";
-        error_log.write( error_string_bad_write( err_msg , errno ) );
-        return ERROR_FAILED;
-    }
-
-    return ERROR_NONE;
-}
-
-//-----------------------------------------------------------------------------
-/// Fulfill controller need to get initial state information and issue
-/// any initial command that might result from initial state
-// TODO : add more error handling
-error_e query_control_publish( const Real& t ) {
-
-    actuator_msg_c state, command;
-
-    // query the dyanmics for the initial state
-    if( get_state( t, state ) != ERROR_NONE ) {
-        sprintf( strbuffer, "(controller.cpp) get_initial_state() failed calling get_state(0.0,state)\n" );
-        error_log.write( strbuffer );
-        return ERROR_FAILED;
-    }
-
-    // compute the initial command message
-    if( control( state, command ) != ERROR_NONE ) {
-        sprintf( strbuffer, "(controller.cpp) get_initial_state() failed calling control(state,command)\n" );
-        error_log.write( strbuffer );
-        return ERROR_FAILED;
-    }
-    command.header.type = ACTUATOR_MSG_COMMAND;
-
-    // publish the initial command message
-    if( publish_command( command ) != ERROR_NONE ) {
-        sprintf( strbuffer, "(controller.cpp) get_initial_state() failed calling publish_command(command)\n" );
-        error_log.write( strbuffer );
-        return ERROR_FAILED;
-    }
-
-    return ERROR_NONE;
-}
-
-//-----------------------------------------------------------------------------
-/// Initialization sequence for a standalone controller
-void init( void ) {
-
-    // connect to the error log
-    // Note: error log is created by the coordinator
-    error_log = log_c( FD_ERROR_LOG );
-    if( error_log.open( ) != LOG_ERROR_NONE ) {
-        // Note:  this is not really necessary.  If coordinator launched properly, this should never happen
-        printf( "(controller.cpp) ERROR: main() failed calling log_c.open() on FD_ERROR_LOG\nController Exiting\n" );
-        exit( 1 );
-    }
-
-    // connect to the shared message buffer BEFORE attempting any IPC
-    // Note: the message buffer is created by the coordinator before the controller
-    // is launched
-    amsgbuffer = actuator_msg_buffer_c( ACTUATOR_MSG_BUFFER_NAME, ACTUATOR_MSG_BUFFER_MUTEX_NAME, false );
-    if( amsgbuffer.open( ) != BUFFER_ERROR_NONE ) {
-        sprintf( strbuffer, "(controller.cpp) init(argc,argv) failed calling actuator_msg_buffer_c.open(...,false)\nController Exiting\n" );
-        printf( "%s", strbuffer );
-
-        error_log.write( strbuffer );
-        error_log.close( );
-        exit( 1 );
-    }
-
-}
-
-//-----------------------------------------------------------------------------
-
-void shutdown( void ) {
-    printf( "Controller shutting down\n" );
-
-    amsgbuffer.close( );  // TODO : figure out a way to force a clean up
-}
-
-//-----------------------------------------------------------------------------
-
-/// Standalone Controller Entry Point
-// TODO : refactor to exit as gracefully as possible
-int main( int argc, char* argv[] ) {
-
-    int cycle = 0;
-    controller_notification_c notification;
-    timestamp_t ts;
-    const Real INTERVAL = 1.0 / (double) CONTROLLER_HZ;
-    Real t = 0.0;
-
-    // Note: if init fails, the controller bombs out.  Will write a message to
-    // console and/or error_log if this happens.
-    init( );
-
-    // query and publish initial values
-    query_control_publish( 0.0 );
-
-    notification.type = CONTROLLER_NOTIFICATION_SNOOZE;
-    notification.duration = INTERVAL;
-
-    // lock into memory to prevent pagefaults
-    mlockall( MCL_CURRENT );
-
-    // get the current timestamp
-    rdtscll( ts.cycle );
-
-    // start the main process loop
-    while( 1 ) {
-
-        notification.ts.cycle = ts.cycle;
-
-        // send a snooze notification
-        //write( FD_CONTROLLER_TO_COORDINATOR_WRITE_CHANNEL, &notification, sizeof( controller_notification_c ) );
-        if( write( FD_CONTROLLER_TO_COORDINATOR_WRITE_CHANNEL, &notification, sizeof( controller_notification_c ) ) == -1 ) {
-            // failed to write, should record in error log?
-        }
-
-        //READ? to get the controller to block and to ensure it doesn't overrun?  Ideally, the write event
-        // causes the coordinator to wake and interrupt this process so there shouldn't be overrun.
-
-        // unsnoozed here, so get a new timestamp
-        rdtscll( ts.cycle );
-        // Note: may have some long term drift due to fp math
-        t += INTERVAL;
-
-        query_control_publish( t );
-
-        cycle++;
-    }
-
-    munlockall( );
-
-    shutdown( );
-
-    return 0;
-}
-*/
 //-----------------------------------------------------------------------------

@@ -122,7 +122,7 @@ public:
 
 //-----------------------------------------------------------------------------
 
-cpuinfo_err_e get_cpu_frequency( unsigned long long& cpu_hz, const unsigned int& cpu_id ) {
+cpuinfo_err_e get_cpu_frequency( unsigned long long& cpu_hz, const int& cpu_id ) {
     cpuinfo_c cpuinfo;
 
     if( cpuinfo.load( ) != CPUINFO_ERROR_NONE ) {

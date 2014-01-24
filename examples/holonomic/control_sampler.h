@@ -4,6 +4,7 @@
 //-----------------------------------------------------------------------------
 
 #include "common.h"
+#include "command.h"
 
 #include <ompl/base/State.h>
 #include <ompl/base/StateSpace.h>

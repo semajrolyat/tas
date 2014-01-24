@@ -4,41 +4,13 @@ author: James R. Taylor                                             jrt@gwu.edu
 time.h
 -----------------------------------------------------------------------------*/
 
-#ifndef _TIME_H_
-#define _TIME_H_
+#include "time.h"
 
-#include <tas/error.h>
-#include <tas/log.h>
 
 //-----------------------------------------------------------------------------
-
-/// Assembly call to get current content of rdtsc register
-#define rdtscll(val) __asm__ __volatile__("rdtsc" : "=A" (val))
-
-//-----------------------------------------------------------------------------
-
-#define NSECS_PER_SEC 1E9
-#define USECS_PER_SEC 1E6
-
-//-----------------------------------------------------------------------------
-// TIME STRUCTS
-//-----------------------------------------------------------------------------
-
-struct timestamp_t {
-    unsigned long long cycle;
-};
-
-//-----------------------------------------------------------------------------
-
-struct realtime_t {
-    double seconds;
-};
-
-//-----------------------------------------------------------------------------
-
 timestamp_t generate_timestamp( void ) {
   timestamp_t ts;
-  rdtscll( ts );
+  rdtscll( ts.cycle );
   return ts;
 }
 
@@ -47,21 +19,21 @@ timestamp_t generate_timestamp( void ) {
 //-----------------------------------------------------------------------------
 
 /// Conversion from POSIX timeval to floating point seconds
-inline double timeval_to_real( const struct timeval& tv ) {
+double timeval_to_real( const struct timeval& tv ) {
     return (double) tv.tv_sec + (double) tv.tv_usec / (double) USECS_PER_SEC;
 }
 
 //-----------------------------------------------------------------------------
 
 /// Conversion from POSIX timespec to floating point seconds
-inline double timespec_to_real( const struct timespec& ts ) {
+double timespec_to_real( const struct timespec& ts ) {
     return (double) ts.tv_sec + (double) ts.tv_nsec / (double) NSECS_PER_SEC;
 }
 
 //-----------------------------------------------------------------------------
 
 /// Conversion from POSIX timeval to realtime_t type
-inline realtime_t timeval_to_realtime( const struct timeval& tv ) {
+realtime_t timeval_to_realtime( const struct timeval& tv ) {
     realtime_t rt;
     rt.seconds =  timeval_to_real( tv );
     return rt;
@@ -70,7 +42,7 @@ inline realtime_t timeval_to_realtime( const struct timeval& tv ) {
 //-----------------------------------------------------------------------------
 
 /// Conversion from POSIX timespec to realtime_t type
-inline realtime_t timespec_to_realtime( const struct timespec& ts ) {
+realtime_t timespec_to_realtime( const struct timespec& ts ) {
     realtime_t rt;
     rt.seconds =  timespec_to_real( ts );
     return rt;
@@ -79,21 +51,21 @@ inline realtime_t timespec_to_realtime( const struct timespec& ts ) {
 //-----------------------------------------------------------------------------
 
 /// Conversion from whole cycles to floating point seconds
-inline double cycles_to_seconds( const unsigned long long& cycles, const unsigned long long& cpu_hz ) {
+double cycles_to_seconds( const unsigned long long& cycles, const unsigned long long& cpu_hz ) {
     return (double)cycles / (double)cpu_hz;
 }
 
 //-----------------------------------------------------------------------------
 
 /// Conversion from timestamp_t type to floating point seconds
-inline double timestamp_to_seconds( const timestamp_t& ts, const unsigned long long& cpu_hz ) {
+double timestamp_to_seconds( const timestamp_t& ts, const unsigned long long& cpu_hz ) {
     return cycles_to_seconds( ts.cycle, cpu_hz );
 }
 
 //-----------------------------------------------------------------------------
 
 /// Conversion from timestamp_t type to realtime_t type
-inline realtime_t timestamp_to_realtime( const timestamp_t& ts, const unsigned long long& cpu_hz ) {
+realtime_t timestamp_to_realtime( const timestamp_t& ts, const unsigned long long& cpu_hz ) {
     realtime_t rt;
     rt.seconds = cycles_to_seconds( ts.cycle, cpu_hz );
     return rt;
@@ -102,14 +74,14 @@ inline realtime_t timestamp_to_realtime( const timestamp_t& ts, const unsigned l
 //-----------------------------------------------------------------------------
 
 /// Conversion from floating point seconds to whole cycles
-inline unsigned long long seconds_to_cycles( const double& seconds, const unsigned long long& cpu_hz ) {
+unsigned long long seconds_to_cycles( const double& seconds, const unsigned long long& cpu_hz ) {
     return (unsigned long long)(seconds * (double)cpu_hz);
 }
 
 //-----------------------------------------------------------------------------
 
 /// Conversion from floating point seconds to timestamp_t type
-inline timestamp_t seconds_to_timestamp( const double& seconds, const unsigned long long& cpu_hz ) {
+timestamp_t seconds_to_timestamp( const double& seconds, const unsigned long long& cpu_hz ) {
     timestamp_t ts;
     ts.cycle = seconds_to_cycles( seconds, cpu_hz );
     return ts;
@@ -118,7 +90,7 @@ inline timestamp_t seconds_to_timestamp( const double& seconds, const unsigned l
 //-----------------------------------------------------------------------------
 
 /// Conversion from realtime_t type to timestamp_t type
-inline timestamp_t realtime_to_timestamp( const realtime_t& rt, const unsigned long long& cpu_hz ) {
+timestamp_t realtime_to_timestamp( const realtime_t& rt, const unsigned long long& cpu_hz ) {
     timestamp_t ts;
     ts.cycle = seconds_to_cycles( rt.seconds, cpu_hz );
     return ts;
@@ -128,14 +100,14 @@ inline timestamp_t realtime_to_timestamp( const realtime_t& rt, const unsigned l
 //-----------------------------------------------------------------------------
 
 /// Conversion from whole nanoseconds to whole cycles
-inline unsigned long long nanoseconds_to_cycles( const long& ns, const unsigned long long& cpu_hz ) {
+unsigned long long nanoseconds_to_cycles( const long& ns, const unsigned long long& cpu_hz ) {
     return ((unsigned long long)ns * (unsigned long long)cpu_hz)/(unsigned long long)NSECS_PER_SEC;
 }
 
 //-----------------------------------------------------------------------------
 
 /// Conversion from whole nanoseconds to timestamp_t type
-inline timestamp_t nanoseconds_to_timestamp( const long& ns, const unsigned long long& cpu_hz ) {
+timestamp_t nanoseconds_to_timestamp( const long& ns, const unsigned long long& cpu_hz ) {
     timestamp_t ts;
     ts.cycle = nanoseconds_to_cycles( ns, cpu_hz );
     return ts;
@@ -144,14 +116,14 @@ inline timestamp_t nanoseconds_to_timestamp( const long& ns, const unsigned long
 //-----------------------------------------------------------------------------
 
 /// Conversion from whole cycles to whole nanoseconds
-inline unsigned long long cycles_to_nanoseconds( const unsigned long long& cycles, const unsigned long long& cpu_hz ) {
+unsigned long long cycles_to_nanoseconds( const unsigned long long& cycles, const unsigned long long& cpu_hz ) {
     return (cycles * (unsigned long long) NSECS_PER_SEC) / cpu_hz;
 }
 
 //-----------------------------------------------------------------------------
 
 /// Conversion from timestamp_t type to whole nanoseconds
-inline unsigned long long timestamp_to_nanoseconds( const timestamp_t& ts, const unsigned long long& cpu_hz ) {
+unsigned long long timestamp_to_nanoseconds( const timestamp_t& ts, const unsigned long long& cpu_hz ) {
     return cycles_to_nanoseconds( ts.cycle, cpu_hz );
 }
 
@@ -182,195 +154,85 @@ struct timespec subtract_ts( const struct timespec& ts1, const struct timespec& 
 
 //-----------------------------------------------------------------------------
 
-// arbitrary size : buffer > 100s * 1000Hz
-//#define TIMESTAMP_BUFFER_SIZE 1000000
+timestamp_buffer_c::timestamp_buffer_c( void ) {
+  cursor = 0;
+  cpu_hz = 0;
+}
 
-#define TIMESTAMP_BUFFER_SIZE 500000
+//-----------------------------------------------------------------------------
+timestamp_buffer_c::timestamp_buffer_c( const unsigned long long& _cpu_hz, std::string _filename ) {
+  cursor = 0;
+  cpu_hz = _cpu_hz;
+  filename = _filename;
+}
 
 //-----------------------------------------------------------------------------
 
-class timestamp_buffer_c {
-private:
-    timestamp_t buffer[TIMESTAMP_BUFFER_SIZE];
-    //unsigned long long buffer[TIMESTAMP_BUFFER_SIZE];
+timestamp_buffer_c::~timestamp_buffer_c( void ) { }
 
-    unsigned int cursor;
-    unsigned long long cpu_hz;
-    std::string filename;
+//-----------------------------------------------------------------------------
 
-    //-------------------------------------------------------------------------
-public:
-    timestamp_buffer_c( void ) {
-        cursor = 0;
-        cpu_hz = 0;
-    }
+/// initialize
+error_t timestamp_buffer_c::open( void ) {
+  return ERROR_NONE;
+}
 
-    //-------------------------------------------------------------------------
+//-----------------------------------------------------------------------------
 
-    timestamp_buffer_c( const unsigned long long& cpu_hz, std::string filename ) {
-        cursor = 0;
-        this->cpu_hz = cpu_hz;
-        this->filename = filename;
-    }
+/// write to disk
+error_t timestamp_buffer_c::close( void ) {
+  char strbuffer[256];
 
-    //-------------------------------------------------------------------------
+  //printf( "closing timestamp log\n" );
 
-    virtual ~timestamp_buffer_c( void ) { }
+  if( cursor == 0 ) return ERROR_NONE;
 
-    //-------------------------------------------------------------------------
+  log_c log = log_c( filename );
 
-    /// initialize
-    error_t open( void ) {
-        return ERROR_NONE;
-    }
+  if( log.open( ) != LOG_ERROR_NONE )
+    return ERROR_FAILED;
 
-    //-------------------------------------------------------------------------
+  //printf( "writing timestamp log to disk\n" );
+  //printf( "records: %d\n", cursor );
 
-    /// write to disk
-    error_t close( void ) {
-        char strbuffer[256];
+  sprintf( strbuffer, "cpu_hz: %lld\n", cpu_hz );
+  log.write( strbuffer );
 
-        //printf( "closing timestamp log\n" );
+  sprintf( strbuffer, "cycles\tseconds\n" );
+  log.write( strbuffer );
 
-        if( cursor == 0 ) return ERROR_NONE;
-
-        log_c log = log_c( filename );
-
-        if( log.open( ) != LOG_ERROR_NONE )
-            return ERROR_FAILED;
-
-        //printf( "writing timestamp log to disk\n" );
-        //printf( "records: %d\n", cursor );
-
-        sprintf( strbuffer, "cpu_hz: %lld\n", cpu_hz );
-        log.write( strbuffer );
-
-        sprintf( strbuffer, "cycles\tseconds\n" );
-        log.write( strbuffer );
-
-        for( unsigned int i = 0; i < cursor; i++ ) {
+  for( unsigned int i = 0; i < cursor; i++ ) {
 /*
-	    double seconds = cycles_to_seconds( buffer[i], cpu_hz );
-            sprintf( strbuffer, "%lld\t%10.9f\n", buffer[i], seconds );
-            //buffer[i].seconds = cycles_to_seconds( buffer[i].cycles, cpu_hz );
-            //sprintf( strbuffer, "%lld\t%10.9f\n", buffer[i].cycles, buffer[i].seconds );
-            log.write( strbuffer );
-        }
+    double seconds = cycles_to_seconds( buffer[i], cpu_hz );
+    sprintf( strbuffer, "%lld\t%10.9f\n", buffer[i], seconds );
+    //buffer[i].seconds = cycles_to_seconds( buffer[i].cycles, cpu_hz );
+    //sprintf( strbuffer, "%lld\t%10.9f\n", buffer[i].cycles, buffer[i].seconds );
+    log.write( strbuffer );
+  }
 */
-        double seconds = timestamp_to_seconds( buffer[i], cpu_hz );
-            sprintf( strbuffer, "%lld\t%10.9f\n", buffer[i].cycle, seconds );
-            //buffer[i].seconds = cycles_to_seconds( buffer[i].cycles, cpu_hz );
-            //sprintf( strbuffer, "%lld\t%10.9f\n", buffer[i].cycles, buffer[i].seconds );
-            log.write( strbuffer );
-        }
+    double seconds = timestamp_to_seconds( buffer[i], cpu_hz );
+    sprintf( strbuffer, "%lld\t%10.9f\n", buffer[i].cycle, seconds );
+    //buffer[i].seconds = cycles_to_seconds( buffer[i].cycles, cpu_hz );
+    //sprintf( strbuffer, "%lld\t%10.9f\n", buffer[i].cycles, buffer[i].seconds );
+    log.write( strbuffer );
+  }
 
-        log.close( );
+  log.close( );
 
-        return ERROR_NONE;
-    }
-
-    //-------------------------------------------------------------------------
-
-    /*
-    error_t write( const timestamp_t& ts ) {
-        assert( cursor < TIMESTAMP_BUFFER_SIZE - 1 );
-
-        buffer[cursor].cycles = ts.cycles;
-        buffer[cursor].seconds = ts.seconds;
-        cursor++;
-
-        return ERROR_NONE;
-    }
-
-    //-------------------------------------------------------------------------
-
-    error_t write( const unsigned long long& cycles, const double& seconds ) {
-        assert( cursor < TIMESTAMP_BUFFER_SIZE - 1 );
-
-        buffer[cursor].cycles = cycles;
-        buffer[cursor].seconds = seconds;
-        cursor++;
-
-        return ERROR_NONE;
-    }
-    */
-
-    //-------------------------------------------------------------------------
-/*
-    error_t write( const unsigned long long& cycles ) {
-        assert( cursor < TIMESTAMP_BUFFER_SIZE - 1 );
-
-        buffer[cursor] = cycles;
-        //buffer[cursor].cycles = cycles;
-        cursor++;
-
-        return ERROR_NONE;
-    }
-*/
-    //-------------------------------------------------------------------------
-
-    error_t write( const timestamp_t& ts ) {
-        assert( cursor < TIMESTAMP_BUFFER_SIZE - 1 );
-
-        buffer[cursor].cycle = ts.cycle;
-        cursor++;
-
-        return ERROR_NONE;
-    }
-
-};
-
-
-//-----------------------------------------------------------------------------
-// Timing Functions
-//-----------------------------------------------------------------------------
-
-// ------- Notes -------
-// -- Rusage --
-// rusage is unsatisfactory because it cannot measure the amount of time that the
-// child thread runs for.  It can only record this time if the child is joined or it can record
-// the time that the current process (coordinator) runs for.  The problem is that it cannot
-// effectively query the process time of an active child process/thread.  It cannot therefore monitor
-// the time that a controller runs for.
-
-// -- proc --
-// The granularity of proc is too small.  It can only measure at a scale determined by _SC_CLK_TCK
-// which is apparantly a default of 100 on current linux and osx based distributions meaning that the
-// smallest granularity available of clock would be in the centi-seconds domain where it is normal for
-// controllers to operate in the milliseconds domain.  As the quantum approaches 1 centisecond, the accuracy
-// gets wild.  Sometimes, the controller is indicated to run for 0 units, 1 unit, or 2 units.
-
-// -- gettimeofday vs RDTSC --
-// We are looking into RDTSC, but realistically, what is the difference between RDTSC and gettimeofday.
-// getttimeofday is at least microsecond granularity.  If RDTSC cannot differentiate between system time and
-// user time and between particular thread time, then it is really no different than gettimeofday.
-
-// -- RDTSC --
-// major potential issues.
-// Skew between cores
-// Frequency changes with clock
-
-// high level of granularity, closer to per cycle rather than per tick
-//
-
-// -- clock_gettime --
-// 10 us.  Per tick granularity
+  return ERROR_NONE;
+}
 
 //-----------------------------------------------------------------------------
 
-// The signal identifier for the controller's real-time timer
-#define RTTIMER_SIGNAL                          SIGRTMIN + 4
+error_t timestamp_buffer_c::write( const timestamp_t& ts ) {
+  assert( cursor < TIMESTAMP_BUFFER_SIZE - 1 );
 
-//-----------------------------------------------------------------------------
-/// Error codes for timer control
-enum timer_err_e {
-    TIMER_ERROR_NONE = 0,
-    TIMER_ERROR_SIGACTION,
-    TIMER_ERROR_SIGPROCMASK,
-    TIMER_ERROR_CREATE,
-    TIMER_ERROR_SETTIME,
-    TIMER_ERROR_GETCLOCKID
-};
+  buffer[cursor].cycle = ts.cycle;
+  cursor++;
+
+  return ERROR_NONE;
+}
+
 //-----------------------------------------------------------------------------
 
 ///*
@@ -400,7 +262,7 @@ struct timespec add_timespecs( const struct timespec& a, const struct timespec& 
 // give the same result, but there is implicit delay due to operations
 unsigned long long calibrate_cycles_per_second( void ) {
     struct timespec tspec_time, tspec_period, tspec_end;
-    unsigned long long ts_start, ts_end;
+    timestamp_t ts_start, ts_end;
 
     printf( "Calibrating CPU speed\n" );
 ///*
@@ -414,13 +276,15 @@ unsigned long long calibrate_cycles_per_second( void ) {
     clock_gettime( CLOCK_MONOTONIC, &tspec_time );
     tspec_end = add_timespecs( tspec_time, tspec_period );
 
-    rdtscll( ts_start );
+    ts_start = generate_timestamp();
+    //rdtscll( ts_start );
 
     clock_nanosleep( CLOCK_MONOTONIC, TIMER_ABSTIME, &tspec_end, NULL );
 
-    rdtscll( ts_end );
+    ts_end = generate_timestamp();
+    //rdtscll( ts_end );
 
-    return ( ts_end - ts_start );
+    return ( ts_end.cycle - ts_start.cycle );
     //return ( ts_end - ts_start ) * 1000;
 //*/
 /*
@@ -441,138 +305,108 @@ unsigned long long calibrate_cycles_per_second( void ) {
 
 //-----------------------------------------------------------------------------
 
-typedef void ( *timer_sighandler_fn )( int signum, siginfo_t *si, void *data );
+timer_c::timer_c( void ) {
+  first_arming = true;
+  agg_error = 0;
+  last_overrun = 0;
+  ts_prev_arm.cycle = 0;
+}
+
+//-------------------------------------------------------------------------
+
+timer_c::~timer_c( void ) { }
+
+//-------------------------------------------------------------------------
+/// Blocks the timer signal if it is necessary to suppress the timer
+timer_c::timer_err_e timer_c::block( void ) {
+  if( sigprocmask( SIG_SETMASK, &rttimer_mask, NULL ) == -1 )
+    return TIMER_ERROR_SIGPROCMASK;
+  return TIMER_ERROR_NONE;
+}
 
 //-----------------------------------------------------------------------------
 
-class timer_c {
-public:
-    timer_c( void ) {
-        first_arming = true;
-        agg_error = 0;
-        last_overrun = 0;
-        ts_prev_arm.cycle = 0;
-    }
+/// Unblocks a blocked timer signal
+timer_c::timer_err_e timer_c::unblock( void ) {
+  if( sigprocmask( SIG_UNBLOCK, &rttimer_mask, NULL ) == -1 )
+    return TIMER_ERROR_SIGPROCMASK;
+  return TIMER_ERROR_NONE;
+}
 
-    //-------------------------------------------------------------------------
+//-------------------------------------------------------------------------
 
-    virtual ~timer_c( void ) { }
+/// Creates a high-resolution real-time timer to monitor the controller process
+timer_c::timer_err_e timer_c::create( timer_sighandler_fn sighandler, int signum ) {
+  struct sigevent sevt;
 
-    //-------------------------------------------------------------------------
+  // Establish handler for timer signal
+  rttimer_sigaction.sa_flags = SA_SIGINFO;
+  rttimer_sigaction.sa_sigaction = sighandler;
+  sigemptyset( &rttimer_sigaction.sa_mask );
+  if( sigaction( signum, &rttimer_sigaction, NULL ) == -1)
+    return TIMER_ERROR_SIGACTION;
 
-    sigset_t rttimer_mask;
-    struct sigaction rttimer_sigaction;
-    timer_t rttimer_id;
+  // intialize the signal mask
+  sigemptyset( &rttimer_mask );
+  sigaddset( &rttimer_mask, signum );
 
-    bool first_arming;
-    long long agg_error;
-    unsigned long long last_overrun;
-    timestamp_t ts_prev_arm;
+  sevt.sigev_notify = SIGEV_SIGNAL;
+  sevt.sigev_signo = signum;
+  sevt.sigev_value.sival_ptr = &rttimer_id;
+  if( timer_create( CLOCK_MONOTONIC, &sevt, &rttimer_id ) == -1 )
+  //if( timer_create( CLOCK_REALTIME, &sevt, &rttimer_id ) == -1 )
+    return TIMER_ERROR_CREATE;
 
-    //-------------------------------------------------------------------------
+  return TIMER_ERROR_NONE;
+}
 
-    /// Error codes for timer control
-    enum timer_err_e {
-        TIMER_ERROR_NONE = 0,
-        TIMER_ERROR_SIGACTION,
-        TIMER_ERROR_SIGPROCMASK,
-        TIMER_ERROR_CREATE,
-        TIMER_ERROR_SETTIME,
-        TIMER_ERROR_GETCLOCKID
-    };
+//-------------------------------------------------------------------------
 
-    //-------------------------------------------------------------------------
+timer_c::timer_err_e timer_c::arm( const timestamp_t& ts_req, timestamp_t& ts_arm, const unsigned long long& period_nsec, const unsigned long long& cpu_speed_hz ) {
+  struct itimerspec its;
+  timestamp_t ts_now;
 
-    /// Blocks the timer signal if it is necessary to suppress the timer
-    timer_err_e block( void ) {
-        if( sigprocmask( SIG_SETMASK, &rttimer_mask, NULL ) == -1 )
-            return TIMER_ERROR_SIGPROCMASK;
-        return TIMER_ERROR_NONE;
-    }
+  // sanity check.  Not supporting controllers that run at 1 Hz or slower or faster than 1ns.
+  //assert( CONTROLLER_HZ > 1 && CONTROLLER_HZ <= NSECS_PER_SEC );
 
-    //-----------------------------------------------------------------------------
+  timestamp_t ts_err;
+  ts_err.cycle = 0;
 
-    /// Unblocks a blocked timer signal
-    timer_err_e unblock( void ) {
-        if( sigprocmask( SIG_UNBLOCK, &rttimer_mask, NULL ) == -1 )
-            return TIMER_ERROR_SIGPROCMASK;
-        return TIMER_ERROR_NONE;
-    }
+  unsigned long long ns_err = 0;
 
-    //-------------------------------------------------------------------------
+  unsigned long long period = period_nsec;
 
-    /// Creates a high-resolution real-time timer to monitor the controller process
-    timer_err_e create( timer_sighandler_fn sighandler, int signum ) {
-        struct sigevent sevt;
-        //struct itimerspec its;
+  ts_now = generate_timestamp();
+  //rdtscll( ts_now.cycle );
 
-        // Establish handler for timer signal
-        rttimer_sigaction.sa_flags = SA_SIGINFO;
-        rttimer_sigaction.sa_sigaction = sighandler;
-        sigemptyset( &rttimer_sigaction.sa_mask );
-        if( sigaction( signum, &rttimer_sigaction, NULL ) == -1)
-            return TIMER_ERROR_SIGACTION;
+  if( first_arming ) {
+    // cannot compute err correction
+    first_arming = false;
+  } else {
+     ts_err.cycle = ts_now.cycle - ts_prev_arm.cycle;
+     ns_err = cycles_to_nanoseconds( ts_err.cycle, cpu_speed_hz );
+     long long error = (long long) period - (long long) ns_err;
 
-        // intialize the signal mask
-        sigemptyset( &rttimer_mask );
-        sigaddset( &rttimer_mask, signum );
+     agg_error += error;
+     period += agg_error;
+  }
 
-        sevt.sigev_notify = SIGEV_SIGNAL;
-        sevt.sigev_signo = signum;
-        sevt.sigev_value.sival_ptr = &rttimer_id;
-        if( timer_create( CLOCK_MONOTONIC, &sevt, &rttimer_id ) == -1 )
-        //if( timer_create( CLOCK_REALTIME, &sevt, &rttimer_id ) == -1 )
-           return TIMER_ERROR_CREATE;
+  its.it_interval.tv_sec = 0;
+  its.it_interval.tv_nsec = 0;
+  its.it_value.tv_sec = 0;
 
-        return TIMER_ERROR_NONE;
-    }
+  its.it_value.tv_nsec = (unsigned long long)(period);
 
-    //-------------------------------------------------------------------------
+  ts_arm.cycle = ts_req.cycle;
+  ts_prev_arm.cycle = ts_now.cycle;
 
-    timer_err_e arm( const timestamp_t& ts_req, timestamp_t& ts_arm, const unsigned long long& period_nsec, const unsigned long long& cpu_speed_hz ) {
-        struct itimerspec its;
-        timestamp_t ts_now;
+  if( timer_settime( rttimer_id, 0, &its, NULL ) == -1 ) {
+    //printf( "dts: %lld, dns: %lld, nsec: %d\n", dts, dns, its.it_value.tv_nsec );
+    return TIMER_ERROR_SETTIME;
+  }
 
-        // sanity check.  Not supporting controllers that run at 1 Hz or slower or faster than 1ns.
-        //assert( CONTROLLER_HZ > 1 && CONTROLLER_HZ <= NSECS_PER_SEC );
-
-        unsigned long long ts_err = 0;
-        unsigned long long ns_err = 0;
-
-        unsigned long long period = period_nsec;
-
-        rdtscll( ts_now.cycle );
-
-        if( first_arming ) {
-            // cannot compute err correction
-            first_arming = false;
-        } else {
-            ts_err = ts_now.cycle - ts_prev_arm.cycle;
-            ns_err = cycles_to_nanoseconds( ts_err, cpu_speed_hz );
-            long long error = (long long) period - (long long) ns_err;
-
-            agg_error += error;
-            period += agg_error;
-        }
-
-        its.it_interval.tv_sec = 0;
-        its.it_interval.tv_nsec = 0;
-        its.it_value.tv_sec = 0;
-
-        its.it_value.tv_nsec = (unsigned long long)(period);
-
-        ts_arm.cycle = ts_req.cycle;
-        ts_prev_arm.cycle = ts_now.cycle;
-
-        if( timer_settime( rttimer_id, 0, &its, NULL ) == -1 ) {
-            //printf( "dts: %lld, dns: %lld, nsec: %d\n", dts, dns, its.it_value.tv_nsec );
-            return TIMER_ERROR_SETTIME;
-        }
-
-        return TIMER_ERROR_NONE;
-    }
-
-};
+  return TIMER_ERROR_NONE;
+}
 
 //-----------------------------------------------------------------------------
 
@@ -760,4 +594,3 @@ static void print_proc_stat( struct proc_stat_t *s ) {
 //-----------------------------------------------------------------------------
 
 
-#endif // _TIME_H_

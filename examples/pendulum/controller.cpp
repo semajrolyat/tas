@@ -11,6 +11,8 @@ controller.cpp
 #include <pthread.h>
 #include <errno.h>
 
+#include <Ravelin/VectorNd.h>
+
 #include <Moby/Simulator.h>
 #include <Moby/RCArticulatedBody.h>
 
@@ -81,7 +83,7 @@ void control_PD( RCArticulatedBodyPtr pendulum, Real time ) {
 
     Real torque = Kp * ( desired_position - measured_position ) + Kv * ( desired_velocity - measured_velocity );
 
-    VectorN tau( 1 );
+    Ravelin::VectorNd tau( 1 );
     tau[0] = torque;
     pivot->add_force( tau );
 }
