@@ -60,10 +60,29 @@ public:
 
   double step_size;
 
+  //---------------------------------------------------------------------------
   virtual void execute( void ) {
     (*step)(step_size);
   }
 
+  //---------------------------------------------------------------------------
+  virtual void suspend( void ) {
+
+  }
+
+  //---------------------------------------------------------------------------
+  virtual void resume( void ) {
+
+  }
+/*
+  //---------------------------------------------------------------------------
+  // Note: that this method is provided by the plugin interface through a 
+  // function pointer.  However, anticipate a linking or segmentation issue
+  // due to inheritence of the method.
+  virtual void shutdown( void ) {
+
+  }
+*/
   //---------------------------------------------------------------------------
   plugin_err_e read( const char* filename ) {
     if( open( filename )  )

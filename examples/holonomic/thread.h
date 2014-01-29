@@ -8,6 +8,13 @@
 
 #include "time.h"
 #include "error.h"
+#include "ipc.h"
+
+#include <boost/shared_ptr.hpp>
+
+//-------------------------------------------------------------------------
+class thread_c;
+typedef boost::shared_ptr<thread_c> thread_p;
 
 //-------------------------------------------------------------------------
 
@@ -57,12 +64,21 @@ public:
   bool initialized;
   unsigned long long PERIOD_NSEC;
 
+  pipe_c pipe_to;
+  pipe_c pipe_from;
+
+  // the number of quantums this thread is assigned to run
+  unsigned budget;
 public:
   thread_c( void ); 
   virtual ~thread_c( void );
 
-  //virtual void execute( void ) = 0;
-  virtual void execute( void ) {}
+  virtual void execute( void );
+
+  virtual void suspend( void );
+  virtual void resume( void );
+  virtual void shutdown( void );
+
 };
 
 //-----------------------------------------------------------------------------

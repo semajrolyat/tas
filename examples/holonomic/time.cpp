@@ -377,7 +377,6 @@ timer_c::timer_err_e timer_c::arm( const timestamp_t& ts_req, timestamp_t& ts_ar
   unsigned long long period = period_nsec;
 
   ts_now = generate_timestamp();
-  //rdtscll( ts_now.cycle );
 
   if( first_arming ) {
     // cannot compute err correction

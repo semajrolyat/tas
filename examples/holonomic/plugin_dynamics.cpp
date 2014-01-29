@@ -465,8 +465,8 @@ extern "C" {
 boost::shared_ptr<Simulator> sim;
 osgViewer::Viewer viewer;
 const double DYNAMICS_FREQ = 0.001;
-RigidBodyPtr predator;
-RigidBodyPtr prey;
+RigidBodyPtr rb_predator;
+RigidBodyPtr rb_prey;
 
 ship_c pred_ship;
 ship_c prey_ship;
@@ -703,93 +703,99 @@ int init(int argc, char** argv)
   }
   #endif
 
-    // custom implementation follows
+  // custom implementation follows
 
-    // Get reference to the predator
-    if( READ_MAP.find("predator") == READ_MAP.end() ) {
-        sprintf( err_buffer, "(dynamics.cpp) init(argc,argv) failed- unable to find predator in xml!\n" );
-        dyn_error_log.write( err_buffer );
-        // TODO : return error condition
-    }
-    predator = dynamic_pointer_cast<Moby::RigidBody>( READ_MAP.find("predator")->second  );
-    if( !predator ) {
-        sprintf( err_buffer, "(dynamics.cpp) init(argc,argv)- unable to cast predator to type RigidBody\n" );
-        dyn_error_log.write( err_buffer );
-        // TODO : return error condition
-    }
-    pred_ship = ship_c();
-    pred_ship.inertial = predator->get_inertia(); 
+  // Get reference to the predator
+  if( READ_MAP.find("predator") == READ_MAP.end() ) {
+    sprintf( err_buffer, "(dynamics.cpp) init(argc,argv) failed- unable to find predator in xml!\n" );
+    dyn_error_log.write( err_buffer );
+    // TODO : return error condition
+  }
+  rb_predator = dynamic_pointer_cast<Moby::RigidBody>( READ_MAP.find("predator")->second  );
+  if( !rb_predator ) {
+    sprintf( err_buffer, "(dynamics.cpp) init(argc,argv)- unable to cast predator to type RigidBody\n" );
+    dyn_error_log.write( err_buffer );
+    // TODO : return error condition
+  }
+  pred_ship = ship_c();
+  pred_ship.inertial = rb_predator->get_inertia(); 
   
-    // Copy the state from the system into structure
-    boost::shared_ptr<const Ravelin::Pose3d> pose;
-    SVelocityd vel;
-    CollisionGeometryPtr g;
-    PrimitivePtr p;
-    Moby::BVPtr b;
-    Point3d pt1, pt2;
-    Point3d pt1_ship_frame, pt2_ship_frame;
+  // Copy the state from the system into structure
+  boost::shared_ptr<const Ravelin::Pose3d> pose;
+  SVelocityd vel;
+  CollisionGeometryPtr g;
+  PrimitivePtr p;
+  Moby::BVPtr b;
+  Point3d pt1, pt2;
+  Point3d pt1_ship_frame, pt2_ship_frame;
 
-    pose = predator->get_pose();
-    g = predator->geometries.front();
-    p = g->get_geometry();
-    b = p->get_BVH_root( g );
-    pt1 = b->get_lower_bounds();
-    pt1_ship_frame = Pose3d::transform_point( pose, pt1 );
-    pt2 = b->get_upper_bounds();
-    pt2_ship_frame = Pose3d::transform_point( pose, pt2 );
+  pose = rb_predator->get_pose();
+  g = rb_predator->geometries.front();
+  p = g->get_geometry();
+  b = p->get_BVH_root( g );
+  pt1 = b->get_lower_bounds();
+  pt1_ship_frame = Pose3d::transform_point( pose, pt1 );
+  pt2 = b->get_upper_bounds();
+  pt2_ship_frame = Pose3d::transform_point( pose, pt2 );
 
-    // Compute aabb from pt1_ship_frame, pt2_ship_frame
+  // Compute aabb from pt1_ship_frame, pt2_ship_frame
 
+  // Get reference to the prey
+  if( READ_MAP.find("prey") == READ_MAP.end() ) {
+    sprintf( err_buffer, "(dynamics.cpp) init(argc,argv) failed- unable to find prey in xml!\n" );
+    dyn_error_log.write( err_buffer );
+    // TODO : return error condition
+  }
+  rb_prey = dynamic_pointer_cast<Moby::RigidBody>( READ_MAP.find("prey")->second  );
+  if( !rb_prey ) {
+    sprintf( err_buffer, "(dynamics.cpp) init(argc,argv)- unable to cast prey to type RigidBody\n" );
+    dyn_error_log.write( err_buffer );
+    // TODO : return error condition
+  }
+  prey_ship = ship_c();
+  prey_ship.inertial = rb_prey->get_inertia(); 
 
+  pose = rb_prey->get_pose();
+  g = rb_prey->geometries.front();
+  p = g->get_geometry();
+  b = p->get_BVH_root( g );
+  pt1 = b->get_lower_bounds();
+  pt1_ship_frame = Pose3d::transform_point( pose, pt1 );
+  pt2 = b->get_upper_bounds();
+  pt2_ship_frame = Pose3d::transform_point( pose, pt2 );
 
-    // Get reference to the prey
-    if( READ_MAP.find("prey") == READ_MAP.end() ) {
-        sprintf( err_buffer, "(dynamics.cpp) init(argc,argv) failed- unable to find prey in xml!\n" );
-        dyn_error_log.write( err_buffer );
-        // TODO : return error condition
-    }
-    prey = dynamic_pointer_cast<Moby::RigidBody>( READ_MAP.find("prey")->second  );
-    if( !prey ) {
-        sprintf( err_buffer, "(dynamics.cpp) init(argc,argv)- unable to cast prey to type RigidBody\n" );
-        dyn_error_log.write( err_buffer );
-        // TODO : return error condition
-    }
-    prey_ship = ship_c();
-    prey_ship.inertial = prey->get_inertia(); 
+  // Compute aabb from pt1_ship_frame, pt2_ship_frame
 
-    pose = prey->get_pose();
-    g = predator->geometries.front();
-    p = g->get_geometry();
-    b = p->get_BVH_root( g );
-    pt1 = b->get_lower_bounds();
-    pt1_ship_frame = Pose3d::transform_point( pose, pt1 );
-    pt2 = b->get_upper_bounds();
-    pt2_ship_frame = Pose3d::transform_point( pose, pt2 );
+  RigidBodyPtr rb_wall;
+  
+  /*
+  // Get reference to space
+  // Space was adjusted to be six walls rather than a box.  Will have to query each wall and build up space from that information.
 
-    // Get reference to space
-    if( READ_MAP.find("space") == READ_MAP.end() ) {
-        sprintf( err_buffer, "(dynamics.cpp) init(argc,argv) failed- unable to find prey in xml!\n" );
-        dyn_error_log.write( err_buffer );
-        // TODO : return error condition
-    }
-    prey = dynamic_pointer_cast<Moby::RigidBody>( READ_MAP.find("space")->second  );
-    if( !prey ) {
-        sprintf( err_buffer, "(dynamics.cpp) init(argc,argv)- unable to cast space to type RigidBody\n" );
-        dyn_error_log.write( err_buffer );
-        // TODO : return error condition
-    }
-    space = space_c();
-    // Note:  *outstanding* Spatial bounds may need to be hardcoded into class.
+  if( READ_MAP.find("space") == READ_MAP.end() ) {
+    sprintf( err_buffer, "(dynamics.cpp) init(argc,argv) failed- unable to find prey in xml!\n" );
+    dyn_error_log.write( err_buffer );
+    // TODO : return error condition
+  }
+  space = dynamic_pointer_cast<Moby::RigidBody>( READ_MAP.find("space")->second  );
+  if( !space ) {
+    sprintf( err_buffer, "(dynamics.cpp) init(argc,argv)- unable to cast space to type RigidBody\n" );
+    dyn_error_log.write( err_buffer );
+    // TODO : return error condition
+  }
+  space = space_c();
+  // Note:  *outstanding* Spatial bounds may need to be hardcoded into class.
+  */
 
-    // open the command buffer
-    dyn_msgbuffer = sharedbuffer_c( "/amsgbuffer", false );
-    if( dyn_msgbuffer.open( ) != BUFFER_ERR_NONE) {
-        sprintf( err_buffer, "(dynamics.cpp) init(argc,argv) failed calling sharedbuffer_c.open(...,false)\n" );
-        dyn_error_log.write( err_buffer );
-        // TODO : return error condition
-    }
+  // open the command buffer
+  dyn_msgbuffer = sharedbuffer_c( "/amsgbuffer", false );
+  if( dyn_msgbuffer.open( ) != BUFFER_ERR_NONE) {
+    sprintf( err_buffer, "(dynamics.cpp) init(argc,argv) failed calling sharedbuffer_c.open(...,false)\n" );
+    dyn_error_log.write( err_buffer );
+    // TODO : return error condition
+  }
 
-    printf( "(dynamics::initialized)\n" );
+  printf( "(dynamics::initialized)\n" );
 
 /*
   // begin rendering
@@ -829,8 +835,8 @@ void write_state( void ) {
 
   // Note : not checking requestor because we are dumping whole state anyway.
 
-  pose = predator->get_mixed_pose();
-  vel = predator->get_velocity();
+  pose = rb_predator->get_mixed_pose();
+  vel = rb_predator->get_velocity();
 
   // Compute aabb from pt1_ship_frame, pt2_ship_frame
 
@@ -839,8 +845,8 @@ void write_state( void ) {
   state.dposition_pred( vel.get_linear() );
   state.drotation_pred( vel.get_angular() );
 
-  pose = prey->get_mixed_pose();
-  vel = prey->get_velocity();
+  pose = rb_prey->get_mixed_pose();
+  vel = rb_prey->get_velocity();
 
   state.position_prey( pose->x );
   state.rotation_prey( pose->q );
@@ -884,28 +890,27 @@ void read_command( void ) {
   // Copy the command message into structure
   ship_command_c cmd = m.command();
 
-
   // apply any force determined by the controller to the correct ship
   if( m.header.requestor == REQUESTOR_PREDATOR ) {
     // Reset accumulators.
-    predator->reset_accumulators();
+    rb_predator->reset_accumulators();
 
     // Compute the force in the ship frame
-    boost::shared_ptr<const Pose3d> pose = predator->get_mixed_pose();
+    boost::shared_ptr<const Pose3d> pose = rb_predator->get_mixed_pose();
     SForced force( pose );
     force.set_force( cmd.force() );
     force.set_torque( cmd.torque() );
-    predator->add_force( force );
+    rb_predator->add_force( force );
   } else if( m.header.requestor == REQUESTOR_PREY ) {
     // Reset accumulators.
-    prey->reset_accumulators();
+    rb_prey->reset_accumulators();
 
     // Compute the force in the ship frame
-    boost::shared_ptr<const Pose3d> pose = prey->get_mixed_pose();
+    boost::shared_ptr<const Pose3d> pose = rb_prey->get_mixed_pose();
     SForced force( pose );
     force.set_force( cmd.force() );
     force.set_torque( cmd.torque() );
-    prey->add_force( force );
+    rb_prey->add_force( force );
   }
 }
 

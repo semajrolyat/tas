@@ -154,7 +154,7 @@ error_e planner_c::request( const simtime_t& simtime, act_msg_c& state ) {
 
   char buf = 0;
   act_msg_c req;
-  controller_notification_c notification;
+  notification_c notification;
 
   // build the request message
   req.header.type = MSG_REQUEST;
@@ -167,13 +167,11 @@ error_e planner_c::request( const simtime_t& simtime, act_msg_c& state ) {
     return ERROR_FAILED;
   }
 
-  notification.type = CONTROLLER_NOTIFICATION_ACTUATOR_EVENT;
-  notification.duration = 0.0;
+  notification.type = NOTIFICATION_REQUEST;
   notification.ts = generate_timestamp( );
-  //rdtscll( notification.ts );
 
   // send a notification to the coordinator that a message has been published
-  if( write( FD_PLANNER_TO_COORDINATOR_WRITE_CHANNEL, &notification, sizeof(controller_notification_c) ) == -1 ) {
+  if( write( FD_PLANNER_TO_COORDINATOR_WRITE_CHANNEL, &notification, sizeof(notification_c) ) == -1 ) {
     std::string err_msg = "(planner.cpp) request(simtime) failed making system call write(...)";
     error_log.write( error_string_bad_write( err_msg , errno ) );
     return ERROR_FAILED;
@@ -181,7 +179,7 @@ error_e planner_c::request( const simtime_t& simtime, act_msg_c& state ) {
 
   // wait for the reply meaning the state request fulfilled and written to the buffer
   // Note: controller blocks here on read
-  if( read( FD_COORDINATOR_TO_PLANNER_READ_CHANNEL, &buf, 1 ) == -1 ) {
+  if( read( FD_COORDINATOR_TO_PLANNER_READ_CHANNEL, &notification, sizeof(notification_c) ) == -1 ) {
     std::string err_msg = "(planner.cpp) request(simtime) failed making system call read(...)";
     error_log.write( error_string_bad_read( err_msg , errno ) );
     return ERROR_FAILED;
@@ -202,7 +200,7 @@ error_e planner_c::request( const simtime_t& simtime, act_msg_c& state ) {
 //-----------------------------------------------------------------------------
 error_e planner_c::publish( const act_msg_c& command ) {
 
-  controller_notification_c notification;
+  notification_c notification;
 
   // send the command message to the actuator
   // Note: will block waiting to acquire mutex
@@ -212,13 +210,11 @@ error_e planner_c::publish( const act_msg_c& command ) {
     return ERROR_FAILED;
   }
 
-  notification.type = CONTROLLER_NOTIFICATION_ACTUATOR_EVENT;
-  notification.duration = 0.0;
+  notification.type = NOTIFICATION_REQUEST;
   notification.ts = generate_timestamp( );
-  //rdtscll( notification.ts );
 
   // send a notification to the coordinator
-  if( write( FD_PLANNER_TO_COORDINATOR_WRITE_CHANNEL, &notification, sizeof(controller_notification_c) ) == -1 ) {
+  if( write( FD_PLANNER_TO_COORDINATOR_WRITE_CHANNEL, &notification, sizeof(notification_c) ) == -1 ) {
     std::string err_msg = "(planner.cpp) publish(command) failed making system call write(...)";
     error_log.write( error_string_bad_write( err_msg , errno ) );
     return ERROR_FAILED;

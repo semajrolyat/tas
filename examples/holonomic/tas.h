@@ -39,33 +39,6 @@ tas.h
 
 
 //-----------------------------------------------------------------------------
-// NOTIFICATIONS
-//-----------------------------------------------------------------------------
-
-enum controller_notification_type_e {
-    CONTROLLER_NOTIFICATION_UNDEFINED = 0,
-    CONTROLLER_NOTIFICATION_SNOOZE,
-    CONTROLLER_NOTIFICATION_ACTUATOR_EVENT
-};
-
-//-----------------------------------------------------------------------------
-
-class controller_notification_c {
-public:
-    controller_notification_c( void ) {
-        type = CONTROLLER_NOTIFICATION_UNDEFINED;
-        ts.cycle = 0;
-        duration = 0.0;
-    }
-
-    virtual ~controller_notification_c( void ) { }
-
-    controller_notification_type_e type;
-    timestamp_t ts;
-    double duration;
-};
-
-//-----------------------------------------------------------------------------
 
 #endif // _TAS_H_
 

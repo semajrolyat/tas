@@ -103,15 +103,25 @@ enum scheduler_error_e {
 
 class scheduler_c {
 public:
-  scheduler_c( void ) { }
-  virtual ~scheduler_c( void ) { }
+  scheduler_c( void ) { 
+    quantum = 0;
+  }
 
-  std::queue<thread_c> runqueue;
-  std::queue<thread_c> readyqueue;
-  std::queue<thread_c> waitqueue;
+  virtual ~scheduler_c( void ) { 
+
+  }
+
+  std::queue<thread_p> runqueue;
+  std::queue<thread_p> readyqueue;
+  std::queue<thread_p> waitqueue;
 
   // scheduling facilities
 
+  thread_p current_thread;
+
+  // the realative count of quantums the current thread has been active for
+  // meaning how long the current thread has run during the current execution
+  unsigned quantum;
 
   //---------------------------------------------------------------------------
 
@@ -132,37 +142,37 @@ public:
   /// Creates the controller process with a priority level one step below the coordinator.
   /// Note: an ERROR_NONE in the coordinator does not really guarantee that the controller
   /// started properly
-  scheduler_error_e create( thread_c& thread, const std::string& program, const int& priority, const int& processor ) {
+  scheduler_error_e create( const thread_p& thread, const std::string& program, const int& priority, const int& processor ) {
 
-    thread.type = PROCESS;
-    thread.program = program;
-    thread.status = THREAD_NEW;
+    thread->type = PROCESS;
+    thread->program = program;
+    thread->status = THREAD_NEW;
 
-    thread.pid = fork( );
+    thread->pid = fork( );
 
     // handle any fork error
-    if( thread.pid < 0 ) {
+    if( thread->pid < 0 ) {
       return SCHED_ERROR_THREAD_SPAWN;
     }
 
     // if this is still the parent process then get out.
-    if( thread.pid > 0 ) return SCHED_ERROR_NONE;
+    if( thread->pid > 0 ) return SCHED_ERROR_NONE;
 
     // start of the child process
-    thread.pid = getpid( );
+    thread->pid = getpid( );
 
-    if( set_cpu( thread.pid, processor ) != ERROR_NONE ) {
+    if( set_cpu( thread->pid, processor ) != ERROR_NONE ) {
       return SCHED_ERROR_THREAD_SET_CPU;
     }
 
     // Note: may need to parameterize the relative priority for the current function's signature
-    if( set_realtime_schedule_rel( thread.pid, thread.priority, priority ) != ERROR_NONE ) {
+    if( set_realtime_schedule_rel( thread->pid, thread->priority, priority ) != ERROR_NONE ) {
       return SCHED_ERROR_THREAD_SET_POLICY;
     }
 
     // execute the program
     // TODO : error handling
-    execl( thread.program.c_str(), thread.program.c_str(), NULL );
+    execl( thread->program.c_str(), thread->program.c_str(), NULL );
 
     // Note: this will need to become execv and pass any parameters
 
@@ -175,13 +185,13 @@ public:
 
   //---------------------------------------------------------------------------
 
-  scheduler_error_e create( thread_c& thread, const int& priority, thread_callback_fn callback ) {
+  scheduler_error_e create( const thread_p& thread, const int& priority, thread_callback_fn callback ) {
 
     pthread_attr_t attributes;
     struct sched_param param;
 
-    thread.type = THREAD;
-    thread.status = THREAD_NEW;
+    thread->type = THREAD;
+    thread->status = THREAD_NEW;
 
     // establish attributes
     if( pthread_attr_init( &attributes ) != 0 )
@@ -201,7 +211,7 @@ public:
       return SCHED_ERROR_THREAD_SET_PRIORITY;
 
     // spawn the thread
-    if( pthread_create( &thread.thread, &attributes, callback, NULL ) != 0 )
+    if( pthread_create( &thread->thread, &attributes, callback, NULL ) != 0 )
       return SCHED_ERROR_THREAD_SPAWN;
 
     // clean up attributes
@@ -212,46 +222,29 @@ public:
   }
 
   //---------------------------------------------------------------------------
-
-  void suspend( thread_c& thread ) {
-
-    if( thread.type == PROCESS )
-      kill( thread.pid, SIGSTOP );
-
-    thread.status = THREAD_READY;
+  void suspend( const thread_p& thread ) {
+    thread->suspend();
   }
 
   //---------------------------------------------------------------------------
-
-  /// Continue the controller from the coordinator process
-  void resume( thread_c& thread ) {
-
-    thread.status = THREAD_RUNNING;
-
-    if( thread.type == PROCESS )
-      kill( thread.pid, SIGCONT );
+  void resume( const thread_p& thread ) {
+    thread->resume();
   }
 
   //---------------------------------------------------------------------------
-
-  void shutdown( thread_c& thread ) {
-
-    thread.status = THREAD_TERMINATED;
-
-    if( thread.type == PROCESS )
-      kill( thread.pid, SIGTERM );
-      //kill( thread.pid, SIGKILL );
+  void shutdown( const thread_p& thread ) {
+    thread->shutdown();
   }
 
   //---------------------------------------------------------------------------
 
   // Note: the thread must already have been created to use this method
-  scheduler_error_e adjust_priority( thread_c& thread, const int& priority ) {
+  scheduler_error_e adjust_priority( const thread_p& thread, const int& priority ) {
     struct sched_param param;
 
-    if( thread.type == PROCESS ) {
+    if( thread->type == PROCESS ) {
       // Query current priority for the process
-      if( sched_getparam( thread.pid, &param ) == -1 ) {
+      if( sched_getparam( thread->pid, &param ) == -1 ) {
         // querying failed
         switch( errno ) {
         case EINVAL:
@@ -273,7 +266,7 @@ public:
 
       // Adjust the priority
       param.sched_priority = priority;
-      if( sched_setparam( thread.pid, &param ) == -1 ) {
+      if( sched_setparam( thread->pid, &param ) == -1 ) {
         // system call to update policy failed
         switch( errno ) {
         case EINVAL:
@@ -291,7 +284,7 @@ public:
       }
 
       // Requery the policy to validate
-      if( sched_getparam( thread.pid, &param ) == -1 ) {
+      if( sched_getparam( thread->pid, &param ) == -1 ) {
         // requerying failed
         switch( errno ) {
         case EINVAL:
@@ -313,12 +306,12 @@ public:
         // Validation failed : system did not update policy properly
         return SCHED_ERROR_VALIDATION;
       }
-    } else if( thread.type == THREAD ) {
+    } else if( thread->type == THREAD ) {
       int policy;
       int result;
 
       // Query current policy for the pthread
-      result = pthread_getschedparam( thread.thread, &policy, &param );
+      result = pthread_getschedparam( thread->thread, &policy, &param );
       if( result != 0 ) {
         // querying failed probably due to thread not existing
         switch( result ) {
@@ -335,7 +328,7 @@ public:
 
       // Adjust the priority
       param.sched_priority = priority;
-      result = pthread_setschedparam( thread.thread, policy, &param );
+      result = pthread_setschedparam( thread->thread, policy, &param );
       if( result != 0 ) {
         // system call to update policy failed
         switch( result ) {
@@ -357,7 +350,7 @@ public:
       }
 
       // Requery the policy to validate
-      result = pthread_getschedparam( thread.thread, &policy, &param );
+      result = pthread_getschedparam( thread->thread, &policy, &param );
       if( result != 0 ) {
         // requerying failed
         switch( result ) {
@@ -377,9 +370,41 @@ public:
     }
 
     // Only after setting the priority has been validated then update
-    thread.priority = priority;
+    thread->priority = priority;
 
     return SCHED_ERROR_NONE;
+  }
+/*
+  void schedule( void ) {
+    thread_p next_thread;
+
+    next_thread = runqueue.front();
+    if( current_thread != next_thread ) {
+      // move current to low priority
+      adjust_priority( *current_thread.get(), current_thread->priority - 1 );
+      // move next to high priority
+      adjust_priority( *next_thread.get(), next_thread->priority + 1 );
+      // update the run queue
+      runqueue.pop();
+      runqueue.push( current_thread );
+      // swap
+      current_thread = next_thread;
+    }
+    // timestamp
+    // block thread on pipe
+    
+  }
+*/
+  void schedule( const thread_p& thread ) {
+    // adjust thread priority
+    // insert into runqueue
+    runqueue.push( thread );
+  }
+
+  thread_p next( void ) {
+    thread_p thread = runqueue.front();
+    runqueue.pop();
+    return thread;
   }
 };
 

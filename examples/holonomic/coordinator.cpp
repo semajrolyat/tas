@@ -60,7 +60,17 @@ unsigned long long PLANNER_PERIOD_NSEC;
 controller_c prey;
 controller_c pred;
 planner_c planner;
+dynamics_plugin_c dynamics;
 
+thread_p prey_thread;
+thread_p pred_thread;
+thread_p planner_thread;
+thread_p dynamics_thread;
+
+bool system_initialized = false;
+
+pipe_c pipe_timer;
+pipe_c pipe_wakeup;
 //-----------------------------------------------------------------------------
 
 // NEED TO SORT OUT HOW DYNAMICS CAN BE HANDLED THE SAME AS OTHER THREADS
@@ -68,7 +78,7 @@ planner_c planner;
 
 //-----------------------------------------------------------------------------
 
-thread_c wakeup_thread;
+thread_p wakeup_thread;
 
 //-----------------------------------------------------------------------------
 // SCHEDULER
@@ -144,7 +154,6 @@ sharedbuffer_c amsgbuffer;
 // Note: In actuality only support a single plugin at this time.
 //std::list< dynamics_plugin_c > plugins;
 
-dynamics_plugin_c dynamics;
 
 //-----------------------------------------------------------------------------
 
@@ -242,434 +251,136 @@ error_e init_dynamics( const int& argc, char* argv[] ) {
 /// Initializes all interprocess communication channels.  This must be done
 /// before any controller processes are forked or threads are spawned so that they
 /// will inherit the file descriptors from the coordinator.
+// NOTE: a read channel needs to be blocking to force  block waiting for event
+// NOTE: a write channel should be non-blocking (won't ever fill up buffer anyway).  But wakeup is set as an exception for now.
 error_e init_pipes( void ) {
-  int flags;
-  int fd[2];
 
-  // NOTE: a read channel needs to be blocking to force  block waiting for event
-  // NOTE: a write channel should be non-blocking (won't ever fill up buffer anyway)
+  pipe_c::pipe_error_e r;
 
-  // Open the prey timer to coordinator channel for timer events
-  if( pipe( fd ) != 0 ) {
-    sprintf( errstr, "(coordinator.cpp) init_pipes() failed calling pipe(FD_PREY_TIMER_TO_COORDINATOR)\n" );
-    error_log.write( errstr );
-    return ERROR_FAILED;
-  }
-  flags = fcntl( fd[0], F_GETFL, 0 );
-  fcntl( fd[0], F_SETFL, flags );
-  flags = fcntl( fd[1], F_GETFL, 0 );
-  fcntl( fd[1], F_SETFL, flags | O_NONBLOCK );
-
-  if( dup2( fd[0], FD_TIMER_TO_COORDINATOR_READ_CHANNEL ) == -1 ) {
-    sprintf( errstr, "(coordinator.cpp) init_pipes() failed calling dup2(FD_TIMER_TO_COORDINATOR_READ_CHANNEL)\n" );
-    error_log.write( errstr );
-    close( fd[0] );
-    close( fd[1] );
-    return ERROR_FAILED;
-  }
-  if( dup2( fd[1], FD_TIMER_TO_COORDINATOR_WRITE_CHANNEL ) == -1 ) {
-    sprintf( errstr, "(coordinator.cpp) init_pipes() failed calling dup2(FD_TIMER_TO_COORDINATOR_WRITE_CHANNEL)\n" );
-    error_log.write( errstr );
-    close( FD_TIMER_TO_COORDINATOR_READ_CHANNEL );
-    close( fd[1] );
+  // open timer channels
+  pipe_timer = pipe_c( FD_TIMER_TO_COORDINATOR_READ_CHANNEL, FD_TIMER_TO_COORDINATOR_WRITE_CHANNEL );
+  r = pipe_timer.open();
+  if( r != pipe_c::PIPE_ERROR_NONE ) {
+    pipe_c::log_error( error_log, r, "coordinator.cpp", "init_pipes", "pipe_timer.open()" );
     return ERROR_FAILED;
   }
 
-  // Open the wakeup to coordinator channel for wakeup (blocking) events
-  if( pipe( fd ) != 0 ) {
-    close( FD_TIMER_TO_COORDINATOR_READ_CHANNEL );
-    close( FD_TIMER_TO_COORDINATOR_WRITE_CHANNEL );
-    sprintf( errstr, "(coordinator.cpp) init_pipes() failed calling pipe(FD_WAKEUP_TO_COORDINATOR)\n" );
-    error_log.write( errstr );
-    return ERROR_FAILED;
-  }
-  flags = fcntl( fd[0], F_GETFL, 0 );
-  fcntl( fd[0], F_SETFL, flags );
-  flags = fcntl( fd[1], F_GETFL, 0 );
-  //fcntl( fd[1], F_SETFL, flags | O_NONBLOCK );
-  fcntl( fd[1], F_SETFL, flags );
-
-  if( dup2( fd[0], FD_WAKEUP_TO_COORDINATOR_READ_CHANNEL ) == -1 ) {
-    sprintf( errstr, "(coordinator.cpp) init_pipes() failed calling dup2(FD_WAKEUP_TO_COORDINATOR_READ_CHANNEL)\n" );
-    error_log.write( errstr );
-    close( fd[0] );
-    close( fd[1] );
-    close( FD_TIMER_TO_COORDINATOR_READ_CHANNEL );
-    close( FD_TIMER_TO_COORDINATOR_WRITE_CHANNEL );
+  // open wakeup channels
+  pipe_wakeup = pipe_c( FD_WAKEUP_TO_COORDINATOR_READ_CHANNEL, FD_WAKEUP_TO_COORDINATOR_WRITE_CHANNEL, true );
+  r = pipe_wakeup.open();
+  if( r != pipe_c::PIPE_ERROR_NONE ) {
+    pipe_c::log_error( error_log, r, "coordinator.cpp", "init_pipes", "pipe_wakeup.open()" );
+    pipe_timer.close();
     return ERROR_FAILED;
   }
 
-  if( dup2( fd[1], FD_WAKEUP_TO_COORDINATOR_WRITE_CHANNEL ) == -1 ) {
-    sprintf( errstr, "(coordinator.cpp) init_pipes() failed calling dup2(FD_WAKEUP_TO_COORDINATOR_WRITE_CHANNEL)\n" );
-    error_log.write( errstr );
-    close( FD_WAKEUP_TO_COORDINATOR_READ_CHANNEL );
-    close( fd[1] );
-    close( FD_TIMER_TO_COORDINATOR_READ_CHANNEL );
-    close( FD_TIMER_TO_COORDINATOR_WRITE_CHANNEL );
+  // open prey comm to channels
+  prey.pipe_to = pipe_c( FD_COORDINATOR_TO_PREY_READ_CHANNEL, FD_COORDINATOR_TO_PREY_WRITE_CHANNEL );
+  r = prey.pipe_to.open();
+  if( r != pipe_c::PIPE_ERROR_NONE ) {
+    pipe_c::log_error( error_log, r, "coordinator.cpp", "init_pipes", "prey.pipe_to.open()" );
+    pipe_timer.close();
+    pipe_wakeup.close();
     return ERROR_FAILED;
   }
 
-  // Open the coordinator to prey channel for notifications
-  if( pipe( fd ) != 0 ) {
-    close( FD_TIMER_TO_COORDINATOR_READ_CHANNEL );
-    close( FD_TIMER_TO_COORDINATOR_WRITE_CHANNEL );
-    close( FD_WAKEUP_TO_COORDINATOR_READ_CHANNEL );
-    close( FD_WAKEUP_TO_COORDINATOR_WRITE_CHANNEL );
-    sprintf( errstr, "(coordinator.cpp) init_pipes() failed calling pipe(FD_COORDINATOR_TO_PREY)\n" );
-    error_log.write( errstr );
-    return ERROR_FAILED;
-  }
-  flags = fcntl( fd[0], F_GETFL, 0 );
-  fcntl( fd[0], F_SETFL, flags );
-  flags = fcntl( fd[1], F_GETFL, 0 );
-  fcntl( fd[1], F_SETFL, flags | O_NONBLOCK );
-
-  if( dup2( fd[0], FD_COORDINATOR_TO_PREY_READ_CHANNEL ) == -1 ) {
-    sprintf( errstr, "(coordinator.cpp) init_pipes() failed calling dup2(FD_COORDINATOR_TO_PREY_READ_CHANNEL)\n" );
-    error_log.write( errstr );
-    close( fd[0] );
-    close( fd[1] );
-    close( FD_WAKEUP_TO_COORDINATOR_READ_CHANNEL );
-    close( FD_WAKEUP_TO_COORDINATOR_WRITE_CHANNEL );
-    close( FD_TIMER_TO_COORDINATOR_READ_CHANNEL );
-    close( FD_TIMER_TO_COORDINATOR_WRITE_CHANNEL );
+  // open prey comm out channels
+  prey.pipe_from = pipe_c( FD_PREY_TO_COORDINATOR_READ_CHANNEL, FD_PREY_TO_COORDINATOR_WRITE_CHANNEL );
+  r = prey.pipe_from.open();
+  if( r != pipe_c::PIPE_ERROR_NONE ) {
+    pipe_c::log_error( error_log, r, "coordinator.cpp", "init_pipes", "prey.pipe_from.open()" );
+    pipe_timer.close();
+    pipe_wakeup.close();
+    prey.pipe_to.close();
     return ERROR_FAILED;
   }
 
-  if( dup2( fd[1], FD_COORDINATOR_TO_PREY_WRITE_CHANNEL ) == -1 ) {
-    sprintf( errstr, "(coordinator.cpp) init_pipes() failed calling dup2(FD_COORDINATOR_TO_PREY_WRITE_CHANNEL)\n" );
-    error_log.write( errstr );
-    close( FD_COORDINATOR_TO_PREY_READ_CHANNEL );
-    close( fd[1] );
-    close( FD_WAKEUP_TO_COORDINATOR_READ_CHANNEL );
-    close( FD_WAKEUP_TO_COORDINATOR_WRITE_CHANNEL );
-    close( FD_TIMER_TO_COORDINATOR_READ_CHANNEL );
-    close( FD_TIMER_TO_COORDINATOR_WRITE_CHANNEL );
+  // open pred comm in channels
+  pred.pipe_to = pipe_c( FD_COORDINATOR_TO_PREDATOR_READ_CHANNEL, FD_COORDINATOR_TO_PREDATOR_WRITE_CHANNEL );
+  r = pred.pipe_to.open();
+  if( r != pipe_c::PIPE_ERROR_NONE ) {
+    pipe_c::log_error( error_log, r, "coordinator.cpp", "init_pipes", "pred.pipe_to.open()" );
+    pipe_timer.close();
+    pipe_wakeup.close();
+    prey.pipe_to.close();
+    prey.pipe_from.close();
     return ERROR_FAILED;
   }
 
-  // Open the coordinator to predator channel for notifications
-  if( pipe( fd ) != 0 ) {
-    close( FD_COORDINATOR_TO_PREY_READ_CHANNEL );
-    close( FD_COORDINATOR_TO_PREY_WRITE_CHANNEL );
-    close( FD_TIMER_TO_COORDINATOR_READ_CHANNEL );
-    close( FD_TIMER_TO_COORDINATOR_WRITE_CHANNEL );
-    close( FD_WAKEUP_TO_COORDINATOR_READ_CHANNEL );
-    close( FD_WAKEUP_TO_COORDINATOR_WRITE_CHANNEL );
-    sprintf( errstr, "(coordinator.cpp) init_pipes() failed calling pipe(FD_COORDINATOR_TO_PREDATOR)\n" );
-    error_log.write( errstr );
-    return ERROR_FAILED;
-  }
-  flags = fcntl( fd[0], F_GETFL, 0 );
-  fcntl( fd[0], F_SETFL, flags );
-  flags = fcntl( fd[1], F_GETFL, 0 );
-  fcntl( fd[1], F_SETFL, flags | O_NONBLOCK );
-
-  if( dup2( fd[0], FD_COORDINATOR_TO_PREDATOR_READ_CHANNEL ) == -1 ) {
-    sprintf( errstr, "(coordinator.cpp) init_pipes() failed calling dup2(FD_COORDINATOR_TO_PREDATOR_READ_CHANNEL)\n" );
-    error_log.write( errstr );
-    close( fd[0] );
-    close( fd[1] );
-    close( FD_COORDINATOR_TO_PREY_READ_CHANNEL );
-    close( FD_COORDINATOR_TO_PREY_WRITE_CHANNEL );
-    close( FD_WAKEUP_TO_COORDINATOR_READ_CHANNEL );
-    close( FD_WAKEUP_TO_COORDINATOR_WRITE_CHANNEL );
-    close( FD_TIMER_TO_COORDINATOR_READ_CHANNEL );
-    close( FD_TIMER_TO_COORDINATOR_WRITE_CHANNEL );
+  // open pred comm out channels
+  pred.pipe_from = pipe_c( FD_PREDATOR_TO_COORDINATOR_READ_CHANNEL, FD_PREDATOR_TO_COORDINATOR_WRITE_CHANNEL );
+  r = pred.pipe_from.open();
+  if( r != pipe_c::PIPE_ERROR_NONE ) {
+    pipe_c::log_error( error_log, r, "coordinator.cpp", "init_pipes", "pred.pipe_from.open()" );
+    pipe_timer.close();
+    pipe_wakeup.close();
+    prey.pipe_to.close();
+    prey.pipe_from.close();
+    pred.pipe_to.close();
     return ERROR_FAILED;
   }
 
-  if( dup2( fd[1], FD_COORDINATOR_TO_PREDATOR_WRITE_CHANNEL ) == -1 ) {
-    sprintf( errstr, "(coordinator.cpp) init_pipes() failed calling dup2(FD_COORDINATOR_TO_PREDATOR_WRITE_CHANNEL)\n" );
-    error_log.write( errstr );
-    close( FD_COORDINATOR_TO_PREY_READ_CHANNEL );
-    close( FD_COORDINATOR_TO_PREY_WRITE_CHANNEL );
-    close( FD_COORDINATOR_TO_PREDATOR_READ_CHANNEL );
-    close( fd[1] );
-    close( FD_WAKEUP_TO_COORDINATOR_READ_CHANNEL );
-    close( FD_WAKEUP_TO_COORDINATOR_WRITE_CHANNEL );
-    close( FD_TIMER_TO_COORDINATOR_READ_CHANNEL );
-    close( FD_TIMER_TO_COORDINATOR_WRITE_CHANNEL );
+  // open planner comm to channels
+  planner.pipe_to = pipe_c( FD_COORDINATOR_TO_PLANNER_READ_CHANNEL, FD_COORDINATOR_TO_PLANNER_WRITE_CHANNEL );
+  r = planner.pipe_to.open();
+  if( r != pipe_c::PIPE_ERROR_NONE ) {
+    pipe_c::log_error( error_log, r, "coordinator.cpp", "init_pipes", "planner.pipe_to.open()" );
+    pipe_timer.close();
+    pipe_wakeup.close();
+    prey.pipe_to.close();
+    prey.pipe_from.close();
+    pred.pipe_to.close();
+    pred.pipe_from.close();
     return ERROR_FAILED;
   }
 
-  // Open the coordinator to planner channel for notifications
-  if( pipe( fd ) != 0 ) {
-    close( FD_COORDINATOR_TO_PREDATOR_READ_CHANNEL );
-    close( FD_COORDINATOR_TO_PREDATOR_WRITE_CHANNEL );
-    close( FD_COORDINATOR_TO_PREY_READ_CHANNEL );
-    close( FD_COORDINATOR_TO_PREY_WRITE_CHANNEL );
-    close( FD_TIMER_TO_COORDINATOR_READ_CHANNEL );
-    close( FD_TIMER_TO_COORDINATOR_WRITE_CHANNEL );
-    close( FD_WAKEUP_TO_COORDINATOR_READ_CHANNEL );
-    close( FD_WAKEUP_TO_COORDINATOR_WRITE_CHANNEL );
-    sprintf( errstr, "(coordinator.cpp) init_pipes() failed calling pipe(FD_COORDINATOR_TO_PREDATOR)\n" );
-    error_log.write( errstr );
-    return ERROR_FAILED;
-  }
-  flags = fcntl( fd[0], F_GETFL, 0 );
-  fcntl( fd[0], F_SETFL, flags );
-  flags = fcntl( fd[1], F_GETFL, 0 );
-  fcntl( fd[1], F_SETFL, flags | O_NONBLOCK );
-
-  if( dup2( fd[0], FD_COORDINATOR_TO_PLANNER_READ_CHANNEL ) == -1 ) {
-    sprintf( errstr, "(coordinator.cpp) init_pipes() failed calling dup2(FD_COORDINATOR_TO_PLANNER_READ_CHANNEL)\n" );
-    error_log.write( errstr );
-    close( fd[0] );
-    close( fd[1] );
-    close( FD_COORDINATOR_TO_PREDATOR_READ_CHANNEL );
-    close( FD_COORDINATOR_TO_PREDATOR_WRITE_CHANNEL );
-    close( FD_COORDINATOR_TO_PREY_READ_CHANNEL );
-    close( FD_COORDINATOR_TO_PREY_WRITE_CHANNEL );
-    close( FD_WAKEUP_TO_COORDINATOR_READ_CHANNEL );
-    close( FD_WAKEUP_TO_COORDINATOR_WRITE_CHANNEL );
-    close( FD_TIMER_TO_COORDINATOR_READ_CHANNEL );
-    close( FD_TIMER_TO_COORDINATOR_WRITE_CHANNEL );
+  // open planner comm out channels
+  planner.pipe_from = pipe_c( FD_PLANNER_TO_COORDINATOR_READ_CHANNEL, FD_PLANNER_TO_COORDINATOR_WRITE_CHANNEL );
+  r = planner.pipe_from.open();
+  if( r != pipe_c::PIPE_ERROR_NONE ) {
+    pipe_c::log_error( error_log, r, "coordinator.cpp", "init_pipes", "planner,pipe_from.open()" );
+    pipe_timer.close();
+    pipe_wakeup.close();
+    prey.pipe_to.close();
+    prey.pipe_from.close();
+    pred.pipe_to.close();
+    pred.pipe_from.close();
+    planner.pipe_to.close();
     return ERROR_FAILED;
   }
 
-  if( dup2( fd[1], FD_COORDINATOR_TO_PLANNER_WRITE_CHANNEL ) == -1 ) {
-    sprintf( errstr, "(coordinator.cpp) init_pipes() failed calling dup2(FD_COORDINATOR_TO_PLANNER_WRITE_CHANNEL)\n" );
-    error_log.write( errstr );
-    close( FD_COORDINATOR_TO_PREDATOR_READ_CHANNEL );
-    close( FD_COORDINATOR_TO_PREDATOR_WRITE_CHANNEL );
-    close( FD_COORDINATOR_TO_PREY_READ_CHANNEL );
-    close( FD_COORDINATOR_TO_PREY_WRITE_CHANNEL );
-    close( FD_COORDINATOR_TO_PLANNER_READ_CHANNEL );
-    close( fd[1] );
-    close( FD_WAKEUP_TO_COORDINATOR_READ_CHANNEL );
-    close( FD_WAKEUP_TO_COORDINATOR_WRITE_CHANNEL );
-    close( FD_TIMER_TO_COORDINATOR_READ_CHANNEL );
-    close( FD_TIMER_TO_COORDINATOR_WRITE_CHANNEL );
-    return ERROR_FAILED;
-  }
-
-  // Open the prey to coordinator channel for notifications
-  if( pipe( fd ) != 0 ) {
-    close( FD_TIMER_TO_COORDINATOR_READ_CHANNEL );
-    close( FD_TIMER_TO_COORDINATOR_WRITE_CHANNEL );
-    close( FD_WAKEUP_TO_COORDINATOR_READ_CHANNEL );
-    close( FD_WAKEUP_TO_COORDINATOR_WRITE_CHANNEL );
-    close( FD_COORDINATOR_TO_PREDATOR_READ_CHANNEL );
-    close( FD_COORDINATOR_TO_PREDATOR_WRITE_CHANNEL );
-    close( FD_COORDINATOR_TO_PREY_READ_CHANNEL );
-    close( FD_COORDINATOR_TO_PREY_WRITE_CHANNEL );
-    close( FD_COORDINATOR_TO_PLANNER_READ_CHANNEL );
-    close( FD_COORDINATOR_TO_PLANNER_WRITE_CHANNEL );
-    sprintf( errstr, "(coordinator.cpp) init_pipes() failed calling pipe(FD_PREY_TO_COORDINATOR)\n" );
-    error_log.write( errstr );
-    return ERROR_FAILED;
-  }
-  flags = fcntl( fd[0], F_GETFL, 0 );
-  fcntl( fd[0], F_SETFL, flags );
-  flags = fcntl( fd[1], F_GETFL, 0 );
-  fcntl( fd[1], F_SETFL, flags | O_NONBLOCK );
-
-  if( dup2( fd[0], FD_PREY_TO_COORDINATOR_READ_CHANNEL ) == -1 ) {
-    sprintf( errstr, "(coordinator.cpp) init_pipes() failed calling dup2(FD_PREY_TO_COORDINATOR_READ_CHANNEL)\n" );
-    error_log.write( errstr );
-    close( fd[0] );
-    close( fd[1] );
-    close( FD_COORDINATOR_TO_PREDATOR_READ_CHANNEL );
-    close( FD_COORDINATOR_TO_PREDATOR_WRITE_CHANNEL );
-    close( FD_COORDINATOR_TO_PREY_READ_CHANNEL );
-    close( FD_COORDINATOR_TO_PREY_WRITE_CHANNEL );
-    close( FD_COORDINATOR_TO_PLANNER_READ_CHANNEL );
-    close( FD_COORDINATOR_TO_PLANNER_WRITE_CHANNEL );
-    close( FD_WAKEUP_TO_COORDINATOR_READ_CHANNEL );
-    close( FD_WAKEUP_TO_COORDINATOR_WRITE_CHANNEL );
-    close( FD_TIMER_TO_COORDINATOR_READ_CHANNEL );
-    close( FD_TIMER_TO_COORDINATOR_WRITE_CHANNEL );
-    return ERROR_FAILED;
-  }
-
-  if( dup2( fd[1], FD_PREY_TO_COORDINATOR_WRITE_CHANNEL ) == -1 ) {
-    sprintf( errstr, "(coordinator.cpp) init_pipes() failed calling dup2(FD_PREY_TO_COORDINATOR_WRITE_CHANNEL)\n" );
-    error_log.write( errstr );
-    close( FD_PREY_TO_COORDINATOR_READ_CHANNEL );
-    close( fd[1] );
-    close( FD_COORDINATOR_TO_PREDATOR_READ_CHANNEL );
-    close( FD_COORDINATOR_TO_PREDATOR_WRITE_CHANNEL );
-    close( FD_COORDINATOR_TO_PREY_READ_CHANNEL );
-    close( FD_COORDINATOR_TO_PREY_WRITE_CHANNEL );
-    close( FD_COORDINATOR_TO_PLANNER_READ_CHANNEL );
-    close( FD_COORDINATOR_TO_PLANNER_WRITE_CHANNEL );
-    close( FD_WAKEUP_TO_COORDINATOR_READ_CHANNEL );
-    close( FD_WAKEUP_TO_COORDINATOR_WRITE_CHANNEL );
-    close( FD_TIMER_TO_COORDINATOR_READ_CHANNEL );
-    close( FD_TIMER_TO_COORDINATOR_WRITE_CHANNEL );
-    return ERROR_FAILED;
-  }
-
-  // Open the predator to coordinator channel for notifications
-  if( pipe( fd ) != 0 ) {
-    close( FD_PREY_TO_COORDINATOR_READ_CHANNEL );
-    close( FD_PREY_TO_COORDINATOR_WRITE_CHANNEL );
-    close( FD_TIMER_TO_COORDINATOR_READ_CHANNEL );
-    close( FD_TIMER_TO_COORDINATOR_WRITE_CHANNEL );
-    close( FD_WAKEUP_TO_COORDINATOR_READ_CHANNEL );
-    close( FD_WAKEUP_TO_COORDINATOR_WRITE_CHANNEL );
-    close( FD_COORDINATOR_TO_PREDATOR_READ_CHANNEL );
-    close( FD_COORDINATOR_TO_PREDATOR_WRITE_CHANNEL );
-    close( FD_COORDINATOR_TO_PREY_READ_CHANNEL );
-    close( FD_COORDINATOR_TO_PREY_WRITE_CHANNEL );
-    close( FD_COORDINATOR_TO_PLANNER_READ_CHANNEL );
-    close( FD_COORDINATOR_TO_PLANNER_WRITE_CHANNEL );
-    sprintf( errstr, "(coordinator.cpp) init_pipes() failed calling pipe(FD_PREDATOR_TO_COORDINATOR)\n" );
-    error_log.write( errstr );
-    return ERROR_FAILED;
-  }
-  flags = fcntl( fd[0], F_GETFL, 0 );
-  fcntl( fd[0], F_SETFL, flags );
-  flags = fcntl( fd[1], F_GETFL, 0 );
-  fcntl( fd[1], F_SETFL, flags | O_NONBLOCK );
-
-  if( dup2( fd[0], FD_PREDATOR_TO_COORDINATOR_READ_CHANNEL ) == -1 ) {
-    sprintf( errstr, "(coordinator.cpp) init_pipes() failed calling dup2(FD_PREDATOR_TO_COORDINATOR_READ_CHANNEL)\n" );
-    error_log.write( errstr );
-    close( fd[0] );
-    close( fd[1] );
-    close( FD_PREY_TO_COORDINATOR_READ_CHANNEL );
-    close( FD_PREY_TO_COORDINATOR_WRITE_CHANNEL );
-    close( FD_COORDINATOR_TO_PREDATOR_READ_CHANNEL );
-    close( FD_COORDINATOR_TO_PREDATOR_WRITE_CHANNEL );
-    close( FD_COORDINATOR_TO_PREY_READ_CHANNEL );
-    close( FD_COORDINATOR_TO_PREY_WRITE_CHANNEL );
-    close( FD_COORDINATOR_TO_PLANNER_READ_CHANNEL );
-    close( FD_COORDINATOR_TO_PLANNER_WRITE_CHANNEL );
-    close( FD_WAKEUP_TO_COORDINATOR_READ_CHANNEL );
-    close( FD_WAKEUP_TO_COORDINATOR_WRITE_CHANNEL );
-    close( FD_TIMER_TO_COORDINATOR_READ_CHANNEL );
-    close( FD_TIMER_TO_COORDINATOR_WRITE_CHANNEL );
-    return ERROR_FAILED;
-  }
-
-  if( dup2( fd[1], FD_PREDATOR_TO_COORDINATOR_WRITE_CHANNEL ) == -1 ) {
-    sprintf( errstr, "(coordinator.cpp) init_pipes() failed calling dup2(FD_PREDATOR_TO_COORDINATOR_WRITE_CHANNEL)\n" );
-    error_log.write( errstr );
-    close( FD_PREDATOR_TO_COORDINATOR_READ_CHANNEL );
-    close( fd[1] );
-    close( FD_PREY_TO_COORDINATOR_READ_CHANNEL );
-    close( FD_PREY_TO_COORDINATOR_WRITE_CHANNEL );
-    close( FD_COORDINATOR_TO_PREDATOR_READ_CHANNEL );
-    close( FD_COORDINATOR_TO_PREDATOR_WRITE_CHANNEL );
-    close( FD_COORDINATOR_TO_PREY_READ_CHANNEL );
-    close( FD_COORDINATOR_TO_PREY_WRITE_CHANNEL );
-    close( FD_COORDINATOR_TO_PLANNER_READ_CHANNEL );
-    close( FD_COORDINATOR_TO_PLANNER_WRITE_CHANNEL );
-    close( FD_WAKEUP_TO_COORDINATOR_READ_CHANNEL );
-    close( FD_WAKEUP_TO_COORDINATOR_WRITE_CHANNEL );
-    close( FD_TIMER_TO_COORDINATOR_READ_CHANNEL );
-    close( FD_TIMER_TO_COORDINATOR_WRITE_CHANNEL );
-    return ERROR_FAILED;
-  }
-
-  // Open the planner to coordinator channel for notifications
-  if( pipe( fd ) != 0 ) {
-    close( FD_PREDATOR_TO_COORDINATOR_READ_CHANNEL );
-    close( FD_PREDATOR_TO_COORDINATOR_WRITE_CHANNEL );
-    close( FD_PREY_TO_COORDINATOR_READ_CHANNEL );
-    close( FD_PREY_TO_COORDINATOR_WRITE_CHANNEL );
-    close( FD_TIMER_TO_COORDINATOR_READ_CHANNEL );
-    close( FD_TIMER_TO_COORDINATOR_WRITE_CHANNEL );
-    close( FD_WAKEUP_TO_COORDINATOR_READ_CHANNEL );
-    close( FD_WAKEUP_TO_COORDINATOR_WRITE_CHANNEL );
-    close( FD_COORDINATOR_TO_PREDATOR_READ_CHANNEL );
-    close( FD_COORDINATOR_TO_PREDATOR_WRITE_CHANNEL );
-    close( FD_COORDINATOR_TO_PREY_READ_CHANNEL );
-    close( FD_COORDINATOR_TO_PREY_WRITE_CHANNEL );
-    close( FD_COORDINATOR_TO_PLANNER_READ_CHANNEL );
-    close( FD_COORDINATOR_TO_PLANNER_WRITE_CHANNEL );
-    sprintf( errstr, "(coordinator.cpp) init_pipes() failed calling pipe(FD_PLANNER_TO_COORDINATOR)\n" );
-    error_log.write( errstr );
-    return ERROR_FAILED;
-  }
-  flags = fcntl( fd[0], F_GETFL, 0 );
-  fcntl( fd[0], F_SETFL, flags );
-  flags = fcntl( fd[1], F_GETFL, 0 );
-  fcntl( fd[1], F_SETFL, flags | O_NONBLOCK );
-
-  if( dup2( fd[0], FD_PLANNER_TO_COORDINATOR_READ_CHANNEL ) == -1 ) {
-    sprintf( errstr, "(coordinator.cpp) init_pipes() failed calling dup2(FD_PLANNER_TO_COORDINATOR_READ_CHANNEL)\n" );
-    error_log.write( errstr );
-    close( fd[0] );
-    close( fd[1] );
-    close( FD_PREDATOR_TO_COORDINATOR_READ_CHANNEL );
-    close( FD_PREDATOR_TO_COORDINATOR_WRITE_CHANNEL );
-    close( FD_PREY_TO_COORDINATOR_READ_CHANNEL );
-    close( FD_PREY_TO_COORDINATOR_WRITE_CHANNEL );
-    close( FD_COORDINATOR_TO_PREDATOR_READ_CHANNEL );
-    close( FD_COORDINATOR_TO_PREDATOR_WRITE_CHANNEL );
-    close( FD_COORDINATOR_TO_PREY_READ_CHANNEL );
-    close( FD_COORDINATOR_TO_PREY_WRITE_CHANNEL );
-    close( FD_COORDINATOR_TO_PLANNER_READ_CHANNEL );
-    close( FD_COORDINATOR_TO_PLANNER_WRITE_CHANNEL );
-    close( FD_WAKEUP_TO_COORDINATOR_READ_CHANNEL );
-    close( FD_WAKEUP_TO_COORDINATOR_WRITE_CHANNEL );
-    close( FD_TIMER_TO_COORDINATOR_READ_CHANNEL );
-    close( FD_TIMER_TO_COORDINATOR_WRITE_CHANNEL );
-    return ERROR_FAILED;
-  }
-
-  if( dup2( fd[1], FD_PLANNER_TO_COORDINATOR_WRITE_CHANNEL ) == -1 ) {
-    sprintf( errstr, "(coordinator.cpp) init_pipes() failed calling dup2(FD_PLANNER_TO_COORDINATOR_WRITE_CHANNEL)\n" );
-    error_log.write( errstr );
-    close( FD_PLANNER_TO_COORDINATOR_READ_CHANNEL );
-    close( fd[1] );
-    close( FD_PREDATOR_TO_COORDINATOR_READ_CHANNEL );
-    close( FD_PREDATOR_TO_COORDINATOR_WRITE_CHANNEL );
-    close( FD_PREY_TO_COORDINATOR_READ_CHANNEL );
-    close( FD_PREY_TO_COORDINATOR_WRITE_CHANNEL );
-    close( FD_COORDINATOR_TO_PREDATOR_READ_CHANNEL );
-    close( FD_COORDINATOR_TO_PREDATOR_WRITE_CHANNEL );
-    close( FD_COORDINATOR_TO_PREY_READ_CHANNEL );
-    close( FD_COORDINATOR_TO_PREY_WRITE_CHANNEL );
-    close( FD_COORDINATOR_TO_PLANNER_READ_CHANNEL );
-    close( FD_COORDINATOR_TO_PLANNER_WRITE_CHANNEL );
-    close( FD_WAKEUP_TO_COORDINATOR_READ_CHANNEL );
-    close( FD_WAKEUP_TO_COORDINATOR_WRITE_CHANNEL );
-    close( FD_TIMER_TO_COORDINATOR_READ_CHANNEL );
-    close( FD_TIMER_TO_COORDINATOR_WRITE_CHANNEL );
-    return ERROR_FAILED;
-  }
   return ERROR_NONE;
 }
 
 //-----------------------------------------------------------------------------
 /// Clean up the pipes to prevent leakage
 void close_pipes( void ) {
-  close( FD_TIMER_TO_COORDINATOR_READ_CHANNEL );
-  close( FD_TIMER_TO_COORDINATOR_WRITE_CHANNEL );
-  close( FD_WAKEUP_TO_COORDINATOR_READ_CHANNEL );
-  close( FD_WAKEUP_TO_COORDINATOR_WRITE_CHANNEL );
-  close( FD_COORDINATOR_TO_PREY_READ_CHANNEL );
-  close( FD_COORDINATOR_TO_PREY_WRITE_CHANNEL );
-  close( FD_COORDINATOR_TO_PREDATOR_READ_CHANNEL );
-  close( FD_COORDINATOR_TO_PREDATOR_WRITE_CHANNEL );
-  close( FD_COORDINATOR_TO_PLANNER_READ_CHANNEL );
-  close( FD_COORDINATOR_TO_PLANNER_WRITE_CHANNEL );
-  close( FD_PREY_TO_COORDINATOR_READ_CHANNEL );
-  close( FD_PREY_TO_COORDINATOR_WRITE_CHANNEL );
-  close( FD_PREDATOR_TO_COORDINATOR_READ_CHANNEL );
-  close( FD_PREDATOR_TO_COORDINATOR_WRITE_CHANNEL );
-  close( FD_PLANNER_TO_COORDINATOR_READ_CHANNEL );
-  close( FD_PLANNER_TO_COORDINATOR_WRITE_CHANNEL );
+  pipe_timer.close();
+  pipe_wakeup.close();
+  prey.pipe_to.close();
+  prey.pipe_from.close();
+  pred.pipe_to.close();
+  pred.pipe_from.close();
+  planner.pipe_to.close();
+  planner.pipe_from.close();
 }
 
 //-----------------------------------------------------------------------------
 // TIMER
 //-----------------------------------------------------------------------------
 
-/// The signal handler for the controller's timer.  Is called only when the controller's
-/// budget is exhausted.  Puts a message out onto the comm channel the coordinator
-/// is listening to for notifications about this event
+/// The signal handler for the timer.  Is called only when the user process'
+/// budget is exhausted.  Puts a timestamp message out onto the comm channel 
+/// that wakes the coordinator.
 void timer_sighandler( int signum, siginfo_t *si, void *data ) {
+ 
+  notification_c notification;
+  notification.type = NOTIFICATION_TIMER;
+  notification.ts = generate_timestamp();
 
-  timestamp_t ts;
-  rdtscll( ts.cycle );
-
-  if( write( FD_TIMER_TO_COORDINATOR_WRITE_CHANNEL, &ts, sizeof(timestamp_t) ) == -1) {
-    std::string err_msg = "(coordinator.cpp) prey_timer_sighandler(...) failed making system call write(...)";
+  pipe_c::pipe_error_e r = pipe_timer.write( notification );
+  if( r != pipe_c::PIPE_ERROR_NONE ) {
+  std::string err_msg = "(coordinator.cpp) timer_sighandler(...) failed making system call write(...)";
     error_log.write( error_string_bad_write( err_msg, errno ) );
     // TODO : determine if there is a need to recover
   }
@@ -681,16 +392,16 @@ void timer_sighandler( int signum, siginfo_t *si, void *data ) {
 
 /// the wakeup thread function itself.  Established at the priority level one
 /// below the controller (therefore two below coordinator), this thread is unblocked when
-/// the controller blocks and therefore can detect when the controller thread is not
-/// consuming budget but is not directly suspended by the coordinator.
+/// the controller blocks and therefore can detect when the controller thread is/// not consuming budget but is not directly suspended by the coordinator.
 
-// TODO : should send a timestamp instead as the time between notification and message
-// arrival may be significant
 void* wakeup( void* ) {
   char buf;
   timespec ts_sleep, ts_rem;
   ts_sleep.tv_sec = 0;
   ts_sleep.tv_nsec = 100;
+
+  notification_c notification;
+  notification.type = NOTIFICATION_WAKEUP;
 
   while( 1 ) {
     // REMARKED FOR NOW TO PREVENT LOCKUP UNTIL THIS GETS CLOSER VETTING AND INSTEAD SLEEP
@@ -706,11 +417,15 @@ void* wakeup( void* ) {
     // Note: may need mutex protection!
     controller_thread.blocked = true;
 
-    if( write( FD_WAKEUP_TO_COORDINATOR_WRITE_CHANNEL, &buf, 1 ) == -1) {
+    notification.ts = generate_timestamp();
+
+    pipe_c::pipe_error_e r = pipe_wakeup.write( notification );
+    if( r != pipe_c::PIPE_ERROR_NONE ) {
       std::string err_msg = "(coordinator.cpp) wakeup() failed making system call write(...)";
       error_log.write( error_string_bad_write( err_msg, errno ) );
-      // TODO : determine if there is a need to bomb or recover
+      // TODO : determine if there is a need to recover
     }
+
 */
     clock_nanosleep( CLOCK_MONOTONIC, 0, &ts_sleep, &ts_rem );
   }
@@ -814,10 +529,12 @@ void init( int argc, char* argv[] ) {
     exit( 1 );
   }
 
-
   //++++++++++++++++++++++++++++++++++++++++++++++++
   // initialize planners and controllers
-  if( scheduler.create( prey, "tas-ship-controller", 1, DEFAULT_PROCESSOR ) != SCHED_ERROR_NONE ) {
+
+  // Note: pass serialization args here
+  prey_thread = thread_p( new controller_c() );
+  if( scheduler.create( prey_thread, "tas-ship-controller", 1, DEFAULT_PROCESSOR ) != SCHED_ERROR_NONE ) {
     sprintf( errstr, "(coordinator.cpp) init() failed calling scheduler.create(prey_thread,DEFAULT_PROCESSOR)\nExiting\n" );
     error_log.write( errstr );
     printf( "%s", errstr );
@@ -828,7 +545,9 @@ void init( int argc, char* argv[] ) {
   }
   prey.PERIOD_NSEC = (unsigned long long)NSECS_PER_SEC / (unsigned long long)CONTROLLER_HZ;
 
-  if( scheduler.create( pred, "tas-ship-controller", 1, DEFAULT_PROCESSOR ) != SCHED_ERROR_NONE ) {
+  // Note: pass serialization args here
+  pred_thread = thread_p( new controller_c() );
+  if( scheduler.create( pred_thread, "tas-ship-controller", 1, DEFAULT_PROCESSOR ) != SCHED_ERROR_NONE ) {
     sprintf( errstr, "(coordinator.cpp) init() failed calling scheduler.create(predator_thread,DEFAULT_PROCESSOR)\nExiting\n" );
     error_log.write( errstr );
     printf( "%s", errstr );
@@ -839,7 +558,9 @@ void init( int argc, char* argv[] ) {
   }
   pred.PERIOD_NSEC = (unsigned long long)NSECS_PER_SEC / (unsigned long long)CONTROLLER_HZ;
 
-  if( scheduler.create( planner, "tas-ship-planner", 1, DEFAULT_PROCESSOR ) != SCHED_ERROR_NONE ) {
+  // Note: pass serialization args here
+  planner_thread = thread_p( new planner_c() );
+  if( scheduler.create( planner_thread, "tas-ship-planner", 1, DEFAULT_PROCESSOR ) != SCHED_ERROR_NONE ) {
     sprintf( errstr, "(coordinator.cpp) init() failed calling scheduler.create(planner_thread,DEFAULT_PROCESSOR)\nExiting\n" );
     error_log.write( errstr );
     printf( "%s", errstr );
@@ -866,6 +587,7 @@ void init( int argc, char* argv[] ) {
   }
 
   // initialize the wakeup thread
+  wakeup_thread = thread_p( new thread_c() );
   if( scheduler.create( wakeup_thread, coordinator_priority - 2, wakeup ) != SCHED_ERROR_NONE ) {
     amsgbuffer.close( );
     close_pipes( );
@@ -937,10 +659,10 @@ void shutdown( void ) {
   //pthread_join( wakeup_thread, NULL );
   //pthread_kill( wakeup_thread, SIGKILL );
 
-  scheduler.shutdown( prey );
-  scheduler.shutdown( pred );
-  scheduler.shutdown( planner );
-  scheduler.shutdown( dynamics );
+  scheduler.shutdown( prey_thread );
+  scheduler.shutdown( pred_thread );
+  scheduler.shutdown( planner_thread );
+  scheduler.shutdown( dynamics_thread );
 
   sleep( 1 );  // block for a second to allow controller to receive signal
 
@@ -967,9 +689,9 @@ double dt;
 
 //-----------------------------------------------------------------------------
 
-error_e service_controller_actuator_msg( void ) {
+error_e service_process_notification( void ) {
   act_msg_c msg;
-  char buf = 0;
+  notification_c note;
 
   if( amsgbuffer.read( msg ) != BUFFER_ERR_NONE ) {
     sprintf( errstr, "(coordinator.cpp) main() failed calling sharedbuffer_c.read(msg)\n" );
@@ -977,15 +699,22 @@ error_e service_controller_actuator_msg( void ) {
     return ERROR_FAILED;
   }
 
-  switch( msg.header.type ) {
-  case MSG_COMMAND:
+  if( msg.header.type == MSG_COMMAND ) {
     dynamics_get_command( );
-    break;
-  case MSG_REQUEST:
+
+    // mark as initialized once initial command is delivered
+    if( msg.header.requestor == REQUESTOR_PREY ) {
+      prey_thread->initialized = true;
+    } else if( msg.header.requestor == REQUESTOR_PREDATOR ) {
+      pred_thread->initialized = true;
+    } else if( msg.header.requestor == REQUESTOR_PLANNER ) {
+      planner_thread->initialized = true;
+    }
+  } else if( msg.header.type == MSG_REQUEST ) {
     // Note: the child is blocking now on read, waiting for coordinator write
     // Handle requests in normal operation
     if( msg.header.requestor == REQUESTOR_PREY ) {
-      if( prey.initialized ) {
+      if( prey_thread->initialized ) {
 	// NOTE: The commented code in these branches needs attention
 /*
         current_t = msg.state.time;
@@ -999,7 +728,7 @@ error_e service_controller_actuator_msg( void ) {
         // dynamics.execute()
       }
     } else if( msg.header.requestor == REQUESTOR_PREDATOR ) {
-      if( pred.initialized ) {
+      if( pred_thread->initialized ) {
 /*
         current_t = msg.state.time;
         dt = current_t - previous_t;
@@ -1008,7 +737,7 @@ error_e service_controller_actuator_msg( void ) {
         //step_dynamics( dt ); // NO
       }
     } else if( msg.header.requestor == REQUESTOR_PLANNER ) {
-      if( planner.initialized ) {
+      if( planner_thread->initialized ) {
 /*
         current_t = msg.state.time;
         dt = current_t - previous_t;
@@ -1016,15 +745,6 @@ error_e service_controller_actuator_msg( void ) {
 */
         //step_dynamics( dt ); // NO
       }
-    }
-
-    // Handle the initial request
-    if( msg.header.requestor == REQUESTOR_PREY ) {
-      if( !prey.initialized ) prey.initialized = true;
-    } else if( msg.header.requestor == REQUESTOR_PREDATOR ) {
-      if( !pred.initialized ) pred.initialized = true;
-    } else if( msg.header.requestor == REQUESTOR_PLANNER ) {
-      if( !planner.initialized ) planner.initialized = true;
     }
 
     dynamics_state_requested( );
@@ -1035,26 +755,26 @@ error_e service_controller_actuator_msg( void ) {
       return ERROR_FAILED;
     }
 
-    int write_channel;
-    if( msg.header.requestor == REQUESTOR_PREY ) {
-      write_channel = FD_COORDINATOR_TO_PREY_WRITE_CHANNEL;
-    } else if( msg.header.requestor == REQUESTOR_PREDATOR ) {
-      write_channel = FD_COORDINATOR_TO_PREDATOR_WRITE_CHANNEL;
-    } else if( msg.header.requestor == REQUESTOR_PLANNER ) {
-      write_channel = FD_COORDINATOR_TO_PLANNER_WRITE_CHANNEL;
-    }
+    pipe_c* pipe;
+    if( msg.header.requestor == REQUESTOR_PREY ) 
+      pipe = &prey.pipe_to;
+    else if( msg.header.requestor == REQUESTOR_PREDATOR )
+      pipe = &pred.pipe_to;
+    else if( msg.header.requestor == REQUESTOR_PLANNER )
+      pipe = &planner.pipe_to;
 
-    if( write( write_channel, &buf, 1 ) == -1 ) {
+    note.type = NOTIFICATION_RESPONSE;
+    note.ts = generate_timestamp();
+
+    pipe_c::pipe_error_e r = pipe->write( note );
+    if( r != pipe_c::PIPE_ERROR_NONE ) {
       std::string err_msg = "(coordinator.cpp) main() failed making system call write(...)";
       error_log.write( error_string_bad_write( err_msg, errno ) );
-      // TODO : determine if there is a need to recover
       return ERROR_FAILED;
     }
-    break;
-  case MSG_NO_COMMAND:
-  case MSG_REPLY:
-  case MSG_UNDEFINED:
-    break;
+  } else if( msg.header.type == MSG_NO_COMMAND ) {
+  } else if( msg.header.type == MSG_REPLY ) {
+  } else if( msg.header.type == MSG_UNDEFINED ) {
   }
   return ERROR_NONE;
 }
@@ -1077,16 +797,20 @@ int main( int argc, char* argv[] ) {
   unsigned int timer_events = 0;
   timestamp_t ts_timer_armed, ts_timer_fired;
 
-  controller_notification_c ctl_msg;
   fd_set fds_channels;
   int max_fd;
 
+  notification_c notification;
+  pipe_c::pipe_error_e pipe_err;
+
   init( argc, argv );
 
-  max_fd = std::max( FD_TIMER_TO_COORDINATOR_READ_CHANNEL, FD_PREY_TO_COORDINATOR_READ_CHANNEL );
-  max_fd = std::max( FD_TIMER_TO_COORDINATOR_READ_CHANNEL, FD_PREDATOR_TO_COORDINATOR_READ_CHANNEL );
-  max_fd = std::max( FD_TIMER_TO_COORDINATOR_READ_CHANNEL, FD_PLANNER_TO_COORDINATOR_READ_CHANNEL );
-  max_fd = std::max( max_fd, FD_WAKEUP_TO_COORDINATOR_READ_CHANNEL );
+  scheduler.schedule( dynamics_thread );
+
+  max_fd=std::max( pipe_timer.fd_read_channel, prey.pipe_from.fd_read_channel );
+  max_fd=std::max( max_fd, pred.pipe_from.fd_read_channel );
+  max_fd=std::max( max_fd, planner.pipe_from.fd_read_channel );
+  max_fd=std::max( max_fd, pipe_wakeup.fd_read_channel );
 
   // lock into memory to prevent pagefaults
   mlockall( MCL_CURRENT );
@@ -1096,140 +820,125 @@ int main( int argc, char* argv[] ) {
   while( 1 ) {
 
     FD_ZERO( &fds_channels );
-    FD_SET( FD_TIMER_TO_COORDINATOR_READ_CHANNEL, &fds_channels );
-    FD_SET( FD_WAKEUP_TO_COORDINATOR_READ_CHANNEL, &fds_channels );
-    FD_SET( FD_PREY_TO_COORDINATOR_READ_CHANNEL, &fds_channels );
-    FD_SET( FD_PREDATOR_TO_COORDINATOR_READ_CHANNEL, &fds_channels );
-    FD_SET( FD_PLANNER_TO_COORDINATOR_READ_CHANNEL, &fds_channels );
+    FD_SET( pipe_timer.fd_read_channel, &fds_channels );
+    FD_SET( pipe_wakeup.fd_read_channel, &fds_channels );
+    FD_SET( prey.pipe_from.fd_read_channel, &fds_channels );
+    FD_SET( pred.pipe_from.fd_read_channel, &fds_channels );
+    FD_SET( planner.pipe_from.fd_read_channel, &fds_channels );
 
     if( select( max_fd + 1, &fds_channels, NULL, NULL, NULL ) ) {
-      if( FD_ISSET( FD_TIMER_TO_COORDINATOR_READ_CHANNEL, &fds_channels ) ) {
+      if( FD_ISSET( pipe_timer.fd_read_channel, &fds_channels ) ) {
         // timer event
-
-        if( read( FD_TIMER_TO_COORDINATOR_READ_CHANNEL, &ts_timer_fired, sizeof(timestamp_t) ) == -1 ) {
+   
+        pipe_err = pipe_timer.read( notification );
+        if( pipe_err != pipe_c::PIPE_ERROR_NONE ) {
           std::string err_msg = "(coordinator.cpp) main() failed making system call read(...) on FD_TIMER_TO_COORDINATOR_READ_CHANNEL";
           error_log.write( error_string_bad_read( err_msg, errno ) );
           // TODO : determine if there is a need to recover
         }
 
-        //timestamp_timer_buffer.write( ts_timer_fired.cycle - ts_timer_armed.cycle );
+        // if not all threads are initialized, ignore this notification
+        if( !system_initialized ) continue;
+        // else if all threads are initialized, proceed
 
-        timestamp_t ts_dtimer;
-        ts_dtimer.cycle = ts_timer_fired.cycle - ts_timer_armed.cycle;
-        timestamp_timer_buffer.write( ts_dtimer );
+        // if the scheduler has no active thread (first time here)
+        if( scheduler.current_thread ) {
+          // dispatch next thread
 
-        // Note : following is current exit strategy, e.g. run for a limited number of timer events
-        if( ++timer_events == SIM_DURATION_CYCLES ) break;
+          // dequeue next thread as active thread
+          scheduler.current_thread = scheduler.next();
+          // zero out the number of quantums for the newly active thread
+          scheduler.quantum = 0;
+          // execute the current thread
+          scheduler.current_thread->execute();
+        } else {
+          // else the scheduler has an active thread(only after first time here)
 
-        // controller needs to run!
-        //scheduler.resume( controller_thread );
-        // Before there was one controller.  Now need to schedule
-  
+          // increment the number of quantums the active thread has run for
+          scheduler.quantum++;
 
-      } else if( FD_ISSET( FD_PREY_TO_COORDINATOR_READ_CHANNEL, &fds_channels ) ) {
+          // if the active thread's budget iis exhausted
+          if( scheduler.quantum == scheduler.current_thread->budget ) {
+            // if not dynamics (as it is a special case)
+            if( scheduler.current_thread.get() != dynamics_thread.get() ) {
+              // explicitly block the active thread
+              scheduler.suspend( scheduler.current_thread );
+            }
+            // reschedule thread
+            scheduler.schedule( scheduler.current_thread );
+          }
+
+          // dispatch next thread
+
+          // dequeue next thread as active thread
+          scheduler.current_thread = scheduler.next();
+          // zero out the number of quantums for the newly active thread
+          scheduler.quantum = 0;
+          // execute the current thread
+          scheduler.current_thread->execute();
+          // *dynamics calls step(dt), other thread's call resume()
+        }
+
+      } else if( FD_ISSET( prey.pipe_from.fd_read_channel, &fds_channels ) ) {
         // prey notification event
 
-        if( read( FD_PREY_TO_COORDINATOR_READ_CHANNEL, &ctl_msg, sizeof( controller_notification_c ) ) == -1 ) {
+        pipe_err = pipe_timer.read( notification );
+        if( pipe_err != pipe_c::PIPE_ERROR_NONE ) {
           std::string err_msg = "(coordinator.cpp) main() failed making system call read(...) on FD_PREY_TO_COORDINATOR_READ_CHANNEL";
           error_log.write( error_string_bad_read( err_msg, errno ) );
           // TODO : determine if there is a need to recover
         }
 
         // check to see what kind of notification was sent.
-        // if it's an actuator message then service it
-        // else if it's a schedule request then schedule the controller timer
-        if( ctl_msg.type == CONTROLLER_NOTIFICATION_ACTUATOR_EVENT ) {
-          if( service_controller_actuator_msg( ) != ERROR_NONE) {
+        if( notification.type == NOTIFICATION_UNDEFINED ) {
+          // unknown issue
+        } else if( notification.type == NOTIFICATION_REQUEST || 
+                   notification.type == NOTIFICATION_RESPONSE ) {
+          // requested state or issued a command
+          if( service_process_notification( ) != ERROR_NONE) {
             sprintf( errstr, "(coordinator.cpp) main() failed calling service_controller_actuator_msg()\n" );
             error_log.write( errstr );
             break; //?
           }
-        } else if( ctl_msg.type == CONTROLLER_NOTIFICATION_SNOOZE ) {
-          // controller is preempted so it cannot run
+        } else if( notification.type == NOTIFICATION_IDLE ) {
 
-          // set a timer, suspend the controller until the timer fires
-          //controller_thread.suspend( );
+          // if the active thread is not the prey thread, ignore
+          if( scheduler.current_thread.get() != prey_thread.get() ) continue;
 
-          scheduler.suspend( prey );
+          // otherwise suspend so it cannot runaway on a coordindator block
+          scheduler.suspend( scheduler.current_thread );
+          // reschedule active thread
+          scheduler.schedule( scheduler.current_thread );
 
-          if( timer.arm( ctl_msg.ts, ts_timer_armed, prey.PERIOD_NSEC, cpu_speed_hz ) != timer_c::TIMER_ERROR_NONE ) {
-            sprintf( errstr, "(coordinator.cpp) main() failed calling arm_timer()\n" );
-            error_log.write( errstr );
-            break; //?
-          }
-        }
-      } else if( FD_ISSET( FD_PREDATOR_TO_COORDINATOR_READ_CHANNEL, &fds_channels ) ) {
-        // predator notification event
+          // dispatch next thread
 
-        if( read( FD_PREDATOR_TO_COORDINATOR_READ_CHANNEL, &ctl_msg, sizeof( controller_notification_c ) ) == -1 ) {
-          std::string err_msg = "(coordinator.cpp) main() failed making system call read(...) on FD_PREDATOR_TO_COORDINATOR_READ_CHANNEL";
-          error_log.write( error_string_bad_read( err_msg, errno ) );
-          // TODO : determine if there is a need to recover
+          // dequeue next thread as active thread
+          scheduler.current_thread = scheduler.next();
+          // zero out the number of quantums for the newly active thread
+          scheduler.quantum = 0;
+          // execute the current thread.  can only be user process.  dynamics
+          // can never get here
+          scheduler.current_thread->execute();
         }
 
-        // check to see what kind of notification was sent.
-        // if it's an actuator message then service it
-        // else if it's a schedule request then schedule the controller timer
-        if( ctl_msg.type == CONTROLLER_NOTIFICATION_ACTUATOR_EVENT ) {
-          if( service_controller_actuator_msg( ) != ERROR_NONE) {
-            sprintf( errstr, "(coordinator.cpp) main() failed calling service_controller_actuator_msg()\n" );
-            error_log.write( errstr );
-            break; //?
-          }
-        } else if( ctl_msg.type == CONTROLLER_NOTIFICATION_SNOOZE ) {
-          // controller is preempted so it cannot run
+        // if all components are initialized mark system as initialized
+        if( prey_thread->initialized && pred_thread->initialized && 
+            planner_thread->initialized && dynamics_thread->initialized )
+          system_initialized = true;
 
-          // set a timer, suspend the controller until the timer fires
-          //controller_thread.suspend( );
-
-          scheduler.suspend( pred );
-
-          if( timer.arm( ctl_msg.ts, ts_timer_armed, pred.PERIOD_NSEC, cpu_speed_hz ) != timer_c::TIMER_ERROR_NONE ) {
-            sprintf( errstr, "(coordinator.cpp) main() failed calling arm_timer()\n" );
-            error_log.write( errstr );
-            break; //?
-          }
-        }
-      } else if( FD_ISSET( FD_PLANNER_TO_COORDINATOR_READ_CHANNEL, &fds_channels ) ) {
-        // planner notification event
-
-        if( read( FD_PLANNER_TO_COORDINATOR_READ_CHANNEL, &ctl_msg, sizeof( controller_notification_c ) ) == -1 ) {
-          std::string err_msg = "(coordinator.cpp) main() failed making system call read(...) on FD_PREDATOR_TO_COORDINATOR_READ_CHANNEL";
-          error_log.write( error_string_bad_read( err_msg, errno ) );
-          // TODO : determine if there is a need to recover
-        }
-
-        // check to see what kind of notification was sent.
-        // if it's an actuator message then service it
-        // else if it's a schedule request then schedule the controller timer
-        if( ctl_msg.type == CONTROLLER_NOTIFICATION_ACTUATOR_EVENT ) {
-          if( service_controller_actuator_msg( ) != ERROR_NONE) {
-            sprintf( errstr, "(coordinator.cpp) main() failed calling service_controller_actuator_msg()\n" );
-            error_log.write( errstr );
-            break; //?
-          }
-        } else if( ctl_msg.type == CONTROLLER_NOTIFICATION_SNOOZE ) {
-          // controller is preempted so it cannot run
-
-          // set a timer, suspend the controller until the timer fires
-          //controller_thread.suspend( );
-
-          scheduler.suspend( planner );
-
-          if( timer.arm( ctl_msg.ts, ts_timer_armed, planner.PERIOD_NSEC, cpu_speed_hz ) != timer_c::TIMER_ERROR_NONE ) {
-            sprintf( errstr, "(coordinator.cpp) main() failed calling arm_timer()\n" );
-            error_log.write( errstr );
-            break; //?
-          }
-        }
-      } else if( FD_ISSET( FD_WAKEUP_TO_COORDINATOR_READ_CHANNEL, &fds_channels ) ) {
+      // TODO : Add in the predator and planner once prey is worked out
+      } else if( FD_ISSET( pipe_wakeup.fd_read_channel, &fds_channels ) ) {
         // wakeup event
 
-        if( read( FD_WAKEUP_TO_COORDINATOR_READ_CHANNEL, &input_buffer, 1 ) == -1 ) {
+        pipe_err = pipe_wakeup.read( notification );
+        if( pipe_err != pipe_c::PIPE_ERROR_NONE ) {
           std::string err_msg = "(coordinator.cpp) main() failed making system call read(...) on FD_WAKEUP_TO_COORDINATOR_READ_CHANNEL";
           error_log.write( error_string_bad_read( err_msg, errno ) );
           // TODO : determine if there is a need to recover
         }
+
+        // Dont really have to check type of notification here because the
+        // only notifications that come on this pipe are wakeups.
       }
     }
   }

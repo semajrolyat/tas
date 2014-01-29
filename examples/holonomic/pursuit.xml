@@ -5,35 +5,95 @@
   </DRIVER>
 
   <MOBY>
-    <Box id="ship_box" xlen="0.4" ylen="0.2" zlen="0.1" density="10.0" />
-    <Box id="space_box" xlen="50.0" ylen="50.0" zlen="50.0" density="10.0" />
+    <Box id="ship" xlen="0.4" ylen="0.2" zlen="0.1" density="10.0" />
+    <Box id="wall_x" xlen="0.1" ylen="50.0" zlen="50.0" density="10.0" />
+    <Box id="wall_y" xlen="50.0" ylen="0.1" zlen="50.0" density="10.0" />
+    <Box id="wall_z" xlen="50.0" ylen="50.0" zlen="0.1" density="10.0" />
 
     <EulerIntegrator id="euler" type="VectorN" />
     <EulerIntegrator id="euler-quat" type="Quat" />
 
     <!-- <FSABAlgorithm id="fsab" /> -->
-    <CRBAlgorithm id="crb" />
+    <!-- <CRBAlgorithm id="crb" /> -->
 
-    <Simulator id="simulator" integrator-id="euler" >
-      <!-- <RecurrentForce recurrent-force-id="gravity" enabled="true" />  -->
+    <!-- Collision Detector -->
+    <GeneralizedCCD id="ccd" ori-integrator-id="eular-quat" eps-tolerance="1e-3" intersection-tolerance="1e-5" toi-tolerance="1e-5">
+      <Body body-id="predator" />
+      <Body body-id="prey" />
+      <Body body-id="wall_north" />
+      <Body body-id="wall_south" />
+      <Body body-id="wall_east" />
+      <Body body-id="wall_west" />
+      <Body body-id="wall_up" />
+      <Body body-id="wall_down" />
+    </GeneralizedCCD>
+
+    <!-- Gravity force -->
+    <!--
+    <GravityForce id="gravity" accel="0 -9.81 0"  />
+    -->
+ 
+    <!-- Bodies -->
+    <RigidBody id="predator" enabled="true" position="5 0 0" linear-velocity="0 0 0" angular-velocity="0 0 0" visualization-id="ship">
+      <InertiaFromPrimitive primitive-id="ship" />
+      <CollisionGeometry primitive-id="ship" />
+    </RigidBody>
+
+    <RigidBody id="prey" enabled="true" position="-5 0 0" linear-velocity="0 0 0" angular-velocity="0 0 0" visualization-id="ship">
+      <InertiaFromPrimitive primitive-id="ship" />
+      <CollisionGeometry primitive-id="ship" />
+    </RigidBody>
+
+    <!-- Spatial Bounds -->
+    <RigidBody id="wall_north" enabled="false" position="0 0 -25" visualization-id="wall_z" >
+      <CollisionGeometry primitive-id="wall_z" />
+    </RigidBody>
+    <RigidBody id="wall_south" enabled="false" position="0 0 25" visualization-id="wall_z" >
+      <CollisionGeometry primitive-id="wall_z" />
+    </RigidBody>
+
+    <RigidBody id="wall_east" enabled="false" position="25 0 0" visualization-id="wall_x" >
+      <CollisionGeometry primitive-id="wall_x" />
+    </RigidBody>
+    <RigidBody id="wall_west" enabled="false" position="-25 0 0" visualization-id="wall_x" >
+      <CollisionGeometry primitive-id="wall_x" />
+    </RigidBody>
+
+    <RigidBody id="wall_up" enabled="false" position="0 25 0" visualization-id="wall_y" >
+      <CollisionGeometry primitive-id="wall_y" />
+    </RigidBody>
+    <RigidBody id="wall_down" enabled="false" position="0 -25 0" visualization-id="wall_y" >
+      <CollisionGeometry primitive-id="wall_y" />
+    </RigidBody>
+
+    <!-- Simulator -->
+    <EventDrivenSimulator id="simulator" integrator-id="euler" collision-detector-id="ccd">
+      <!--
+      <RecurrentForce recurrent-force-id="gravity" enabled="true" />
+      -->
       <DynamicBody dynamic-body-id="predator" />
       <DynamicBody dynamic-body-id="prey" />
-      <!-- <DynamicBody dynamic-body-id="space" /> -->
-    </Simulator>
+      <DynamicBody dynamic-body-id="wall_north" />
+      <DynamicBody dynamic-body-id="wall_south" />
+      <DynamicBody dynamic-body-id="wall_east" />
+      <DynamicBody dynamic-body-id="wall_west" />
+      <DynamicBody dynamic-body-id="wall_up" />
+      <DynamicBody dynamic-body-id="wall_down" />
+      <ContactParameters object1-id="predator" object2-id="prey" restitution="0" mu-coulomb="0.0001" />
+      <ContactParameters object1-id="predator" object2-id="wall_north" restitution="0" mu-coulomb="0.0001" />
+      <ContactParameters object1-id="predator" object2-id="wall_south" restitution="0" mu-coulomb="0.0001" />
+      <ContactParameters object1-id="predator" object2-id="wall_east" restitution="0" mu-coulomb="0.0001" />
+      <ContactParameters object1-id="predator" object2-id="wall_west" restitution="0" mu-coulomb="0.0001" />
+      <ContactParameters object1-id="predator" object2-id="wall_up" restitution="0" mu-coulomb="0.0001" />
+      <ContactParameters object1-id="predator" object2-id="wall_down" restitution="0" mu-coulomb="0.0001" />
+      <ContactParameters object1-id="prey" object2-id="wall_north" restitution="0" mu-coulomb="0.0001" />
+      <ContactParameters object1-id="prey" object2-id="wall_south" restitution="0" mu-coulomb="0.0001" />
+      <ContactParameters object1-id="prey" object2-id="wall_east" restitution="0" mu-coulomb="0.0001" />
+      <ContactParameters object1-id="prey" object2-id="wall_west" restitution="0" mu-coulomb="0.0001" />
+      <ContactParameters object1-id="prey" object2-id="wall_up" restitution="0" mu-coulomb="0.0001" />
+      <ContactParameters object1-id="prey" object2-id="wall_down" restitution="0" mu-coulomb="0.0001" />
+    </EventDrivenSimulator>
 
-    <RigidBody id="predator" enabled="true" position="0" global-position="5 0 0" linear-velocity="0 0 0" angular-velocity="0 0 0" visualization-id="ship_box"/>
-      <InertiaFromPrimitive primitive-id="ship_box" />
-      <CollisionGeometry primitive-id="ship_box" />
-    </RigidBody>
-
-    <RigidBody id="prey" enabled="true" position="0" global-position="-5 0 0" linear-velocity="0 0 0" angular-velocity="0 0 0" visualization-id="ship_box"/>
-      <InertiaFromPrimitive primitive-id="ship_box" />
-      <CollisionGeometry primitive-id="ship_box" />
-    </RigidBody>
-    <RigidBody id="space" enabled="true" position="0" global-position="0 0 0" linear-velocity="0 0 0" angular-velocity="0 0 0" visualization-id="space_box"/>
-      <InertiaFromPrimitive primitive-id="space_box" />
-      <CollisionGeometry primitive-id="space_box" />
-    </RigidBody>
   </MOBY>
 </XML>
 

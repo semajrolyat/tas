@@ -20,9 +20,15 @@ int main( int argc, char* argv[] ) {
 
   controller_c controller(argv);
   int cycle = 0;
-  controller_notification_c notification;
-  timestamp_t ts;
+  notification_c notification;
+  simtime_t simtime;
+  int write_channel;
+
+  // NOTE: this is now a parameter of the arguments.  pulled from serialization
   const double INTERVAL = 1.0 / (double) CONTROLLER_HZ;
+
+  // NOTE: Subject to parameters.  Will not necessarily initialize at zero.
+  simtime.seconds = 0.0;  
 
   // Note: if init fails, the controller bombs out.  Will write a message to
   // console and/or error_log if this happens.
@@ -31,42 +37,37 @@ int main( int argc, char* argv[] ) {
   // query and publish initial values
   controller.activate( controller.simtime );
 
-  notification.type = CONTROLLER_NOTIFICATION_SNOOZE;
-  notification.duration = INTERVAL;
+  // determine what actor am servicing and what channel to write on
+  if( controller.self->PLAYER_TYPE == ship_c::PREDATOR ) {
+    write_channel = FD_PREDATOR_TO_COORDINATOR_WRITE_CHANNEL;
+  } else {
+    write_channel = FD_PREY_TO_COORDINATOR_WRITE_CHANNEL;
+  }
+
+  // build an idle notification.  Will be reused each cycle.
+  notification.type = NOTIFICATION_IDLE;
 
   // lock into memory to prevent pagefaults
   mlockall( MCL_CURRENT );
 
   // get the current timestamp
-  ts = generate_timestamp( );
-  //rdtscll( ts.cycle );
+  notification.ts = generate_timestamp( );
 
   // start the main process loop
   while( 1 ) {
 
-    notification.ts = ts;
-
-    int write_channel;
-    if( controller.self->PLAYER_TYPE == ship_c::PREDATOR ) {
-      write_channel = FD_PREDATOR_TO_COORDINATOR_WRITE_CHANNEL;
-    } else {
-      write_channel = FD_PREY_TO_COORDINATOR_WRITE_CHANNEL;
-    }
-
-    // send a snooze notification
-    if( write( write_channel, &notification, sizeof( controller_notification_c ) ) == -1 ) {
+    // send an idle notification
+    if( write( write_channel, &notification, sizeof( notification_c ) ) == -1 ){
         // failed to write, should record in error log?
     }
 
-    //READ? to get the controller to block and to ensure it doesn't overrun?  Ideally, the write event
-    // causes the coordinator to wake and interrupt this process so there shouldn't be overrun.
+    // awoken here and now, so get a new timestamp
+    notification.ts = generate_timestamp( );
 
-    // unsnoozed here, so get a new timestamp
-    ts = generate_timestamp( );
-    //rdtscll( ts.cycle );
     // Note: may have some long term drift due to fp math
     controller.simtime.seconds += INTERVAL;
 
+    // run the specialty code for this user process 
     controller.activate( controller.simtime );
 
     cycle++;

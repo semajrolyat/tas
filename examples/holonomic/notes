@@ -1,0 +1,86 @@
+initialize coordinator
+*General
+-open error logging
+*Coordinator General Overhead
+-restrict to cpu
+-set realtime scheduling (priority=0)
+-verify hi-res timer support
+-get cpu frequency
+*IPC
+-open buffer
+-open pipes
+*Dynamics
+-call dynamics initialization
+-read configuration from dynamics
+-serialize configuration (space, prey, predator)
+*Threads/User Processes
+-create prey controller thread (priority=1, args=[space,prey,predator])
+-create predator controller thread (priority=1, args=[space,prey,predator])
+-create planner thread (priority=1, args=[space,prey,predator])
+*Additional Logs
+*Coordinator Monitor Facilities
+-create wakeup thread (priority=2)
+-create periodic timer
+
+=============================================================================== 
+
+main
+-initialize coordinator
+-*all threads are uninitialized and blocked due to priority.
+-schedule dynamics (enqueue in runqueue)
+-arm/unblock timer
+
+-begin loop
+
+--block (implicit) coordinator [on select]
+
+---on timer notification [pipe read]
+----if all threads initialized
+-----if active thread (non initial case)
+------increment quantums passed
+------if active thread's budget equal to quantums passed
+-------if active thread not dynamics
+--------explicitly block active thread
+-------reschedule thread (enqueue in runqueue)
+-------dequeue next runqueue thread as active thread
+-------zero out quantums passed
+-------active thread.execute()
+--------(if dynamics) *via overload of thread.execute()
+---------call dynamics.step( dt )
+---------*executes on coordinator's call stack so process remains here
+--------(else) *via base class thread.execute()
+---------explicitly unblock active thread
+---------*separate processes so fall through to select->implicit block
+-----else
+------dequeue next runqueue thread as active thread
+------zero out quantums passed
+------active thread.execute()
+-------(if dynamics) *via overload of thread.execute()
+--------call dynamics.step( dt )
+--------*executes on coordinator's call stack so process remains here
+-------(else) *via base class thread.execute()
+--------explicitly unblock active thread
+--------*separate processes so fall through to select->implicit block
+
+---on thread notification [pipe read] (prey|predator|planner)
+----if thread initialized
+-----if notification state request or command reply
+------service thread request
+-----else if notification idle
+------explicitly block active thread
+------reschedule thread (enqueue in runqueue)
+------dequeue next runqueue thread as active thread
+------zero out quantums passed
+------active thread.execute()
+------*note can only be user process.  dynamics can never get here.
+----else
+-----service initial request/command
+-----*note somewhat an artifact in that the initial state is now known by 
+-----*serial parameter passing but an initial command will still be generated.
+-----flag thread as initialized
+-----schedule thread (enqueue in runqueue)
+
+---on wakeup notification [pipe read]
+---*ignore until all threads initialize
+---*still needs more attention to for correct time accounting
+-end loop
