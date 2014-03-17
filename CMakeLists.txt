@@ -77,4 +77,4 @@ add_subdirectory( examples )
 
 add_subdirectory( ode )
 
-add_subdirectory( gazebo )
+#add_subdirectory( gazebo )
