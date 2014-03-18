@@ -87,3 +87,4 @@ include_directories( ${PURSUIT_INCLUDE_DIRS} )
 add_executable( pursuit-coordinator ${CMAKE_CURRENT_SOURCE_DIR}/coordinator.cpp ${PURSUIT_HEADERS} ${PURSUIT_SOURCES} )
 target_link_libraries( pursuit-coordinator ${PURSUIT_LIBRARIES} )
 
+add_subdirectory( test )

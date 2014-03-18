@@ -63,4 +63,14 @@ realtime_t timespec_to_realtime( const struct timespec& ts ) {
 }
 
 //-----------------------------------------------------------------------------
+/// Conversion from unsigned long long (nanoseconds) to POSIX timespec.
+/// @param nsec whole nanoseconds
+/// @return a POSIX timespec structure
+struct timespec nanoseconds_to_timespec( const unsigned long long& nsec ) {
+  struct timespec ts;
+  ts.tv_sec = (time_t)(nsec / (unsigned long long)NSECS_PER_SEC);
+  ts.tv_nsec = (long)(nsec % (unsigned long long)NSECS_PER_SEC);
+  return ts;
+}
 
+//-----------------------------------------------------------------------------

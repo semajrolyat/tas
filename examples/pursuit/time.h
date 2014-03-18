@@ -48,6 +48,8 @@ realtime_t timestamp_to_realtime( const timestamp_t& ts, const cpu_speed_t& cpu_
 double timespec_to_real( const struct timespec& ts ); 
 
 realtime_t timespec_to_realtime( const struct timespec& ts );
+
+struct timespec nanoseconds_to_timespec( const unsigned long long& nsec );
  
 //-----------------------------------------------------------------------------
 

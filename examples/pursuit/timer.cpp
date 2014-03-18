@@ -1,6 +1,9 @@
 #include "timer.h"
 
-#include <time.h>
+#include "time.h"  // API time
+#include <time.h>  // POSIX time
+
+//#include <stdio.h>
 
 //-----------------------------------------------------------------------------
 /// Default contructor.
@@ -68,23 +71,56 @@ timer_c::error_e timer_c::create( sighandler_f sighandler, int signum ) {
 }
 
 //-----------------------------------------------------------------------------
-/// Arms the realtime timer.
-/// @param ts_req the requested time for the timer to fire.
-/// @param ts_arm a timestamp that is generated when the timer is armed.
+/// Arms a realtime timer.
+/// @param type defines whether to arm as a one-shot or periodic timer.
 /// @param period_nsec the period in nanoseconds that the timer is requested
 /// to have.
+/// @param ts_req the requested time for the timer to arm.
+/// @param ts_arm a timestamp that is generated when the timer is armed.
 /// @param cpu_hz the speed of the processor.
 /// @return indicator of operation success or specified error.
-timer_c::error_e timer_c::arm( const timestamp_t& ts_req, timestamp_t& ts_arm, const unsigned long long& period_nsec, const cpu_speed_t& cpu_hz ) {
+#include <stdio.h>
+timer_c::error_e timer_c::arm( const type_e& type, const unsigned long long& period_nsec ) {
+  struct itimerspec its;
+
+  struct timespec tspec = nanoseconds_to_timespec( period_nsec );
+
+  if( type == ONESHOT ) {
+    its.it_interval.tv_sec = 0;
+    its.it_interval.tv_nsec = 0;
+    its.it_value.tv_sec = tspec.tv_sec;
+    its.it_value.tv_nsec = tspec.tv_nsec;
+  } else if( type == PERIODIC ) {
+    its.it_interval.tv_sec = tspec.tv_sec;
+    its.it_interval.tv_nsec = tspec.tv_nsec;
+    its.it_value.tv_sec = tspec.tv_sec;
+    its.it_value.tv_nsec = tspec.tv_nsec;
+  }
+
+  if( timer_settime( _rttimer_id, 0, &its, NULL ) == -1 ) 
+    return ERROR_SETTIME;
+
+  return ERROR_NONE;
+}
+
+//-----------------------------------------------------------------------------
+/// Arms the realtime timer using error correction.  This code was inherited 
+/// from initial pendulum experiment.  Retesting has demonstrated that as it
+/// is here, its performance is circumspec and needs deeper evaluation.  So
+/// while this text is here, use at own risk.
+/// @param type defines whether to arm as a one-shot or periodic timer.
+/// @param period_nsec the period in nanoseconds that the timer is requested
+/// to have.
+/// @param ts_req the requested time for the timer to arm.
+/// @param ts_arm a timestamp that is generated when the timer is armed.
+/// @param cpu_hz the speed of the processor.
+/// @return indicator of operation success or specified error.
+timer_c::error_e timer_c::arm( const type_e& type, const unsigned long long& period_nsec, const timestamp_t& ts_req, timestamp_t& ts_arm, const cpu_speed_t& cpu_hz ) {
   struct itimerspec its;
   timestamp_t ts_now;
 
-  // sanity check.  Not supporting controllers that run at 1 Hz or slower or faster than 1ns.
-  //assert( CONTROLLER_HZ > 1 && CONTROLLER_HZ <= NSECS_PER_SEC );
-
   unsigned long long ts_err = 0;
   unsigned long long ns_err = 0;
-
   unsigned long long period = period_nsec;
 
   ts_now = generate_timestamp();
@@ -101,11 +137,20 @@ timer_c::error_e timer_c::arm( const timestamp_t& ts_req, timestamp_t& ts_arm, c
     period += agg_error;
   }
 
-  its.it_interval.tv_sec = 0;
-  its.it_interval.tv_nsec = 0;
-  its.it_value.tv_sec = 0;
+  struct timespec tspec = nanoseconds_to_timespec( period );
+  //printf( "period[%llu]: secs[%d], nsecs[%d]\n", period, tspec.tv_sec, tspec.tv_nsec );
 
-  its.it_value.tv_nsec = (unsigned long long)(period);
+  if( type == ONESHOT ) {
+    its.it_interval.tv_sec = 0;
+    its.it_interval.tv_nsec = 0;
+    its.it_value.tv_sec = tspec.tv_sec;
+    its.it_value.tv_nsec = tspec.tv_nsec;
+  } else if( type == PERIODIC ) {
+    its.it_interval.tv_sec = tspec.tv_sec;
+    its.it_interval.tv_nsec = tspec.tv_nsec;
+    its.it_value.tv_sec = tspec.tv_sec;
+    its.it_value.tv_nsec = tspec.tv_nsec;
+  }
 
   ts_arm = ts_req;
   ts_prev_arm = ts_now;

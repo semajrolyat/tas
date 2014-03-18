@@ -41,7 +41,7 @@
 #define FD_PREDCONTROLLER_TO_COORDINATOR_WRITE_CHANNEL  1021
 
 //-----------------------------------------------------------------------------
-static               pid_t coordinator_pid;
+static pid_t         coordinator_pid;
 static int           coordinator_priority;
 static cpu_speed_t   cpu_speed;
 static cpu_id_t      cpu;
@@ -139,7 +139,7 @@ void timer_sighandler( int signum, siginfo_t *si, void *data ) {
   note.source = notification_t::TIMER;
 
   if( __write( fd, &note, sizeof(notification_t) ) == -1 ) {
-    err = "(coordinator.cpp) rttimer_sighandler(...) failed making system call write(...)";
+    err = "(coordinator.cpp) timer_sighandler(...) failed making system call write(...)";
     //error_log.write( error_string_bad_write( err, errno ) );
     // TODO : determine if there is a need to recover
   }
@@ -433,7 +433,7 @@ void init( int argc, char* argv[] ) {
 
   // * get the cpu speed *
   if( cpu_c::get_speed( cpu_speed, cpu ) != cpu_c::ERROR_NONE ) {
-    sprintf( errstr, "(coordinator.cpp) init() failed calling cpu_c::get_frequency(cpu_speed_hz,cpu)\nExiting\n" );
+    sprintf( errstr, "(coordinator.cpp) init() failed calling cpu_c::get_frequency(cpu_speed,cpu)\nExiting\n" );
     //error_log.write( errstr );
     printf( "%s", errstr );
 
@@ -537,6 +537,7 @@ void init( int argc, char* argv[] ) {
   mlockall( MCL_CURRENT );
 } 
 
+//-----------------------------------------------------------------------------
 void shutdown( void ) {
   // unlock memory.  do before any other shutdown operations
   munlockall();
@@ -565,5 +566,8 @@ int main( int argc, char* argv[] ) {
     scheduler_c::step_system( processor_thread, processor->runqueue, processor->waitqueue );
     sleep( 1 ); // temporary sleep for testing.  Induces block, otherwise realtime schedule max will suck up the entire processor if there is no blocking mechanism
   }
+
+  shutdown();
+  return 0;
 }
 

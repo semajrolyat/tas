@@ -48,6 +48,11 @@ public:
     ERROR_GETCLOCKID         ///< A failure to get the clock id.
   };
 
+  enum type_e {
+    ONESHOT,
+    PERIODIC
+  };
+
   timer_c( void );
   virtual ~timer_c( void ); 
 
@@ -55,7 +60,8 @@ public:
   error_e unblock( void );
 
   error_e create( sighandler_f sighandler, int signum );
-  error_e arm( const timestamp_t& ts_req, timestamp_t& ts_arm, const unsigned long long& period_nsec, const cpu_speed_t& cpu_hz );
+  error_e arm( const type_e& type, const unsigned long long& period_nsec );
+  error_e arm( const type_e& type, const unsigned long long& period_nsec, const timestamp_t& ts_req, timestamp_t& ts_arm, const cpu_speed_t& cpu_hz );
 
 };
 
