@@ -2,7 +2,9 @@
 #define _TIMESINK_H_
 
 #include "thread.h"
+#include "thread_heap.h"
 #include "scheduler.h"
+#include "log.h"
 
 //#include <queue>
 //#include <boost/shared_ptr.hpp>
@@ -22,9 +24,11 @@ public:
 
   thread_p current_thread;
   scheduler_c::policy_e policy;
-  std::vector<thread_p> runqueue;    // heap
-  std::vector<thread_p> waitqueue;   // heap
+  
+  thread_heap_c run_queue;
+  thread_heap_c block_queue;
 
+  log_c* log;
 }; 
 
 #endif // _TIMESINK_H_

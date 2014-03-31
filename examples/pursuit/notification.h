@@ -26,7 +26,9 @@ struct notification_t {
   realtime_t t;
   source_e source;
   type_e type;
-  realtime_t blocktill;
+  //realtime_t blocktill;
+  timestamp_t blocktill;
+  pid_t pid;
 };
 
 //-----------------------------------------------------------------------------

@@ -31,26 +31,31 @@ set( PURSUIT_HEADERS
   #${TAS_HEADERS}
   ${CMAKE_CURRENT_SOURCE_DIR}/types.h
   ${CMAKE_CURRENT_SOURCE_DIR}/os.h
+  ${CMAKE_CURRENT_SOURCE_DIR}/log.h
   ${CMAKE_CURRENT_SOURCE_DIR}/cpu.h
   ${CMAKE_CURRENT_SOURCE_DIR}/time.h
   ${CMAKE_CURRENT_SOURCE_DIR}/timer.h
   ${CMAKE_CURRENT_SOURCE_DIR}/notification.h
   ${CMAKE_CURRENT_SOURCE_DIR}/message.h
   ${CMAKE_CURRENT_SOURCE_DIR}/thread.h
+  ${CMAKE_CURRENT_SOURCE_DIR}/thread_heap.h
   ${CMAKE_CURRENT_SOURCE_DIR}/scheduler.h
   ${CMAKE_CURRENT_SOURCE_DIR}/timesink.h
   ${CMAKE_CURRENT_SOURCE_DIR}/processor.h
   ${CMAKE_CURRENT_SOURCE_DIR}/osthread.h
   ${CMAKE_CURRENT_SOURCE_DIR}/dynamics.h
+  ${CMAKE_CURRENT_SOURCE_DIR}/channels.h  # needs generalization for API
 )
 
 set( PURSUIT_SOURCES
   #${TAS_SOURCES} 
   ${CMAKE_CURRENT_SOURCE_DIR}/os.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/log.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/cpu.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/time.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/timer.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/message.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/thread_heap.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/scheduler.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/timesink.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/processor.cpp

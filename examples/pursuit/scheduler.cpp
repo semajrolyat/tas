@@ -3,9 +3,12 @@
 #include <sys/types.h>
 #include <signal.h>
 #include <errno.h>
+#include <unistd.h>
 
 #include "thread.h"
+#include "osthread.h"
 #include "notification.h"
+#include "log.h"
 
 #include <stdio.h>             // remove after all debugging printf's removed
 
@@ -13,14 +16,12 @@
 /// API function to activate a thread waiting to run.
 /// @param runqueue the heap of threads ready to run for a given timesink.
 /// @return the current thread at the top of the heap.
-thread_p scheduler_c::schedule( std::vector<thread_p>& runqueue ) {
+thread_p scheduler_c::schedule( thread_heap_c& runqueue ) {
   thread_p thread;
 
-  if( !runqueue.empty() ) {
-    std::pop_heap( runqueue.begin(), runqueue.end() );
-    thread = runqueue.back();
-    runqueue.pop_back();
-  }
+  if( !runqueue.empty() )
+    thread_heap_c::error_e err = runqueue.pop( thread );
+
   return thread;
 }
 
@@ -29,8 +30,7 @@ thread_p scheduler_c::schedule( std::vector<thread_p>& runqueue ) {
 /// @param thread the current thread.
 /// @param runqueue the heap of threads ready to run for a given timesink.
 /// @param waitqueue the heap of threads pending on I/O for a given timesink.
-// TODO: change nomenclature from message to notification
-void scheduler_c::process_notifications( thread_p& thread, std::vector<thread_p>& runqueue, std::vector<thread_p>& waitqueue ) {
+void scheduler_c::process_notifications( thread_p& thread, thread_heap_c& runqueue, thread_heap_c& waitqueue, log_c* log ) {
 
   // assert that the thread is valid and that the message queue is not empty
   if( !thread || thread->message_queue.empty() ) return;
@@ -39,26 +39,30 @@ void scheduler_c::process_notifications( thread_p& thread, std::vector<thread_p>
   notification_t msg = thread->message_queue.front();
   thread->message_queue.pop();
 
+  printf( "process_notifications for %s\n", thread->name.c_str() );
+
   if( msg.type == notification_t::IDLE && msg.blocktill > thread->progress ) {
+    printf( "handling idle notification for %s\n", thread->name.c_str() );
+
     // find the thread in the runqueue and remove it.
-    for( std::vector<thread_p>::iterator it = runqueue.begin(); it != runqueue.end(); it++ ) {
-      thread_p thd = *it;
-      if( thd == thread ) {
-        runqueue.erase( it );
-        // reheapify
-        std::sort_heap( runqueue.begin(), runqueue.end() );
-        break;
-      }
+    for( unsigned i = 0; i < runqueue.size(); i++ ) {
+      thread_p thd = runqueue.element(i);
+
+      // if not the searched for thread continue searching
+      if( thd != thread ) continue;
+
+      // otherwise remove and stop searching
+      runqueue.remove( i, thd );
+      break;
     }
     // to be comprehensive, might be inclined to check waitqueue,
     // but logically, it cannot be in the waitqueue if it was running
 
-    // update its progress (forcasting in this way will account for 'idle time')
+    // update its progress (forecasting in this way will account for 'idle time')
     thread->progress = msg.blocktill;
 
     // add to the waitqueue
-    waitqueue.push_back( thread );
-    std::push_heap( waitqueue.begin(), waitqueue.end() );
+    waitqueue.push( thread );
   }
   // TODO - Logic for sending message to other threads if need be
 }
@@ -68,27 +72,30 @@ void scheduler_c::process_notifications( thread_p& thread, std::vector<thread_p>
 /// waiting to running.
 /// @param runqueue the heap of threads ready to run for a given timesink.
 /// @param waitqueue the heap of threads pending on I/O for a given timesink.
-void scheduler_c::process_wakeups( std::vector<thread_p>& runqueue, std::vector<thread_p>& waitqueue ) {
+void scheduler_c::process_wakeups( thread_heap_c& runqueue, thread_heap_c& waitqueue, log_c* log ) {
 
-  // get the highest progress of the runqueue
-  realtime_t time = runqueue.front()->progress;
+  if( runqueue.empty() ) {
+    // if the runqueue is empty then the lowest progress thread in the waitqueue
+    // should be awoken.
+    // Note/TODO: This probably is not sufficient at all levels of the API.
+    // The problem is items in the waitqueue may be blocking on I/O 
+  } else {
+    // get the highest progress of the runqueue
+    thread_p thd;
+    // TODO: check runqueue err
+    runqueue.top( thd );
+    timestamp_t time = thd->progress;
 
-  // iterate over each of the threads in the waitqueue
-  for( std::vector<thread_p>::iterator it = waitqueue.begin(); it != waitqueue.end(); it++ ) {
-    thread_p thread = *it;
+    // iterate over each of the threads in the waitqueue
+    for( unsigned i = 0; i < waitqueue.size(); i++ ) {
+    
+      // if the thread progress is greater than the time, ignore it
+      if( waitqueue.element( i )->progress > time ) continue;
 
-    // if the thread's 'progress' is less than or equal to the highest progress
-    if( thread->progress <= time ) {
-
-      // remove the thread from the waitqueue
-      waitqueue.erase( it );
-
-      // reheapify the waitqueue
-      std::sort_heap( waitqueue.begin(), waitqueue.end() );
-
-      // push the thread onto the runqueue heap
-      runqueue.push_back( thread );
-      std::push_heap( runqueue.begin(), runqueue.end() );
+      // otherwise move it from the waitqueue to the runqueue
+      thread_p thread;
+      waitqueue.remove( i, thread );
+      runqueue.push( thread );
     }
   }
 }
@@ -98,7 +105,7 @@ void scheduler_c::process_wakeups( std::vector<thread_p>& runqueue, std::vector<
 /// @param current_thread the active thread for a given timesink.
 /// @param runqueue the heap of threads ready to run for a given timesink.
 /// @param waitqueue the heap of threads pending on I/O for a given timesink.
-void scheduler_c::step_system( thread_p& current_thread, std::vector<thread_p>& runqueue, std::vector<thread_p>& waitqueue ) {
+void scheduler_c::step_system( thread_p& current_thread, thread_heap_c& runqueue, thread_heap_c& waitqueue, log_c* log ) {
   // schedule the next thread
   thread_p next_thread = schedule( runqueue );
 
@@ -107,26 +114,27 @@ void scheduler_c::step_system( thread_p& current_thread, std::vector<thread_p>& 
     printf( "next_thread:%s\n", next_thread->name.c_str() );
 
     next_thread->dispatch( current_thread );
-  
+ 
     // process any messages delivered to the current (next) thread
-    process_notifications( current_thread, runqueue, waitqueue );
+    process_notifications( current_thread, runqueue, waitqueue, log );
   }
 
   // process the waitqueue to see if any thread needs to be moved to runqueue
-  process_wakeups( runqueue, waitqueue );
+
+  process_wakeups( runqueue, waitqueue, log );
 }
 
 //-----------------------------------------------------------------------------
 /// Forks the main process and executes the specified program in the newly
 /// spawned child process after binding it to a cpu and scheduling it with a 
 /// realtime policy.
-/// @param pid the process identifier assigned to the newly forked process
-/// @param priority_offset the offset from max priority to assign the process
-/// @param processor the processor to bind the process to
-/// @param program the name of the program to execute
-/// @param args the argument list to pass to the program
+/// @param pid the process identifier assigned to the newly forked process.
+/// @param priority_offset the offset from max priority to assign the process.
+/// @param processor the processor to bind the process to.
+/// @param program the name of the program to execute.
+/// @param as the name to give to the program.
 /// @return indicator of operation success or specified error.
-scheduler_c::error_e scheduler_c::create( pid_t& pid, const int& priority_offset, const cpu_id_t& cpu, const std::string& program, const std::string& args ) {
+scheduler_c::error_e scheduler_c::create( pid_t& pid, const int& priority_offset, const cpu_id_t& cpu, const std::string& program, const std::string& as ) {
 // TODO: adjust sig to use the args as we will use
 // TODO: per discussion, any args should be written to a file or stdin then
 //       passed into the new processes either by filename or dup stdin fd
@@ -148,16 +156,75 @@ scheduler_c::error_e scheduler_c::create( pid_t& pid, const int& priority_offset
   pid = getpid();
 
   // bind the child to the cpu  
-  if( cpu_c::bind( pid, cpu ) != ERROR_NONE )
+  if( cpu_c::bind( pid, cpu ) != cpu_c::ERROR_NONE )
     _exit( 1 );     // kill the child process
 
   // set the scheduling policy and priority
-  if( set_realtime_policy( pid, priority, priority_offset ) != ERROR_NONE )
+  if( set_realtime_policy( pid, priority, priority_offset ) != scheduler_c::ERROR_NONE )
     _exit( 1 );     // kill the child process
 
   // TODO: adjust the args execute the external program using either
   // execve( program.c_str(), ?, ? );
-  // exec( program.c_str(), program.c_str(), NULL );
+  execl( program.c_str(), as.c_str(), NULL );
+
+  // kill the child process
+  _exit( 1 );
+
+  // just a formality to eliminate the compiler warning
+  return ERROR_NONE;
+}
+
+//-----------------------------------------------------------------------------
+/// Forks the main process and executes the specified program in the newly
+/// spawned child process after binding it to a cpu and scheduling it with a 
+/// realtime policy.
+/// @param osthread osthread to assign to the newly forked process.
+/// @param priority_offset the offset from max priority to assign the process.
+/// @param processor the processor to bind the process to.
+/// @param program the name of the program to execute.
+/// @param as the name to give to the program.
+/// @param arg1 argument 1 supplied to client process.
+/// @param arg2 argument 2 supplied to client process.
+/// @param arg3 argument 3 supplied to client process.
+/// @return indicator of operation success or specified error.
+scheduler_c::error_e scheduler_c::create( const osthread_p& thread, const int& priority_offset, const cpu_id_t& cpu, const std::string& program, const std::string& as, const char* arg1, const char* arg2, const char* arg3 ) {
+// TODO: adjust sig to use the args as we will use
+// TODO: per discussion, any args should be written to a file or stdin then
+//       passed into the new processes either by filename or dup stdin fd
+
+  int priority;
+  error_e err;
+
+  // fork the process
+  thread->pid = fork();
+
+  // handle any fork error
+  if( thread->pid < 0 ) 
+    return ERROR_CREATE;
+
+  // if still inside the parent process, get out
+  if( thread->pid > 0 ) {
+    // but first get the expected priority for the osthread, Note:NOT GUARANTEED
+    err = get_realtime_relative_priority(thread->_os_priority, priority_offset);
+    if( err != ERROR_NONE ) 
+      return err;  // a little superfluous but if new ops added, add above below
+    return ERROR_NONE;
+  }
+
+  // child process
+  pid_t pid = getpid();
+
+  // bind the child to the cpu  
+  if( cpu_c::bind( pid, cpu ) != cpu_c::ERROR_NONE )
+    _exit( 1 );     // kill the child process
+
+  // set the scheduling policy and priority
+  if( set_realtime_policy( pid, priority, priority_offset ) != scheduler_c::ERROR_NONE )
+    _exit( 1 );     // kill the child process
+
+  // TODO: adjust the args execute the external program using either
+  // execve( program.c_str(), ?, ? );
+  execl( program.c_str(), as.c_str(), arg1, arg2, arg3, NULL );
 
   // kill the child process
   _exit( 1 );
@@ -289,9 +356,14 @@ scheduler_c::error_e scheduler_c::set_realtime_policy( const pid_t& pid, int& pr
 
   struct sched_param param;
   int max_priority, expected_priority;
+  error_e result;
+
+  // validate the priority offset
+  result = validate_realtime_priority_offset( offset );
+  if( result != ERROR_NONE ) return result;
 
   // get the maximum priority allowed by the scheduler
-  error_e result = get_realtime_max_priority( max_priority );
+  result = get_realtime_max_priority( max_priority );
   if( result != ERROR_NONE )
     return result;
 
@@ -370,6 +442,58 @@ scheduler_c::error_e scheduler_c::get_realtime_max_priority( int& priority ) {
 }
 
 //-----------------------------------------------------------------------------
+/// Gets the maximum system schedule realtime priority for a process.
+/// @param priority the maximum system priority.
+/// @return indicator of operation success or specified error.
+scheduler_c::error_e scheduler_c::get_realtime_relative_priority( int& priority, const int& offset ) {
+
+  int max_priority;
+  error_e result;
+
+  // validate the priority offset
+  result = validate_realtime_priority_offset( offset );
+  if( result != ERROR_NONE ) return result;
+
+  // get the max and if that errored, return that error
+  result = get_realtime_max_priority( max_priority );
+  if( result != ERROR_NONE ) return result;
+
+  // compute the priority
+  priority = max_priority - offset;
+
+  // success
+  return ERROR_NONE;
+}
+
+//-----------------------------------------------------------------------------
+/// A sanity check to validate whether an offset parameter exceeds the 
+/// acceptable range of priority values for using a realtime schedule.
+/// @param offset the priority offset to validate.
+/// @return indicator of operation success or specified error.
+scheduler_c::error_e scheduler_c::validate_realtime_priority_offset( const int& offset ) {
+
+  int max_priority, min_priority, max_offset;
+  error_e result;
+
+  // get the max and if that errored, return that error
+  result = get_realtime_max_priority( max_priority );
+  if( result != ERROR_NONE ) return result;
+
+  // get the min and if that errored, return that error
+  result = get_realtime_min_priority( min_priority );
+  if( result != ERROR_NONE ) return result;
+
+  // compute the max offset
+  max_offset = max_priority - min_priority;
+
+  // if the offset greater than max offset, return invalid
+  if( offset > max_offset ) return ERROR_PRIORITY_VALIDATE;
+
+  // success
+  return ERROR_NONE;
+}
+
+//-----------------------------------------------------------------------------
 /// Gets the system schedule priority for a process.
 /// @param pid a process identifier.
 /// @param priority the priority that is currently assigned to the process.
@@ -437,8 +561,9 @@ scheduler_c::error_e scheduler_c::decrease_realtime_priority( const pid_t& pid, 
   int target_priority;
   error_e result;
 
-  // SANITY CHECK that a negative number didn't creep in
-  assert( offset > 0 );
+  // validate the priority offset
+  result = validate_realtime_priority_offset( offset );
+  if( result != ERROR_NONE ) return result;
 
   // get the minimum priority allowed by the scheduler
   result = get_realtime_min_priority( min_allowed );
@@ -494,8 +619,9 @@ scheduler_c::error_e scheduler_c::increase_realtime_priority( const pid_t& pid, 
   int target_priority;
   error_e result;
 
-  // SANITY CHECK that a negative number didn't creep in
-  assert( offset > 0 );
+  // validate the priority offset
+  result = validate_realtime_priority_offset( offset );
+  if( result != ERROR_NONE ) return result;
 
   // get the maximum priority allowed by the scheduler
   result = get_realtime_max_priority( max_allowed );
@@ -570,6 +696,21 @@ scheduler_c::error_e scheduler_c::create( pthread_t& thread, const int& priority
   // clean up attributes
   if( pthread_attr_destroy( &atts ) != 0 )
     return ERROR_GENERAL; 
+
+  // query the pthread's priority and policy
+  int policy;
+  if( pthread_getschedparam( thread, &policy, &param ) != 0 )
+    return ERROR_PARAM_QUERY;
+
+  // validate the policy
+  if( policy != SCHED_RR )
+    return ERROR_POLICY;
+
+  // validate the priority
+  if( param.sched_priority != priority )
+    return ERROR_PRIORITY_VALIDATE;
+
+  //priority = param.sched_priority;
 
   return ERROR_NONE;
 }
@@ -716,12 +857,13 @@ scheduler_c::error_e scheduler_c::increase_realtime_priority( const pthread_t& t
   struct sched_param param;
   int max_allowed;
   int target_priority;
-  error_e result;
   int presult;
   int policy;
+  error_e result;
 
-  // SANITY CHECK that a negative number didn't creep in
-  assert( offset > 0 );
+  // validate the priority offset
+  result = validate_realtime_priority_offset( offset );
+  if( result != ERROR_NONE ) return result;
 
   // get the maximum priority allowed by the scheduler
   result = get_realtime_max_priority( max_allowed );

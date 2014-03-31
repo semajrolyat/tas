@@ -6,6 +6,9 @@
 class thread_c;
 typedef boost::shared_ptr<thread_c> thread_p;
 
+class osthread_c;
+typedef boost::shared_ptr<osthread_c> osthread_p;
+
 class message_c;
 typedef boost::shared_ptr<message_c> message_p;
 

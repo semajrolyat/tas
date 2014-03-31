@@ -82,7 +82,6 @@ timer_c::error_e timer_c::create( sighandler_f sighandler, int signum ) {
 #include <stdio.h>
 timer_c::error_e timer_c::arm( const type_e& type, const unsigned long long& period_nsec ) {
   struct itimerspec its;
-
   struct timespec tspec = nanoseconds_to_timespec( period_nsec );
 
   if( type == ONESHOT ) {
@@ -118,7 +117,6 @@ timer_c::error_e timer_c::arm( const type_e& type, const unsigned long long& per
 timer_c::error_e timer_c::arm( const type_e& type, const unsigned long long& period_nsec, const timestamp_t& ts_req, timestamp_t& ts_arm, const cpu_speed_t& cpu_hz ) {
   struct itimerspec its;
   timestamp_t ts_now;
-
   unsigned long long ts_err = 0;
   unsigned long long ns_err = 0;
   unsigned long long period = period_nsec;

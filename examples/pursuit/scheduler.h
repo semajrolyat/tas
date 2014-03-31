@@ -17,6 +17,8 @@ author: James Taylor : jrt@gwu.edu
 #include "types.h"
 #include "time.h"
 #include "cpu.h"
+#include "thread_heap.h"
+#include "log.h"
 
 //-----------------------------------------------------------------------------
 
@@ -56,16 +58,18 @@ public:
   };
 
   // API level scheduling
-  static thread_p schedule( std::vector<thread_p>& runqueue );
+  static thread_p schedule( thread_heap_c& runqueue );
 
-  static void process_notifications( thread_p& current_thread, std::vector<thread_p>& runqueue, std::vector<thread_p>& waitqueue );
+  static void process_notifications( thread_p& current_thread, thread_heap_c& runqueue, thread_heap_c& waitqueue, log_c* log );
 
-  static void process_wakeups( std::vector<thread_p>& runqueue, std::vector<thread_p>& waitqueue );
+  static void process_wakeups( thread_heap_c& runqueue, thread_heap_c& waitqueue, log_c* log );
 
-  static void step_system( thread_p& current_thread, std::vector<thread_p>& runqueue, std::vector<thread_p>& waitqueue );
+  static void step_system( thread_p& current_thread, thread_heap_c& runqueue, thread_heap_c& waitqueue, log_c* log );
 
   // POSIX level scheduling
-  static error_e create( pid_t& pid, const int& priority_offset, const cpu_id_t& cpu, const std::string& program, const std::string& args ); 
+  static error_e create( pid_t& pid, const int& priority_offset, const cpu_id_t& cpu, const std::string& program, const std::string& as ); 
+
+  static error_e create( const osthread_p& thread, const int& priority_offset, const cpu_id_t& cpu, const std::string& program, const std::string& as, const char* arg1, const char* arg2, const char* arg3 ); 
 
   static error_e suspend( const pid_t& pid );
 
@@ -80,6 +84,10 @@ public:
   static error_e get_realtime_min_priority( int& priority );
 
   static error_e get_realtime_max_priority( int& priority );
+
+  static error_e get_realtime_relative_priority( int& priority, const int& offset );
+
+  static error_e validate_realtime_priority_offset( const int& offset );
 
   static error_e get_priority( const pid_t& pid, int& priority );
 
