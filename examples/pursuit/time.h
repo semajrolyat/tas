@@ -23,8 +23,12 @@ author: James Taylor : jrt@gwu.edu
 //-----------------------------------------------------------------------------
 /// realtime type in seconds aliasing a system double.
 typedef double realtime_t;
-/// timestamp type in clock ticks aliasing rdtsc values dependent on cpu speed.
-typedef unsigned long long timestamp_t;
+
+/// cycle type in clock ticks aliasing rdtsc values dependent on cpu speed.
+typedef cpu_speed_t cycle_t;
+
+/// timestamp type in cycles.
+typedef cycle_t timestamp_t;
 
 //-----------------------------------------------------------------------------
 
@@ -39,9 +43,11 @@ timestamp_t generate_timestamp( void );
 // Conversion functions
 //-----------------------------------------------------------------------------
 
-double cycles_to_seconds( const unsigned long long& cycles, const cpu_speed_t& cpu_hz ); 
+unsigned long long seconds_to_cycles( const double& seconds, const cpu_speed_t& cpu_hz ); 
 
-unsigned long long cycles_to_nanoseconds( const unsigned long long& cycles, const cpu_speed_t& cpu_hz );
+double cycles_to_seconds( const cycle_t& cycles, const cpu_speed_t& cpu_hz ); 
+
+unsigned long long cycles_to_nanoseconds( const cycle_t& cycles, const cpu_speed_t& cpu_hz );
 
 realtime_t timestamp_to_realtime( const timestamp_t& ts, const cpu_speed_t& cpu_hz );
 

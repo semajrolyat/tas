@@ -10,14 +10,11 @@
 #include <assert.h>
 #include <stdio.h>
 
-#include "os.h"
-
 //-----------------------------------------------------------------------------
 client_message_buffer_c::client_message_buffer_c( void ) {
-  _initialized = false;
+  _defined = false;
   _create = false;
   _open = false;
-  _mutex = NULL;
   _buffer = NULL;
 }
 
@@ -26,10 +23,11 @@ client_message_buffer_c::client_message_buffer_c( const char* buffer_name, const
   assert( buffer_name != NULL && mutex_name != NULL );
 
   _buffer_name = buffer_name;
-  _mutex_name = mutex_name;
   _create = create;
   _open = false;
-  _initialized = true;
+  _defined = true;
+
+  _mutex = mutex_c( mutex_name, create );
 }
 
 //-----------------------------------------------------------------------------
@@ -38,71 +36,7 @@ client_message_buffer_c::~client_message_buffer_c( void ) {
 }
 
 //-----------------------------------------------------------------------------
-client_message_buffer_c::buffer_error_e client_message_buffer_c::init_mutex( void ) {
-  void* shm_mutex_addr;
-  pthread_mutexattr_t mutexattr;
-
-  if( _create )
-    _fd_mutex = shm_open( _mutex_name.c_str( ), O_CREAT | O_RDWR, S_IRUSR | S_IWUSR );
-  else
-    _fd_mutex = shm_open( _mutex_name.c_str( ), O_RDWR, S_IRUSR | S_IWUSR );
-
-  if( _fd_mutex == -1 ) {
-    perror( "shm_open()" );
-    return ERROR_OPENING;
-  }
-
-  if( ftruncate( _fd_mutex, sizeof(pthread_mutex_t) ) == -1 ) {
-    return ERROR_TRUNCATING;
-  }
-
-  shm_mutex_addr = mmap( NULL, sizeof(pthread_mutex_t), PROT_READ | PROT_WRITE, MAP_SHARED, _fd_mutex, 0 );
-
-  if( shm_mutex_addr == MAP_FAILED ) {
-    perror( "mmap()" );
-    __close( _fd_mutex );
-    return ERROR_MAPPING;
-  }
-
-  _mutex = static_cast<pthread_mutex_t*> ( shm_mutex_addr );
-  if( _create ) {
-    pthread_mutexattr_init( &mutexattr );
-    pthread_mutexattr_setpshared( &mutexattr, PTHREAD_PROCESS_SHARED );
-
-    if( pthread_mutex_init( _mutex, &mutexattr ) != 0 ) {
-      // what other handling should be done in response.  Close the fd?
-      return ERROR_MUTEX;
-    }
-    pthread_mutexattr_destroy( &mutexattr );
-
-    if( msync( shm_mutex_addr, sizeof(pthread_mutex_t), MS_SYNC | MS_INVALIDATE ) != 0 ) {
-      // what other handling should be done in response.  Close the fd, release the mutex?
-      perror( "msync()" );
-      return ERROR_SYNCING;
-    }
-  }
-  return ERROR_NONE;
-}
-
-//-----------------------------------------------------------------------------
-client_message_buffer_c::buffer_error_e client_message_buffer_c::delete_mutex( void ) {
-
-  __close( _fd_mutex );
-
-  if( _create ) {
-    if( munmap( (void*)_mutex, sizeof(pthread_mutex_t) ) ) {
-      perror( "munmap()" );
-      return ERROR_UNMAPPING;
-    }
-    if( shm_unlink( _mutex_name.c_str( ) ) != 0 ) {
-      return ERROR_UNLINKING;
-    }
-  }
-  return ERROR_NONE;
-}
-
-//-----------------------------------------------------------------------------
-client_message_buffer_c::buffer_error_e client_message_buffer_c::init_buffer( void ) {
+client_message_buffer_c::buffer_error_e client_message_buffer_c::init( void ) {
 
   void* shm_buffer_addr;
 
@@ -124,7 +58,6 @@ client_message_buffer_c::buffer_error_e client_message_buffer_c::init_buffer( vo
 
   if( shm_buffer_addr == MAP_FAILED ) {
     perror( "mmap()" );
-    __close( _fd_mutex );
     return ERROR_MAPPING;
   }
 
@@ -134,7 +67,7 @@ client_message_buffer_c::buffer_error_e client_message_buffer_c::init_buffer( vo
 }
 
 //-----------------------------------------------------------------------------
-client_message_buffer_c::buffer_error_e client_message_buffer_c::delete_buffer( void ) {
+client_message_buffer_c::buffer_error_e client_message_buffer_c::destroy( void ) {
   __close( _fd_buffer );
 
   if( _create ) {
@@ -153,17 +86,19 @@ client_message_buffer_c::buffer_error_e client_message_buffer_c::delete_buffer( 
 
 //-----------------------------------------------------------------------------
 client_message_buffer_c::buffer_error_e client_message_buffer_c::open( void ) {
-  assert( _initialized && !_open );
+  assert( _defined && !_open );
 
   buffer_error_e result;
-  result = init_mutex( );
-  if( result != ERROR_NONE ) {
+  mutex_c::error_e mutex_err;
+  mutex_err = _mutex.init( );
+  if( mutex_err != mutex_c::ERROR_NONE ) {
     // major problem.  No option but to bomb out.
-    return result;
+    return ERROR_MUTEX;
   }
-  result = init_buffer( );
+  result = init( );
   if( result != ERROR_NONE ) {
     // major problem.  No option but to bomb out.
+    _mutex.destroy();
     return result;
   }
 
@@ -174,8 +109,8 @@ client_message_buffer_c::buffer_error_e client_message_buffer_c::open( void ) {
 
 //-----------------------------------------------------------------------------
 void client_message_buffer_c::close( void ) {
-  delete_buffer( );
-  delete_mutex( );
+  destroy( );
+  _mutex.destroy();
 
   _open = false;
 
@@ -186,7 +121,7 @@ void client_message_buffer_c::close( void ) {
 client_message_buffer_c::buffer_error_e client_message_buffer_c::write( const client_message_t& m ) {
   assert( _open );
 
-  pthread_mutex_lock( _mutex );
+  _mutex.lock();
 
   memcpy( &_buffer->header, &m.header, sizeof(struct client_message_header_t) );
   memcpy( &_buffer->prey_state, &m.prey_state, sizeof(struct state_t) );
@@ -198,7 +133,7 @@ client_message_buffer_c::buffer_error_e client_message_buffer_c::write( const cl
     return ERROR_SYNCING;
   }
 
-  pthread_mutex_unlock( _mutex );
+  _mutex.unlock();
 
   return ERROR_NONE;
 }
@@ -207,14 +142,14 @@ client_message_buffer_c::buffer_error_e client_message_buffer_c::write( const cl
 client_message_buffer_c::buffer_error_e client_message_buffer_c::read( client_message_t& m ) {
   assert( _open );
 
-  pthread_mutex_lock( _mutex );
+  _mutex.lock();
 
   memcpy( &m.header, &_buffer->header, sizeof(struct client_message_header_t) );
   memcpy( &m.prey_state, &_buffer->prey_state, sizeof(struct state_t) );
   memcpy( &m.pred_state, &_buffer->pred_state, sizeof(struct state_t) );
   memcpy( &m.pred_control, &_buffer->pred_control, sizeof(struct control_t) );
 
-  pthread_mutex_unlock( _mutex );
+  _mutex.unlock();
 
   return ERROR_NONE;
 }

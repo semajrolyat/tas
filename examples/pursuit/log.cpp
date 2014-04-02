@@ -6,18 +6,19 @@
 
 //-----------------------------------------------------------------------------
 log_c::log_c( void ) {
-  _initialized = false;
+  _defined = false;
   _allocated = false;
   _dirty = false;
   _capacity = 0;
   _cursor = 0;
   _buffer = NULL;
   _firstwrite = true;
+  _create = false;
 }
 
 //-----------------------------------------------------------------------------
-log_c::log_c( const std::string& path ) {
-  _initialized = true;
+log_c::log_c( const std::string& path, const bool& create = false ) {
+  _defined = true;
   _allocated = false;
   _dirty = false;
   _capacity = 0;
@@ -25,6 +26,8 @@ log_c::log_c( const std::string& path ) {
   _buffer = NULL;
   _path = path;
   _firstwrite = true;
+
+  _create = create;
 }
 
 //-----------------------------------------------------------------------------
@@ -35,7 +38,7 @@ log_c::~log_c( void) {
 
 //-----------------------------------------------------------------------------
 log_c::error_e log_c::allocate( const int& bytes ) {
-  if( !_initialized ) return ERROR_NOINIT;
+  if( !_defined ) return ERROR_NOTDEFINED;
   if( _allocated ) return ERROR_REALLOC;
 
   _capacity = bytes;
@@ -51,7 +54,7 @@ log_c::error_e log_c::allocate( const int& bytes ) {
 
 //-----------------------------------------------------------------------------
 void log_c::deallocate( void ) {
-  if( !_initialized || !_allocated ) return;
+  if( !_defined || !_allocated ) return;
 
   free( _buffer );
   _allocated = false;
@@ -61,8 +64,8 @@ void log_c::deallocate( void ) {
 
 //-----------------------------------------------------------------------------
 log_c::error_e log_c::flush( void ) {
-  // if not initialized, return error
-  if( !_initialized ) return ERROR_NOINIT;
+  // if not defined, return error
+  if( !_defined ) return ERROR_NOTDEFINED;
   // if not allocated, return error
   if( !_allocated ) return ERROR_NOALLOC;
   // if not dirty then no need to write
@@ -101,7 +104,7 @@ log_c::error_e log_c::flush( void ) {
 
 //-----------------------------------------------------------------------------
 log_c::error_e log_c::write( const std::string& str ) {
-  if( !_initialized ) return ERROR_NOINIT;
+  if( !_defined ) return ERROR_NOTDEFINED;
   if( !_allocated ) return ERROR_NOALLOC;
 
   // get the length of the string
@@ -135,8 +138,8 @@ int log_c::size( void ) {
 
 //-----------------------------------------------------------------------------
 bool log_c::open( void ) {
-  // if not initialized, not open
-  if( !_initialized ) return false;
+  // if not defined, not open
+  if( !_defined ) return false;
   // if not allocated, not open
   if( !_allocated ) return false;
 

@@ -18,7 +18,7 @@ author: James Taylor : jrt@gwu.edu
 
 //-----------------------------------------------------------------------------
 
-/// cpu speed type aliasing system type.
+/// cpu speed type aliasing cycle type.
 typedef unsigned long long cpu_speed_t;
 /// cpu identified type aliasing system type.
 typedef int cpu_id_t;

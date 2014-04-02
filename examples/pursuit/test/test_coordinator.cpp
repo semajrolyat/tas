@@ -313,7 +313,7 @@ void close_preycontroller_to_coordinator_pipe( void ) {
 //-----------------------------------------------------------------------------
 //-----------------------------------------------------------------------------
 bool init_coordinator_to_predplanner_pipe( void ) {
-  return init_pipe( FD_COORDINATOR_TO_PREDPLANNER_READ_CHANNEL, FD_COORDINATOR_TO_PREDPLANNER_WRITE_CHANNEL );
+  return init_pipe( FD_COORDINATOR_TO_PREDPLANNER_READ_CHANNEL, FD_COORDINATOR_TO_PREDPLANNER_WRITE_CHANNEL, true );
 }
 
 //-----------------------------------------------------------------------------
@@ -324,7 +324,7 @@ void close_coordinator_to_predplanner_pipe( void ) {
 
 //-----------------------------------------------------------------------------
 bool init_predplanner_to_coordinator_pipe( void ) {
-  return init_pipe( FD_PREDPLANNER_TO_COORDINATOR_READ_CHANNEL, FD_PREDPLANNER_TO_COORDINATOR_WRITE_CHANNEL );
+  return init_pipe( FD_PREDPLANNER_TO_COORDINATOR_READ_CHANNEL, FD_PREDPLANNER_TO_COORDINATOR_WRITE_CHANNEL, true );
 }
 
 //-----------------------------------------------------------------------------
@@ -336,7 +336,7 @@ void close_predplanner_to_coordinator_pipe( void ) {
 //-----------------------------------------------------------------------------
 //-----------------------------------------------------------------------------
 bool init_coordinator_to_predcontroller_pipe( void ) {
-  return init_pipe( FD_COORDINATOR_TO_PREDCONTROLLER_READ_CHANNEL, FD_COORDINATOR_TO_PREDCONTROLLER_WRITE_CHANNEL );
+  return init_pipe( FD_COORDINATOR_TO_PREDCONTROLLER_READ_CHANNEL, FD_COORDINATOR_TO_PREDCONTROLLER_WRITE_CHANNEL, true );
 }
 
 //-----------------------------------------------------------------------------
@@ -347,7 +347,7 @@ void close_coordinator_to_predcontroller_pipe( void ) {
 
 //-----------------------------------------------------------------------------
 bool init_predcontroller_to_coordinator_pipe( void ) {
-  return init_pipe( FD_PREDCONTROLLER_TO_COORDINATOR_READ_CHANNEL, FD_PREDCONTROLLER_TO_COORDINATOR_WRITE_CHANNEL );
+  return init_pipe( FD_PREDCONTROLLER_TO_COORDINATOR_READ_CHANNEL, FD_PREDCONTROLLER_TO_COORDINATOR_WRITE_CHANNEL, true );
 }
 
 //-----------------------------------------------------------------------------
@@ -447,7 +447,7 @@ void init( int argc, char* argv[] ) {
   cpu = DEFAULT_CPU;
 
   // * open log *
-  log = log_c( "info.log" );
+  log = log_c( "info.log", true );
   log_c::error_e log_err = log.allocate( LOG_CAPACITY );
   if( log_err != log_c::ERROR_NONE ) {
     sprintf( spstr, "(coordinator.cpp) init() failed calling log_c::allocate(...).\nExiting\n" ); 
@@ -556,21 +556,23 @@ void init( int argc, char* argv[] ) {
   processor = boost::shared_ptr<processor_c>( new processor_c() );
   processor->name = "processor";
 
-  //dynamics = boost::shared_ptr<dynamics_c>( new dynamics_c() );
-  //dynamics->name = "dynamics";
+  dynamics = boost::shared_ptr<dynamics_c>( new dynamics_c( cpu_speed ) );
+  dynamics->name = "dynamics";
 
   prey = boost::shared_ptr<timesink_c>( new timesink_c( scheduler_c::PROGRESS) );
   prey->name = "prey_timesink";
   prey->log = &log;
+  //prey->priority = 0;
 
   prey_controller = boost::shared_ptr<osthread_c>( new osthread_c(&select, &read_notifications, &log) );
   prey_controller->name = "prey_controller";
   prey_controller->_max_os_priority = CLIENT_OS_MAX_PRIORITY;
   prey_controller->_min_os_priority = CLIENT_OS_MIN_PRIORITY;
   prey_controller->_os_priority_step = client_os_priority_step;
-  prey_controller->cpu_speed = cpu_speed;
+  prey_controller->_cpu_speed = cpu_speed;
+  prey_controller->priority = 0;
 ///* 
-  schedulererr = scheduler_c::create( prey_controller, 1, DEFAULT_CPU, "client-process", "prey-controller", "1", controller_floor, controller_ceiling );
+  schedulererr = scheduler_c::create( prey_controller, 3, DEFAULT_CPU, "client-process", "prey-controller", "1", controller_floor, controller_ceiling );
 //*/
   sprintf( spstr, "created prey-controller: pid[%d], _os_priority[%d]\n", prey_controller->pid, prey_controller->_os_priority );
   log_msg( spstr );
@@ -610,9 +612,9 @@ void init( int argc, char* argv[] ) {
   schedulererr = scheduler_c::create( pred_planner, 1, DEFAULT_CPU, "client-process", "pred-planner", "3", planner_floor, planner_ceiling );
   printf( "created pred-planner: pid[%d], priority[%d]\n", pred_planner->pid, pred_planner->priority );
 */
-  //processor->run_queue.push_back( dynamics );
+  processor->run_queue.push( dynamics );
   processor->run_queue.push( prey );
-  //processor->run_queue.push_back( pred );
+  //processor->run_queue.push( pred );
 
   prey->run_queue.push( prey_controller );
 
@@ -668,6 +670,7 @@ int main( int argc, char* argv[] ) {
   init( argc, argv );
 
   thread_p processor_thread = boost::dynamic_pointer_cast<thread_c>(processor);
+  thread_p prey_thread = boost::dynamic_pointer_cast<thread_c>(prey);
 
   // last before main loop, arm the timer
   timer.arm( timer_c::PERIODIC, TIMER_PERIOD_NSECS );
@@ -675,6 +678,7 @@ int main( int argc, char* argv[] ) {
   while( !quit ) {
     scheduler_c::step_system( processor_thread, processor->run_queue, processor->block_queue, &log );
     //select();
+    //scheduler_c::step_system( prey_thread, prey->run_queue, prey->block_queue, &log );
   }
 
   shutdown();

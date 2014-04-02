@@ -40,22 +40,20 @@ public:
 };
 
 //-----------------------------------------------------------------------------
-#include <pthread.h>
+#include "os.h"
 #include <string>
 
 class client_message_buffer_c {
 private:
   bool                  _create;
-  bool                  _initialized;
+  bool                  _defined;
   bool                  _open;
 
   std::string           _buffer_name;
   int                   _fd_buffer;
   client_message_t*     _buffer;  
 
-  std::string           _mutex_name;
-  int                   _fd_mutex;
-  pthread_mutex_t*      _mutex;
+  mutex_c               _mutex;
 
 public:
   //---------------------------------------------------------------------------
@@ -79,10 +77,8 @@ public:
 
   //---------------------------------------------------------------------------
 private:
-  buffer_error_e init_mutex( void );
-  buffer_error_e delete_mutex( void );
-  buffer_error_e init_buffer( void );
-  buffer_error_e delete_buffer( void );
+  buffer_error_e init( void );
+  buffer_error_e destroy( void );
 
   //---------------------------------------------------------------------------
 public:

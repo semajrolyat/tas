@@ -12,13 +12,13 @@ void test1( void ) {
   log_c::error_e err;
   std::string data, err_info;
 
-  log = log_c( "test.log" );
+  log = log_c( "test.log", true );
 
   err = log.allocate( LOG_CAPACITY );
   if( err != log_c::ERROR_NONE ) {
     switch( err ) {
-    case log_c::ERROR_NOINIT:
-      err_info = "ERROR_NOINIT";
+    case log_c::ERROR_NOTDEFINED:
+      err_info = "ERROR_NOTDEFINED";
       break;
     case log_c::ERROR_REALLOC:
       err_info = "ERROR_REALLOC";
@@ -66,13 +66,13 @@ int main( void ) {
   log_c::error_e err;
   std::string data, err_info;
 
-  log = log_c( "test.log" );
+  log = log_c( "test.log", true );
   err = log.allocate( LOG_CAPACITY );
 
   if( err != log_c::ERROR_NONE ) {
     switch( err ) {
-    case log_c::ERROR_NOINIT:
-      err_info = "ERROR_NOINIT";
+    case log_c::ERROR_NOTDEFINED:
+      err_info = "ERROR_NOTDEFINED";
       break;
     case log_c::ERROR_REALLOC:
       err_info = "ERROR_REALLOC";

@@ -23,10 +23,10 @@ protected:
   log_c* _log;
 
 public:
-  timestamp_t progress;
+  cycle_t progress;
   int priority;
   timestamp_t timestamp;
-  cpu_speed_t cpu_speed;
+  cpu_speed_t _cpu_speed;
 
   std::queue<notification_t> message_queue;
 

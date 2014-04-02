@@ -14,32 +14,7 @@
 #include "timesink.h"
 #include "osthread.h"
 #include "dynamics.h"
-
-//-----------------------------------------------------------------------------
-
-#define FD_TIMER_TO_COORDINATOR_READ_CHANNEL   1001
-#define FD_TIMER_TO_COORDINATOR_WRITE_CHANNEL  1002
-
-#define FD_WAKEUP_TO_COORDINATOR_READ_CHANNEL   1003
-#define FD_WAKEUP_TO_COORDINATOR_WRITE_CHANNEL  1004
-
-#define FD_COORDINATOR_TO_PREYCONTROLLER_READ_CHANNEL   1010
-#define FD_COORDINATOR_TO_PREYCONTROLLER_WRITE_CHANNEL  1011
-
-#define FD_PREYCONTROLLER_TO_COORDINATOR_READ_CHANNEL   1012
-#define FD_PREYCONTROLLER_TO_COORDINATOR_WRITE_CHANNEL  1013
-
-#define FD_COORDINATOR_TO_PREDPLANNER_READ_CHANNEL   1014
-#define FD_COORDINATOR_TO_PREDPLANNER_WRITE_CHANNEL  1015
-
-#define FD_PREDPLANNER_TO_COORDINATOR_READ_CHANNEL   1016
-#define FD_PREDPLANNER_TO_COORDINATOR_WRITE_CHANNEL  1017
-
-#define FD_COORDINATOR_TO_PREDCONTROLLER_READ_CHANNEL   1018
-#define FD_COORDINATOR_TO_PREDCONTROLLER_WRITE_CHANNEL  1019
-
-#define FD_PREDCONTROLLER_TO_COORDINATOR_READ_CHANNEL   1020
-#define FD_PREDCONTROLLER_TO_COORDINATOR_WRITE_CHANNEL  1021
+#include "channels.h"
 
 //-----------------------------------------------------------------------------
 static pid_t         coordinator_pid;
@@ -219,7 +194,7 @@ bool init_pipe( int read_fd, int write_fd, bool write_blocking = false ) {
 //-----------------------------------------------------------------------------
 //-----------------------------------------------------------------------------
 bool init_timer_pipe( void ) {
-  return init_pipe( FD_TIMER_TO_COORDINATOR_READ_CHANNEL, FD_TIMER_TO_COORDINATOR_WRITE_CHANNEL );
+  return init_pipe( FD_TIMER_TO_COORDINATOR_READ_CHANNEL, FD_TIMER_TO_COORDINATOR_WRITE_CHANNEL, true );
 }
 
 //-----------------------------------------------------------------------------
@@ -243,7 +218,7 @@ void close_wakeup_pipe( void ) {
 //-----------------------------------------------------------------------------
 //-----------------------------------------------------------------------------
 bool init_coordinator_to_preycontroller_pipe( void ) {
-  return init_pipe( FD_COORDINATOR_TO_PREYCONTROLLER_READ_CHANNEL, FD_COORDINATOR_TO_PREYCONTROLLER_WRITE_CHANNEL );
+  return init_pipe( FD_COORDINATOR_TO_PREYCONTROLLER_READ_CHANNEL, FD_COORDINATOR_TO_PREYCONTROLLER_WRITE_CHANNEL, true );
 }
 
 //-----------------------------------------------------------------------------
@@ -254,7 +229,7 @@ void close_coordinator_to_preycontroller_pipe( void ) {
 
 //-----------------------------------------------------------------------------
 bool init_preycontroller_to_coordinator_pipe( void ) {
-  return init_pipe( FD_PREYCONTROLLER_TO_COORDINATOR_READ_CHANNEL, FD_PREYCONTROLLER_TO_COORDINATOR_WRITE_CHANNEL );
+  return init_pipe( FD_PREYCONTROLLER_TO_COORDINATOR_READ_CHANNEL, FD_PREYCONTROLLER_TO_COORDINATOR_WRITE_CHANNEL, true );
 }
 
 //-----------------------------------------------------------------------------
@@ -266,7 +241,7 @@ void close_preycontroller_to_coordinator_pipe( void ) {
 //-----------------------------------------------------------------------------
 //-----------------------------------------------------------------------------
 bool init_coordinator_to_predplanner_pipe( void ) {
-  return init_pipe( FD_COORDINATOR_TO_PREDPLANNER_READ_CHANNEL, FD_COORDINATOR_TO_PREDPLANNER_WRITE_CHANNEL );
+  return init_pipe( FD_COORDINATOR_TO_PREDPLANNER_READ_CHANNEL, FD_COORDINATOR_TO_PREDPLANNER_WRITE_CHANNEL, true );
 }
 
 //-----------------------------------------------------------------------------
@@ -277,7 +252,7 @@ void close_coordinator_to_predplanner_pipe( void ) {
 
 //-----------------------------------------------------------------------------
 bool init_predplanner_to_coordinator_pipe( void ) {
-  return init_pipe( FD_PREDPLANNER_TO_COORDINATOR_READ_CHANNEL, FD_PREDPLANNER_TO_COORDINATOR_WRITE_CHANNEL );
+  return init_pipe( FD_PREDPLANNER_TO_COORDINATOR_READ_CHANNEL, FD_PREDPLANNER_TO_COORDINATOR_WRITE_CHANNEL, true );
 }
 
 //-----------------------------------------------------------------------------
@@ -289,7 +264,7 @@ void close_predplanner_to_coordinator_pipe( void ) {
 //-----------------------------------------------------------------------------
 //-----------------------------------------------------------------------------
 bool init_coordinator_to_predcontroller_pipe( void ) {
-  return init_pipe( FD_COORDINATOR_TO_PREDCONTROLLER_READ_CHANNEL, FD_COORDINATOR_TO_PREDCONTROLLER_WRITE_CHANNEL );
+  return init_pipe( FD_COORDINATOR_TO_PREDCONTROLLER_READ_CHANNEL, FD_COORDINATOR_TO_PREDCONTROLLER_WRITE_CHANNEL, true );
 }
 
 //-----------------------------------------------------------------------------
@@ -300,7 +275,7 @@ void close_coordinator_to_predcontroller_pipe( void ) {
 
 //-----------------------------------------------------------------------------
 bool init_predcontroller_to_coordinator_pipe( void ) {
-  return init_pipe( FD_PREDCONTROLLER_TO_COORDINATOR_READ_CHANNEL, FD_PREDCONTROLLER_TO_COORDINATOR_WRITE_CHANNEL );
+  return init_pipe( FD_PREDCONTROLLER_TO_COORDINATOR_READ_CHANNEL, FD_PREDCONTROLLER_TO_COORDINATOR_WRITE_CHANNEL, true );
 }
 
 //-----------------------------------------------------------------------------
@@ -578,7 +553,7 @@ int main( int argc, char* argv[] ) {
 
   thread_p processor_thread = boost::dynamic_pointer_cast<thread_c>(processor);
   while( true ) {
-    scheduler_c::step_system( processor_thread, processor->run_queue, processor->block_queue );
+    scheduler_c::step_system( processor_thread, processor->run_queue, processor->block_queue, &log );
     //sleep( 1 ); // temporary sleep for testing.  Induces block, otherwise realtime schedule max will suck up the entire processor if there is no blocking mechanism
   }
 

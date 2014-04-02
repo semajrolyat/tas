@@ -2,7 +2,8 @@
 
 #include "time.h"
 #include "scheduler.h"
-#include <sstream>
+//#include <sstream>
+#include <stdio.h>
 
 // TODO: Add constructor that includes all the ancillary and potentially private
 //       data
@@ -40,53 +41,64 @@ osthread_c::~osthread_c( void ) {
 }
 
 //-----------------------------------------------------------------------------
-
-#include <stdio.h>
 void osthread_c::dispatch( thread_p& current_thread ) {
-  std::stringstream log_msg;
+  char spstr[512];
+  osthread_p current_osthread, this_osthread;
+  thread_p this_thread;
 
-  thread_p this_thread = shared_from_this();
+  // get a reference to the thread about to be dispatched
+  this_thread = shared_from_this();
+  // get an osthread pointer to the thread about to be dispatched
+  this_osthread = boost::dynamic_pointer_cast<osthread_c>(this_thread);
 
-  if( this_thread != current_thread ) {
+  //--------
+  // check if current thread has a valid reference (otherwise was nothing)
+  if( current_thread ) {
+    // sanity check
+    assert( current_thread->type() == thread_c::OSTHREAD );
 
-    log_msg << "dispatching " << this_thread->name << "\n";
-    _log->write( log_msg.str() ); log_msg.str( std::string() ); log_msg.clear();
-    // Note: may need to check thread type here
-    boost::shared_ptr<osthread_c> current_osthread = boost::dynamic_pointer_cast<osthread_c>(current_thread);
-    boost::shared_ptr<osthread_c> this_osthread = boost::dynamic_pointer_cast<osthread_c>(this_thread);
+    // get an osthread pointer to the thread previously dispatched
+    current_osthread = boost::dynamic_pointer_cast<osthread_c>(current_thread);
 
-    if( current_osthread ) {
-      current_osthread->lower_priority();
-      log_msg << "current_osthread: " << current_osthread->name << ", _os_priority:" << current_osthread->_os_priority << "\n";
-      _log->write( log_msg.str() ); log_msg.str( std::string() ); log_msg.clear();
+    // lower the priority of the current thread
+    current_osthread->lower_priority();
+
+    // log information about the switch
+    if( current_thread != this_thread ) {
+      sprintf( spstr, "switching between current[%s] and next[%s] threads\n", current_thread->name.c_str(), this_thread->name.c_str() );
+      _log->write( spstr );
+      printf( "%s", spstr );
     }
- 
-    // flush log here as the time accounting will not be attributed to clients
-    if( _log->size() >= _log->capacity() / 2 )
-      _log->flush();
-
-    this_osthread->raise_priority();
-    log_msg << "this_osthread: " << this_osthread->name << ", os_priority:" << this_osthread->_os_priority << "\n";
-    _log->write( log_msg.str() ); log_msg.str( std::string() ); log_msg.clear();
-
-    current_thread = this_thread;
   }
- 
-  //timestamp_t ts_select, ts_diff;
 
-  log_msg << "selecting\n";
-  _log->write( log_msg.str() ); log_msg.str( std::string() ); log_msg.clear();
+  // flush log here as the time accounting will not be attributed to clients 
+  if( _log->size() >= _log->capacity() / 2 )
+    _log->flush();
+
+  // raise the priority of the thread being dispatched
+  this_osthread->raise_priority();
+
+  sprintf( spstr, "dispatching %s at priority %d\n", this_osthread->name.c_str(), this_osthread->_os_priority );
+  _log->write( spstr );
+  printf( "%s", spstr );
+
+  // set the current thread as the one being dispatched
+  current_thread = this_thread;
+
+  //--------
+  sprintf( spstr, "selecting\n" );
+  _log->write( spstr );
+  printf( "%s", spstr );
+
   timestamp = generate_timestamp();
   select();
   progress += generate_timestamp() - timestamp;
-  //ts_select = generate_timestamp();
-  //ts_diff = ts_select - timestamp;
-  //realtime_t rt_diff = timestamp_to_realtime( ts_diff, cpu_speed );
-  // accounting for select time
-  //progress += rt_diff;
 
-  log_msg << "reading notifications\n";
-  _log->write( log_msg.str() ); log_msg.str( std::string() ); log_msg.clear();
+  //--------
+  sprintf( spstr, "reading notifications\n" );
+  _log->write( spstr );
+  printf( "%s", spstr );
+
   read_notifications();
 }
 /*
