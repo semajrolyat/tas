@@ -1,5 +1,6 @@
 #include "timer.h"
 
+#include <assert.h>
 #include "time.h"  // API time
 #include <time.h>  // POSIX time
 
@@ -12,6 +13,7 @@ timer_c::timer_c( void ) {
   agg_error = 0;
   last_overrun = 0;
   ts_prev_arm = 0;
+  _signum = -1;
 }
 
 //-----------------------------------------------------------------------------
@@ -25,7 +27,7 @@ timer_c::~timer_c( void ) {
 /// POSIX system call.
 /// @return indicator of operation success or specified error.
 timer_c::error_e timer_c::block( void ) {
-  if( sigprocmask( SIG_SETMASK, &_rttimer_mask, NULL ) == -1 )
+  if( sigprocmask( SIG_SETMASK, &_mask, NULL ) == -1 )
     return ERROR_SIGPROCMASK;
   return ERROR_NONE;
 }
@@ -34,7 +36,7 @@ timer_c::error_e timer_c::block( void ) {
 /// Unblocks a blocked timer signal using POSIX system call.
 /// @return indicator of operation success or specified error.
 timer_c::error_e timer_c::unblock( void ) {
-  if( sigprocmask( SIG_UNBLOCK, &_rttimer_mask, NULL ) == -1 )
+  if( sigprocmask( SIG_UNBLOCK, &_mask, NULL ) == -1 )
     return ERROR_SIGPROCMASK;
   return ERROR_NONE;
 }
@@ -47,27 +49,48 @@ timer_c::error_e timer_c::unblock( void ) {
 /// @return indicator of operation success or specified error.
 timer_c::error_e timer_c::create( sighandler_f sighandler, int signum ) {
   struct sigevent sevt;
-  //struct itimerspec its;
+  struct sigaction action;
+
+  assert( signum > 0 );
 
   // Establish handler for timer signal
-  _rttimer_sigaction.sa_flags = SA_SIGINFO;
-  _rttimer_sigaction.sa_sigaction = sighandler;
-  sigemptyset( &_rttimer_sigaction.sa_mask );
-  if( sigaction( signum, &_rttimer_sigaction, NULL ) == -1)
+  action.sa_flags = SA_SIGINFO;
+  action.sa_sigaction = sighandler;
+  sigemptyset( &action.sa_mask );
+  if( sigaction( signum, &action, NULL ) == -1)
     return ERROR_SIGACTION;
 
   // intialize the signal mask
-  sigemptyset( &_rttimer_mask );
-  sigaddset( &_rttimer_mask, signum );
+  sigemptyset( &_mask );
+  sigaddset( &_mask, signum );
 
   sevt.sigev_notify = SIGEV_SIGNAL;
   sevt.sigev_signo = signum;
-  sevt.sigev_value.sival_ptr = &_rttimer_id;
-  if( timer_create( CLOCK_MONOTONIC, &sevt, &_rttimer_id ) == -1 )
-    //if( timer_create( CLOCK_REALTIME, &sevt, &_rttimer_id ) == -1 )
+  sevt.sigev_value.sival_ptr = &_id;
+  if( timer_create( CLOCK_MONOTONIC, &sevt, &_id ) == -1 )
     return ERROR_CREATE;
 
+  _signum = signum;
+
   return ERROR_NONE;
+}
+
+//-----------------------------------------------------------------------------
+/// Destroys an already created timer.
+void timer_c::destroy( void ) {
+  struct sigaction action;
+
+  assert( _signum > 0 );
+
+  timer_delete( _id );
+  // timer_delete returns -1 on failure, errno{EINVAL}
+
+  action.sa_handler = SIG_DFL;
+  action.sa_mask = _mask; 
+
+  if( sigaction( _signum, &action, NULL ) == -1) {
+    //return ERROR_SIGACTION;
+  }
 }
 
 //-----------------------------------------------------------------------------
@@ -96,7 +119,7 @@ timer_c::error_e timer_c::arm( const type_e& type, const unsigned long long& per
     its.it_value.tv_nsec = tspec.tv_nsec;
   }
 
-  if( timer_settime( _rttimer_id, 0, &its, NULL ) == -1 ) 
+  if( timer_settime( _id, 0, &its, NULL ) == -1 ) 
     return ERROR_SETTIME;
 
   return ERROR_NONE;
@@ -153,7 +176,7 @@ timer_c::error_e timer_c::arm( const type_e& type, const unsigned long long& per
   ts_arm = ts_req;
   ts_prev_arm = ts_now;
 
-  if( timer_settime( _rttimer_id, 0, &its, NULL ) == -1 ) {
+  if( timer_settime( _id, 0, &its, NULL ) == -1 ) {
     //printf( "dts: %lld, dns: %lld, nsec: %d\n", dts, dns, its.it_value.tv_nsec );
     return ERROR_SETTIME;
   }

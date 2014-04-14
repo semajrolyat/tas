@@ -4,7 +4,7 @@ project( TAS )
 cmake_minimum_required(VERSION 2.8)
 
 SET(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wall -Wextra -g")
-SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -g")
+SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -g -std=c++0x")
 
 set( CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake_modules ${CMAKE_MODULE_PATH} )
 
@@ -55,7 +55,7 @@ set( TAS_LIBRARIES
     ${GSL_LIBRARIES}
     ${BOOST_LIBRARIES}
     ${RAVELIN_LIBRARIES}
-    libboost_system.so
+    libboost_system-mt.so
     libRavelin.so
 )
 
@@ -75,6 +75,6 @@ add_subdirectory( examples )
 #add_executable( planner ${CMAKE_CURRENT_SOURCE_DIR}/planner.cpp ${TAS_HEADERS} ${TAS_SOURCES} )
 #target_link_libraries( planner ${TAS_LIBRARIES} )
 
-add_subdirectory( ode )
+#add_subdirectory( ode )
 
-#add_subdirectory( gazebo )
+add_subdirectory( gazebo )

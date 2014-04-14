@@ -35,7 +35,7 @@ void test1( void ) {
   }
 
   data = "First Line.\nSecond Line.\n";
-  err = log.write( data );
+  err = log.write( data.c_str() );
   if( err != log_c::ERROR_NONE ) {
     printf( "ERROR: failed to write to the log on first write.\nExiting.\n" );
     exit( 1 );
@@ -47,7 +47,7 @@ void test1( void ) {
   }
 
   data = "Third Line.\nFourth Line.\n";
-  err = log.write( data );
+  err = log.write( data.c_str() );
   if( err != log_c::ERROR_NONE ) {
     printf( "ERROR: failed to write to the log on second write.\nExiting.\n" );
     exit( 1 );
@@ -90,14 +90,14 @@ int main( void ) {
 
   for( unsigned i = 1; i <= LOG_CAPACITY * 2; i++ ) {
     data = (i % 10) + 48;
-    err = log.write( data );
+    err = log.write( data.c_str() );
     if( err != log_c::ERROR_NONE ) {
       printf( "ERROR: failed to write to the log on first write.\nExiting.\n" );
       exit( 1 );
     }
     if( log.size() >= log.capacity() / 2 ) {
       data = "\n";
-      err = log.write( data );
+      err = log.write( data.c_str() );
       if( err != log_c::ERROR_NONE ) {
         printf( "ERROR: failed to write to the log on first write.\nExiting.\n" );
         exit( 1 );

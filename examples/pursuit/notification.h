@@ -9,26 +9,25 @@
 struct notification_t {
 
   enum source_e {
-    TIMER, 
-    WAKEUP,
-    CLIENT 
+    TIMER,                  ///< Notification originated from a timer.
+    WAKEUP,                 ///< Notification originated from block detection.
+    CLIENT,                 ///< Notification originated from a client process.
+    SERVER                  ///< Notification originated from the coordinator.
   };
 
   enum type_e {
-    IDLE,		// explicit block request
-    OPEN,               // initializing
-    CLOSE,              // exiting
-    READ,		// reading state information (state request)
-    WRITE		// writing result
+    OPEN,                   ///< Client is initializing
+    CLOSE,                  ///< Client is closing
+    IDLE,		    ///< Client requests a block
+    READ,		    ///< Client requests state
+    WRITE		    ///< Client has written a command
   };
 
-  timestamp_t ts;
-  realtime_t t;
-  source_e source;
-  type_e type;
-  //realtime_t blocktill;
-  timestamp_t blocktill;
-  pid_t pid;
+  timestamp_t     ts;       ///< Timestamp when the notification was created
+  source_e        source;   ///< Source of the notification
+  type_e          type;     ///< Type of notification
+  cycle_t         period;   ///< Regulated time between actions
+  pid_t           pid;      ///< Process that originated the notification
 };
 
 //-----------------------------------------------------------------------------

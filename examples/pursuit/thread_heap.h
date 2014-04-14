@@ -39,14 +39,14 @@ struct compare_thread_p_t {
   bool operator()( const thread_p& t1, const thread_p& t2 ) const {
     if( t1->type() == thread_c::PROCESSOR && t2->type() == thread_c::PROCESSOR ) {
       // Min heap.  Want lowest progress thread at top of heap
-      return t1->progress > t2->progress;
+      return t1->temporal_progress > t2->temporal_progress;
     } else if( t1->type()==thread_c::OSTHREAD && t2->type()==thread_c::OSTHREAD ) {
       // Max heap.  Want highest priority thread at top of heap
       return t1->priority < t2->priority;
     } else  {
       // Generic catch all for all other cases
       // May need additional specific cases
-      return t1->progress > t2->progress; 
+      return t1->temporal_progress > t2->temporal_progress; 
     }
   }
 };

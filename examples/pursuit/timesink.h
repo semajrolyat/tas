@@ -6,6 +6,8 @@
 #include "scheduler.h"
 #include "log.h"
 
+#include "types.h"
+
 //#include <queue>
 //#include <boost/shared_ptr.hpp>
 
@@ -13,7 +15,9 @@
 class timesink_c : public thread_c {
 public:
 
-  timesink_c( void );
+  timesink_c( const char* name );
+  //timesink_c( const timesink_p& owner );
+  timesink_c( const char* name, const timesink_p& owner, const scheduler_c::policy_e& policy );
   timesink_c( const scheduler_c::policy_e& policy );
   virtual ~timesink_c( void );
 
@@ -25,10 +29,12 @@ public:
   thread_p current_thread;
   scheduler_c::policy_e policy;
   
+  timesink_p owner;
+
   thread_heap_c run_queue;
   thread_heap_c block_queue;
 
-  log_c* log;
+  log_c* info;
 }; 
 
 #endif // _TIMESINK_H_

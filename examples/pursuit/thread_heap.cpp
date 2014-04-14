@@ -40,6 +40,7 @@ thread_heap_c::error_e thread_heap_c::remove( const unsigned& i, thread_p& threa
 
   // remove the element
   _heap.erase( _heap.begin() + i );
+  thread->enqueued = false;
 
   // reheap
   if( _heap.size() == 0 ) {
@@ -63,6 +64,7 @@ thread_heap_c::error_e thread_heap_c::push( thread_p thread ) {
   
   // insert the thread into the heap
   _heap.push_back( thread );
+  thread->enqueued = true;
 
   // if the heap was empty before the operation
   if( _empty ) {
@@ -101,6 +103,7 @@ thread_heap_c::error_e thread_heap_c::pop( thread_p& thread ) {
   } catch( std::exception ex ) {
     return ERROR_POPHEAP;
   }
+  thread->enqueued = false;
   _heap.pop_back();
 
   // check if the heap is now empty post pop and set the flag

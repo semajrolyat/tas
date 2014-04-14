@@ -4,9 +4,6 @@
 //-----------------------------------------------------------------------------
 
 #include <assert.h>
-#include <string>
-#include <string.h>
-
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -33,24 +30,16 @@ private:
   bool _defined;
   bool _dirty;
 
+  bool _forward_to_stdout;
+
   int _capacity;
   int _cursor;
-  std::string _path;
+  char _path[256];
   bool _firstwrite;
 
   char* _buffer;
   mutex_c _mutex;
 
-/*
-  // note: these are part of shared basis with client_message_buffer_c
-  std::string _buffer_name;
-  int _fd_buffer;
-  char* _buffer;
- 
-  std::string _mutex_name;
-  int _fd_mutex;
-  pthread_mutex_t* _mutex; 
-*/
 public:
   enum error_e {
     ERROR_NONE,           ///< No error, operation was successful.
@@ -71,32 +60,18 @@ public:
   };
 
   log_c( void );
-  log_c( const std::string& path, const bool& create );
-  //log_c( const std::string& path, const char* buffer_name, const char* mutex_name, const bool& create );
+  log_c( const char* path, const bool& create );
+
   virtual ~log_c( void );
 
   error_e allocate( const int& size );
   void deallocate( void );
   error_e flush( void );
-  error_e write( const std::string& str );
+  error_e write( const char* str );
 
   int capacity( void );
   int size( void );
   bool open( void );
-/*
-private:
-  // note : these are part of shared basis with client_message_buffer_c
-  error_e init_mutex( void );
-  error_e delete_mutex( void );
-  error_e init_buffer( void );
-  error_e delete_buffer( void );
-
-public:
-  error_e open( void );
-  void close( void );
-  error_e write( const char* msg );
-  //error_e read( char* msg )
-*/
 };
 
 //-----------------------------------------------------------------------------

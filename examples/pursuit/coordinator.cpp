@@ -33,7 +33,7 @@ char errstr[ 256 ];
 
 //-----------------------------------------------------------------------------
 #define LOG_CAPACITY 4096
-log_c log;
+log_c info;
 //-----------------------------------------------------------------------------
 
 std::vector<int>        subscribed_fds;
@@ -371,9 +371,11 @@ void init( int argc, char* argv[] ) {
   cpu = DEFAULT_CPU;
 
   // * open error logs *
-  log = log_c( "info.log" );
+  std::string log_name = "info.log";
+
+  info = log_c( log_name );
   log_c::error_e log_err;
-  log_err = log.allocate( LOG_CAPACITY );
+  log_err = info.allocate( LOG_CAPACITY );
   if( log_err != log_c::ERROR_NONE ) {
     sprintf( errstr, "(coordinator.cpp) init() failed calling log_c::allocate(...).\nExiting\n" ); 
     printf( "%s", errstr );
@@ -553,7 +555,7 @@ int main( int argc, char* argv[] ) {
 
   thread_p processor_thread = boost::dynamic_pointer_cast<thread_c>(processor);
   while( true ) {
-    scheduler_c::step_system( processor_thread, processor->run_queue, processor->block_queue, &log );
+    scheduler_c::step_system( processor_thread, processor->run_queue, processor->block_queue, &info );
     //sleep( 1 ); // temporary sleep for testing.  Induces block, otherwise realtime schedule max will suck up the entire processor if there is no blocking mechanism
   }
 

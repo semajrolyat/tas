@@ -10,6 +10,11 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <sys/mman.h>  // POSIX
+
+#include "log.h"
+
+//-----------------------------------------------------------------------------
+extern log_c info;
 //-----------------------------------------------------------------------------
 //#include <stdio.h>
 void __select( const std::vector<int>& fds, fd_set& channels ) {
@@ -24,17 +29,29 @@ void __select( const std::vector<int>& fds, fd_set& channels ) {
     //printf( "fd:%d, ", fds[i] );
   }
   //printf( "max_fd:%d\n", max_fd );
-  select( max_fd + 1, &channels, NULL, NULL, NULL );
+  if( select( max_fd + 1, &channels, NULL, NULL, NULL ) == -1 ) {
+/*
+    char buf[16];
+    if( errno == EBADF ) 
+      sprintf( buf, "EBADF" );
+    else if( errno == EINTR ) 
+      sprintf( buf, "EINTR" );
+    else if( errno == EINVAL ) 
+      sprintf( buf, "EINVAL" );
+    else if( errno == ENOMEM ) 
+      sprintf( buf, "ENOMEM" );
+    else 
+      sprintf( buf, "UNKNOWN" );
 
-/*if( select( max_fd + 1, &channels, NULL, NULL, NULL ) == -1 ) {
-    errno{ EBADF, EINTR, EINVAL, ENOMEM }
-  }*/
+    printf( "ERROR in select:%s\n", buf );
+*/
+  }
 }
 
 //-----------------------------------------------------------------------------
 bool __isset( const int& fd, fd_set& channels ) {
-  if( FD_ISSET( fd, &channels ) ) return true;
-  return false;
+  if( FD_ISSET( fd, &channels ) == 0 ) return false;
+  return true;
 }
 
 //-----------------------------------------------------------------------------
@@ -62,11 +79,40 @@ ssize_t __read( int fd, void* buffer, size_t bytes ) {
 
 //-----------------------------------------------------------------------------
 ssize_t __write( int fd, void* buffer, size_t bytes ) {
-  return write( fd, buffer, bytes );
-
-/*if( write( fd, buffer, bytes ) == -1 ) {
-   errno{EAGAIN, EBADF, EDESTADDRREQ, EDQUOT, EFAULT, EFBIG, EINVAL, EINTR, EIO, ENOSPC, EPIPE
-  }*/
+  char buf[16];
+  char spstr[256];
+  ssize_t result = write( fd, buffer, bytes );
+  if( result == -1 ) {
+    //errno{EAGAIN, EBADF, EDESTADDRREQ, EDQUOT, EFAULT, EFBIG, EINVAL, EINTR, EIO, ENOSPC, EPIPE
+    if( errno == EAGAIN ) {
+      sprintf( buf, "EAGAIN" );
+    } else if( errno == EBADF ) {
+      sprintf( buf, "EBADF" );
+    } else if( errno == EDESTADDRREQ ) {
+      sprintf( buf, "EDESTADDRREQ" );
+    } else if( errno == EDQUOT ) {
+      sprintf( buf, "EDQUOT" );
+    } else if( errno == EFAULT ) {
+      sprintf( buf, "EFAULT" );
+    } else if( errno == EFBIG ) {
+      sprintf( buf, "EFBIG" );
+    } else if( errno == EINVAL ) {
+      sprintf( buf, "EINVAL" );
+    } else if( errno == EINTR ) {
+      sprintf( buf, "EINTR" );
+    } else if( errno == EIO ) {
+      sprintf( buf, "EIO" );
+    } else if( errno == ENOSPC ) {
+      sprintf( buf, "ENOSPC" );
+    } else if( errno == EPIPE ) {
+      sprintf( buf, "EPIPE" );
+    }
+    sprintf( spstr, "ERROR : (os.cpp) select() failed calling __select(...) : errno[%s]\n", buf );
+    //info.write( spstr );
+    printf( spstr );
+    assert(1);
+  }
+  return result;
 }
 
 //-----------------------------------------------------------------------------

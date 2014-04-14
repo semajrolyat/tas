@@ -28,9 +28,9 @@ typedef void (*sighandler_f)( int signum, siginfo_t *si, void *data );
 
 class timer_c {
 private:
-  sigset_t            _rttimer_mask;        // POSIX signal mask
-  struct sigaction    _rttimer_sigaction;   // POSIX sigaction
-  timer_t             _rttimer_id;          // timer identifier
+  sigset_t            _mask;        // POSIX signal mask
+  int                 _signum;
+  timer_t             _id;          // timer identifier
   bool                _first_arming;        // has this timer armed before
 
 public:
@@ -60,6 +60,8 @@ public:
   error_e unblock( void );
 
   error_e create( sighandler_f sighandler, int signum );
+  void destroy( void );
+
   error_e arm( const type_e& type, const unsigned long long& period_nsec );
   error_e arm( const type_e& type, const unsigned long long& period_nsec, const timestamp_t& ts_req, timestamp_t& ts_arm, const cpu_speed_t& cpu_hz );
 

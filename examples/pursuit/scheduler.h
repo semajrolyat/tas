@@ -11,7 +11,6 @@ author: James Taylor : jrt@gwu.edu
 //-----------------------------------------------------------------------------
 
 #include <vector>
-#include <string>
 #include <pthread.h>
 
 #include "types.h"
@@ -58,18 +57,23 @@ public:
   };
 
   // API level scheduling
-  static thread_p schedule( thread_heap_c& runqueue );
+  // --
+  static thread_p schedule( const thread_p& caller, thread_heap_c& runqueue );
 
-  static void process_notifications( thread_p& current_thread, thread_heap_c& runqueue, thread_heap_c& waitqueue, log_c* log );
+  static void process_notifications( const thread_p& caller, osthread_p& current_thread, thread_heap_c& runqueue, thread_heap_c& waitqueue, log_c* info );
 
-  static void process_wakeups( thread_heap_c& runqueue, thread_heap_c& waitqueue, log_c* log );
+  static void process_wakeups( const thread_p& caller, thread_heap_c& runqueue, thread_heap_c& waitqueue, log_c* info );
 
-  static void step_system( thread_p& current_thread, thread_heap_c& runqueue, thread_heap_c& waitqueue, log_c* log );
+  static void step_system( const thread_p& caller, thread_p& current_thread, thread_heap_c& runqueue, thread_heap_c& waitqueue, log_c* info );
+  // --
 
   // POSIX level scheduling
-  static error_e create( pid_t& pid, const int& priority_offset, const cpu_id_t& cpu, const std::string& program, const std::string& as ); 
+  static error_e create( pid_t& pid, const int& priority_offset, const cpu_id_t& cpu, const char* program, const char* as ); 
 
-  static error_e create( const osthread_p& thread, const int& priority_offset, const cpu_id_t& cpu, const std::string& program, const std::string& as, const char* arg1, const char* arg2, const char* arg3 ); 
+  static error_e create( const osthread_p& thread, const int& priority_offset, const cpu_id_t& cpu, const char* program, const char* as, const char* arg1, const char* arg2, const char* arg3 ); 
+
+  // test
+  static error_e create( pid_t& pid, const int& priority_offset, const cpu_id_t& cpu, worker_f worker ); 
 
   static error_e suspend( const pid_t& pid );
 

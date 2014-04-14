@@ -34,7 +34,7 @@ set( SHIP_LIBRARIES
     ${GAZEBO_LIBRARIES}
     ${RAVELIN_LIBRARIES}
     ${TAS_LIBRARIES}
-    libboost_system.so
+    libboost_system-mt.so
     libRavelin.so
 )
 

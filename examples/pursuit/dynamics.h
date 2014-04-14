@@ -11,8 +11,7 @@ private:
 
 public:
 
-  //dynamics_c( void );
-  dynamics_c( const cpu_speed_t& cpu_speed );
+  dynamics_c( const char* name, const timesink_p& owner, const cpu_speed_t& cpu_speed );
   virtual ~dynamics_c( void );
 
   virtual type_e type( void ) { return DYNAMICS; }

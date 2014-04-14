@@ -9,7 +9,7 @@
 
 class processor_c : public timesink_c {
 public:
-  processor_c( void );
+  processor_c( const char* name );
   virtual ~processor_c( void );
 
   virtual type_e type( void ) { return PROCESSOR; }

@@ -102,7 +102,7 @@ static void cb_sim_step( int pause ) {
     if( !pause ) {
         static dReal angle = 0;
 
-        angle += REAL( 0.01 );
+        angle += dReal( 0.01 );
 
         track_to_pos( dyn_bodies[0], plane2d_joint_ids[0],
             dReal( STAGE_SIZE/2 + STAGE_SIZE/2.0 * cos (angle) ),
@@ -249,8 +249,8 @@ extern int main( int argc, char **argv ) {
 
     dReal  cf_mixing;// = 1 / TIME_STEP * K_SPRING + K_DAMP;
     dReal  err_reduct;// = TIME_STEP * K_SPRING * cf_mixing;
-    err_reduct = REAL( 0.5 );
-    cf_mixing = REAL( 0.001 );
+    err_reduct = dReal( 0.5 );
+    cf_mixing =  dReal( 0.001 );
     dWorldSetERP( dyn_world.id (), err_reduct );
     dWorldSetCFM( dyn_world.id (), cf_mixing );
     dyn_world.setGravity( 0, 0.0, -1.0 );
@@ -262,7 +262,7 @@ extern int main( int argc, char **argv ) {
         int l = (int) ( 1 + sqrt ( (double) N_BODIES ) );
         dReal x = dReal( ( 0.5 + (b / l) ) / l * STAGE_SIZE );
         dReal y = dReal( ( 0.5 + (b % l) ) / l * STAGE_SIZE );
-        dReal z = REAL( 1.0 ) + REAL( 0.1 ) * (dReal)drand48();
+        dReal z = dReal( 1.0 ) + dReal( 0.1 ) * (dReal)drand48();
 
         bodies_sides[b][0] = dReal( 5 * (0.2 + 0.7*drand48()) / sqrt((double)N_BODIES) );
         bodies_sides[b][1] = dReal( 5 * (0.2 + 0.7*drand48()) / sqrt((double)N_BODIES) );
@@ -277,7 +277,7 @@ extern int main( int argc, char **argv ) {
 
         dMass m;
         m.setBox( 1, bodies_sides[b][0],bodies_sides[b][1],bodies_sides[b][2] );
-        m.adjust( REAL(0.1) * bodies_sides[b][0] * bodies_sides[b][1] );
+        m.adjust( dReal(0.1) * bodies_sides[b][0] * bodies_sides[b][1] );
         dyn_bodies[b].setMass( &m );
 
         plane2d_joint_ids[b] = dJointCreatePlane2D( dyn_world.id (), 0 );

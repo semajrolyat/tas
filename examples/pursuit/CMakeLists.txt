@@ -29,6 +29,7 @@ SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -g")
 
 set( PURSUIT_HEADERS
   #${TAS_HEADERS}
+  ${CMAKE_CURRENT_SOURCE_DIR}/tcs.h
   ${CMAKE_CURRENT_SOURCE_DIR}/types.h
   ${CMAKE_CURRENT_SOURCE_DIR}/os.h
   ${CMAKE_CURRENT_SOURCE_DIR}/log.h
@@ -78,7 +79,7 @@ set( PURSUIT_LIBRARIES
   ${GSL_LIBRARIES}
   ${BOOST_LIBRARIES}
   ${RAVELIN_LIBRARIES}
-  libboost_system.so
+  libboost_system-mt.so
   libRavelin.so
   #${GAZEBO_LIBRARIES}
   #${TAS_LIBRARIES}
@@ -89,7 +90,7 @@ include_directories( ${PURSUIT_INCLUDE_DIRS} )
 # Copy data files
 #file( COPY ${CMAKE_CURRENT_SOURCE_DIR}/pursuit.xml DESTINATION ${CMAKE_CURRENT_BINARY_DIR} )
 
-add_executable( pursuit-coordinator ${CMAKE_CURRENT_SOURCE_DIR}/coordinator.cpp ${PURSUIT_HEADERS} ${PURSUIT_SOURCES} )
-target_link_libraries( pursuit-coordinator ${PURSUIT_LIBRARIES} )
+#add_executable( pursuit-coordinator ${CMAKE_CURRENT_SOURCE_DIR}/coordinator.cpp ${PURSUIT_HEADERS} ${PURSUIT_SOURCES} )
+#target_link_libraries( pursuit-coordinator ${PURSUIT_LIBRARIES} )
 
 add_subdirectory( test )
