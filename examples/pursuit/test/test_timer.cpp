@@ -33,7 +33,8 @@ void timer_sighandler( int signum, siginfo_t *si, void *data ) {
   note.ts = generate_timestamp();
   note.source = notification_t::TIMER;
 
-  if( __write( fd, &note, sizeof(notification_t) ) == -1 ) {
+  ssize_t bytes_written;
+  if( __write( fd, &note, sizeof(notification_t), bytes_written ) != OS_ERROR_NONE ) {
     err = "(test.cpp) timer_sighandler(...) failed making system call write(...)";
     //error_log.write( error_string_bad_write( err, errno ) );
     // TODO : determine if there is a need to recover

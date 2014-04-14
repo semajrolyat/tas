@@ -67,8 +67,8 @@ bool quit;
 char spstr[512];
 
 //-----------------------------------------------------------------------------
-//#define LOG_CAPACITY 1048576  // 1MB
-#define LOG_CAPACITY 1024
+#define LOG_CAPACITY 1048576  // 1MB
+//#define LOG_CAPACITY 1024
 log_c info;
 //-----------------------------------------------------------------------------
 
@@ -316,8 +316,9 @@ void timer_sighandler( int signum, siginfo_t *si, void *data ) {
   // increment accounting
   actual_timer_events++;
 
+  ssize_t bytes_written;
   // write the timer notification to the pipe
-  if( __write( timer_write_fd, &timer_note, sizeof(notification_t) ) == -1 ) {
+  if( __write( timer_write_fd, &timer_note, sizeof(notification_t), bytes_written ) != OS_ERROR_NONE ) {
     // TODO: restructure to reduce complexity here.
 /*
     if( errno == EPIPE )

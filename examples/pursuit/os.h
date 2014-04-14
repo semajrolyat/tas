@@ -6,6 +6,25 @@
 
 #include <sys/types.h>  // POSIX
 #include <pthread.h>    // POSIX
+
+//-----------------------------------------------------------------------------
+
+enum os_error_e {
+  OS_ERROR_NONE,
+  OS_ERROR_AGAIN,
+  OS_ERROR_BADF,
+  OS_ERROR_DESTADDRREQ,
+  OS_ERROR_DQUOT,
+  OS_ERROR_FAULT,
+  OS_ERROR_FBIG,
+  OS_ERROR_INVAL,
+  OS_ERROR_INTR,
+  OS_ERROR_IO,
+  OS_ERROR_NOSPC,
+  OS_ERROR_PIPE,
+  OS_ERROR_OTHER  // catch all for unexpected errno's
+};
+
 //-----------------------------------------------------------------------------
 
 void __select( const std::vector<int>& fds, fd_set& channels );
@@ -13,7 +32,7 @@ bool __isset( const int& fd, fd_set& channels );
 int __open( const char* path, int oflags, const mode_t& mode );
 void __close( const int& fd );
 ssize_t __read( int fd, void* buffer, size_t bytes );
-ssize_t __write( int fd, void* buffer, size_t bytes );
+os_error_e __write( int fd, void* buffer, size_t bytes_to_write, ssize_t& bytes_written );
 
 //-----------------------------------------------------------------------------
 

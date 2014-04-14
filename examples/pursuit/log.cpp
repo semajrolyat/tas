@@ -88,20 +88,35 @@ log_c::error_e log_c::flush( void ) {
   if( fd == -1 ) return ERROR_OPEN;
 
   // write the buffer data to the file
-///*
+/*
   if( __write( fd, _buffer, _cursor ) == -1 )
     return ERROR_WRITE;
-//*/
-  //while( __write(fd, _buffer, _cursor) == -1 );
+*/
+  int bytes = _cursor;
+  int offset = 0;
+  os_error_e result;
+  ssize_t bytes_written;
+  bool failed = false;
+  while( offset < _cursor ) {
+    result = __write( fd, _buffer + offset, bytes, bytes_written );
+    if( result != OS_ERROR_NONE ) {
+      // A little arbitrary by just try again
+      failed = true;
+    } else {
+      // otherwise may not have had a complete write, so update indices continue
+      offset += bytes_written;
+      bytes -= bytes_written;
+    }
+  }
 
   // close the file
   __close( fd );
-
+/*
   if( _forward_to_stdout ) {
     if( __write( 1, _buffer, _cursor ) == -1 )
       return ERROR_WRITE;    
   }
-
+*/
   // reset the cursor
   _cursor = 0;
 

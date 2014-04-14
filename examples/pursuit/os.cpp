@@ -78,41 +78,38 @@ ssize_t __read( int fd, void* buffer, size_t bytes ) {
 }
 
 //-----------------------------------------------------------------------------
-ssize_t __write( int fd, void* buffer, size_t bytes ) {
+os_error_e __write( int fd, void* buffer, size_t bytes_to_write, ssize_t& bytes_written ) {
   char buf[16];
   char spstr[256];
-  ssize_t result = write( fd, buffer, bytes );
-  if( result == -1 ) {
+  bytes_written = write( fd, buffer, bytes_to_write );
+  if( bytes_written == -1 ) {
     //errno{EAGAIN, EBADF, EDESTADDRREQ, EDQUOT, EFAULT, EFBIG, EINVAL, EINTR, EIO, ENOSPC, EPIPE
+    bytes_written = 0;
     if( errno == EAGAIN ) {
-      sprintf( buf, "EAGAIN" );
+      return OS_ERROR_AGAIN;
     } else if( errno == EBADF ) {
-      sprintf( buf, "EBADF" );
+      return OS_ERROR_BADF;
     } else if( errno == EDESTADDRREQ ) {
-      sprintf( buf, "EDESTADDRREQ" );
+      return OS_ERROR_DESTADDRREQ;
     } else if( errno == EDQUOT ) {
-      sprintf( buf, "EDQUOT" );
+      return OS_ERROR_DQUOT;
     } else if( errno == EFAULT ) {
-      sprintf( buf, "EFAULT" );
+      return OS_ERROR_FAULT;
     } else if( errno == EFBIG ) {
-      sprintf( buf, "EFBIG" );
+      return OS_ERROR_FBIG;
     } else if( errno == EINVAL ) {
-      sprintf( buf, "EINVAL" );
+      return OS_ERROR_INVAL;
     } else if( errno == EINTR ) {
-      sprintf( buf, "EINTR" );
+      return OS_ERROR_INTR;
     } else if( errno == EIO ) {
-      sprintf( buf, "EIO" );
+      return OS_ERROR_IO;
     } else if( errno == ENOSPC ) {
-      sprintf( buf, "ENOSPC" );
+      return OS_ERROR_NOSPC;
     } else if( errno == EPIPE ) {
-      sprintf( buf, "EPIPE" );
+      return OS_ERROR_PIPE;
     }
-    sprintf( spstr, "ERROR : (os.cpp) select() failed calling __select(...) : errno[%s]\n", buf );
-    //info.write( spstr );
-    printf( spstr );
-    assert(1);
   }
-  return result;
+  return OS_ERROR_NONE;
 }
 
 //-----------------------------------------------------------------------------

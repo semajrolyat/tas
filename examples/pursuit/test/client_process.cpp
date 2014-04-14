@@ -55,8 +55,9 @@ void write( notification_t& note ) {
 
   // update the timestamp on the note
   note.ts = generate_timestamp();
+  ssize_t bytes_written;
 
-  if( __write( write_fd, &note, sizeof(notification_t) ) == -1 ) {
+  if( __write( write_fd, &note, sizeof(notification_t), bytes_written ) != OS_ERROR_NONE ) {
 /*
     if( errno == EPIPE )
       eno = " errno: EPIPE";
