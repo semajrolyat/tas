@@ -20,6 +20,9 @@
 
 #include "../channels.h"
 
+#define DO_LOGGING
+//#undef DO_LOGGING
+
 //-----------------------------------------------------------------------------
 static pid_t           coordinator_pid;
 static int             coordinator_os_priority;
@@ -360,6 +363,133 @@ void read_notifications( void ) {
 }
 
 //-----------------------------------------------------------------------------
+/// API function to process notifications delivered to a thread.
+/// @param thread the current thread.
+/// @param runqueue the heap of threads ready to run for a given timesink.
+/// @param waitqueue the heap of threads pending on I/O for a given timesink.
+void process_notifications( const thread_p& caller, osthread_p& thread, thread_heap_c* runqueue, thread_heap_c* waitqueue ) {
+  cycle_t reschedule_time;
+  char spstr[512];
+
+  // assert that the thread is valid 
+  if( !thread ) return;
+
+//#ifdef DEBUG
+  if( info && thread ) {
+    sprintf( spstr, "process_notifications( caller=%s, thread=%s, ", caller->name, thread->name );
+    info->write( spstr );
+    
+    if( thread->owner ) {
+      sprintf( spstr, "owner=%s, ... )\n", thread->owner->name );
+    } else {
+      sprintf( spstr, "owner=root, ... )\n" );
+    }
+    info->write( spstr );
+  } else {
+    sprintf( spstr, "process_notifications( caller=%s, thread=none, ... )\n", caller->name );
+    info->write( spstr );
+  }
+//#endif
+
+  // assert that the message queue is not empty
+  if( thread->message_queue.empty() ) {
+    runqueue->push( thread );
+    return;
+  }
+
+  // peek at the message at the head of the queue
+  notification_t msg = thread->message_queue.front();
+  // remove the message from the queue
+  thread->message_queue.pop();
+
+  // if an idle message compute values and do updates
+  if( msg.type == notification_t::IDLE ) {
+    // compute when to reschedule the thread
+    reschedule_time = thread->blocktill( msg.period );
+    // update the temporal progress
+    thread->temporal_progress += msg.period;
+  } else if( msg.type == notification_t::OPEN ) {
+    // encapsulated process has fully initialized
+  } else if( msg.type == notification_t::CLOSE ) {
+    // encapsulated process is dying, knows so, and had a chance to notify
+    // * NO GUARANTEES THAT THIS NOTIFICATION IS RECEIVED *
+  } else if( msg.type == notification_t::READ ) {
+    // client needs to read data from shared memory. Please service the request.
+    // * NOT SURE how to get forward this properly to dynamics in particular *
+  } else if( msg.type == notification_t::WRITE ) {
+    // client has written data to shared memory.  Please serve data to clients.
+    // * NOT SURE how to forward this properly to dynamics so it can update, or
+    //   to other clients that share the same owner/timesink *
+  } 
+
+//#ifdef DEBUG 
+  if( info ) {
+    // print the notification for debugging
+    char note_type[8];
+    char note_source[8];
+    if( msg.type == notification_t::IDLE )
+      sprintf( note_type, "IDLE" );
+    else if( msg.type == notification_t::OPEN )
+      sprintf( note_type, "OPEN" );
+    else if( msg.type == notification_t::CLOSE )
+      sprintf( note_type, "CLOSE" );
+    else if( msg.type == notification_t::READ )
+      sprintf( note_type, "READ" );
+    else if( msg.type == notification_t::WRITE )
+      sprintf( note_type, "WRITE" );
+
+    if( msg.source == notification_t::TIMER )
+      sprintf( note_source, "TIMER" );
+    else if( msg.source == notification_t::WAKEUP )
+      sprintf( note_source, "WAKEUP" );
+    else if( msg.source == notification_t::CLIENT )
+      sprintf( note_source, "CLIENT" );
+  
+    sprintf( spstr, "notification: type[%s], source[%s], ts[%llu], period[%llu] thread: computational_progress[%llu], temporal_progress[%llu]\n", note_type, note_source, msg.ts, msg.period, thread->computational_progress, thread->temporal_progress );
+    info->write( spstr );
+  }
+//#endif
+
+  // if an idle message, reschedule
+  //if( msg.type == notification_t::IDLE && reschedule_time > thread->temporal_progress ) {
+  if( msg.type == notification_t::IDLE ) {
+    if( info ) {
+      sprintf( spstr, "handling idle notification for %s\n", thread->name );
+      info->write( spstr );
+    }
+/*
+    // find the thread in the runqueue and remove it.
+    for( unsigned i = 0; i < runqueue.size(); i++ ) {
+      thread_p thd = runqueue.element(i);
+
+      // if not the searched for thread continue searching
+      if( thd != thread ) continue;
+
+      // otherwise remove and stop searching
+      runqueue.remove( i, thd );
+      break;
+    }
+    // to be comprehensive, might be inclined to check waitqueue,
+    // but logically, it cannot be in the waitqueue if it was running
+
+    // update its progress (forecasting in this way will account for 'idle time')
+*/
+    thread->temporal_progress = reschedule_time;
+
+    // add to the waitqueue
+    waitqueue->push( thread );
+
+    if( info ) {
+      sprintf( spstr, "slept %s\n", thread->name );
+      info->write( spstr );
+    }
+  } else {
+    runqueue->push( thread );
+  } 
+  // TODO - Logic for sending message to other threads if need be
+}
+
+//-----------------------------------------------------------------------------
 //-----------------------------------------------------------------------------
 void term_sighandler( int signum ) {
   printf( "coordinator received SIGTERM\n" );
@@ -493,7 +623,7 @@ void close_wakeup_pipe( void ) {
 //-----------------------------------------------------------------------------
 //-----------------------------------------------------------------------------
 bool init_coordinator_to_preycontroller_pipe( void ) {
-  return init_pipe( FD_COORDINATOR_TO_PREYCONTROLLER_READ_CHANNEL, FD_COORDINATOR_TO_PREYCONTROLLER_WRITE_CHANNEL );
+  return init_pipe( FD_COORDINATOR_TO_PREYCONTROLLER_READ_CHANNEL, FD_COORDINATOR_TO_PREYCONTROLLER_WRITE_CHANNEL, true );
 }
 
 //-----------------------------------------------------------------------------
@@ -504,7 +634,7 @@ void close_coordinator_to_preycontroller_pipe( void ) {
 
 //-----------------------------------------------------------------------------
 bool init_preycontroller_to_coordinator_pipe( void ) {
-  return init_pipe( FD_PREYCONTROLLER_TO_COORDINATOR_READ_CHANNEL, FD_PREYCONTROLLER_TO_COORDINATOR_WRITE_CHANNEL );
+  return init_pipe( FD_PREYCONTROLLER_TO_COORDINATOR_READ_CHANNEL, FD_PREYCONTROLLER_TO_COORDINATOR_WRITE_CHANNEL, true );
 }
 
 //-----------------------------------------------------------------------------
@@ -516,7 +646,7 @@ void close_preycontroller_to_coordinator_pipe( void ) {
 //-----------------------------------------------------------------------------
 //-----------------------------------------------------------------------------
 bool init_coordinator_to_predplanner_pipe( void ) {
-  return init_pipe( FD_COORDINATOR_TO_PREDPLANNER_READ_CHANNEL, FD_COORDINATOR_TO_PREDPLANNER_WRITE_CHANNEL );
+  return init_pipe( FD_COORDINATOR_TO_PREDPLANNER_READ_CHANNEL, FD_COORDINATOR_TO_PREDPLANNER_WRITE_CHANNEL, true );
 }
 
 //-----------------------------------------------------------------------------
@@ -527,7 +657,7 @@ void close_coordinator_to_predplanner_pipe( void ) {
 
 //-----------------------------------------------------------------------------
 bool init_predplanner_to_coordinator_pipe( void ) {
-  return init_pipe( FD_PREDPLANNER_TO_COORDINATOR_READ_CHANNEL, FD_PREDPLANNER_TO_COORDINATOR_WRITE_CHANNEL );
+  return init_pipe( FD_PREDPLANNER_TO_COORDINATOR_READ_CHANNEL, FD_PREDPLANNER_TO_COORDINATOR_WRITE_CHANNEL, true );
 }
 
 //-----------------------------------------------------------------------------
@@ -539,7 +669,7 @@ void close_predplanner_to_coordinator_pipe( void ) {
 //-----------------------------------------------------------------------------
 //-----------------------------------------------------------------------------
 bool init_coordinator_to_predcontroller_pipe( void ) {
-  return init_pipe( FD_COORDINATOR_TO_PREDCONTROLLER_READ_CHANNEL, FD_COORDINATOR_TO_PREDCONTROLLER_WRITE_CHANNEL );
+  return init_pipe( FD_COORDINATOR_TO_PREDCONTROLLER_READ_CHANNEL, FD_COORDINATOR_TO_PREDCONTROLLER_WRITE_CHANNEL, true );
 }
 
 //-----------------------------------------------------------------------------
@@ -550,7 +680,7 @@ void close_coordinator_to_predcontroller_pipe( void ) {
 
 //-----------------------------------------------------------------------------
 bool init_predcontroller_to_coordinator_pipe( void ) {
-  return init_pipe( FD_PREDCONTROLLER_TO_COORDINATOR_READ_CHANNEL, FD_PREDCONTROLLER_TO_COORDINATOR_WRITE_CHANNEL );
+  return init_pipe( FD_PREDCONTROLLER_TO_COORDINATOR_READ_CHANNEL, FD_PREDCONTROLLER_TO_COORDINATOR_WRITE_CHANNEL, true );
 }
 
 //-----------------------------------------------------------------------------
@@ -660,7 +790,7 @@ void init( int argc, char* argv[] ) {
   sigaction( SIGTERM, &action, NULL );
 
   // * open log *
-///*
+#ifdef DO_LOGGING
   info = log_p( new log_c( "info.log", true ) );
   log_c::error_e log_err = info->allocate( LOG_CAPACITY );
   if( log_err != log_c::ERROR_NONE ) {
@@ -668,7 +798,7 @@ void init( int argc, char* argv[] ) {
     printf( spstr );
     exit( 1 );
   }
-//*/
+#endif
 
   // * get the process identifier *
   coordinator_pid = getpid( );
@@ -826,7 +956,7 @@ void init( int argc, char* argv[] ) {
   processor->run_queue.push( prey );
   prey_thread = boost::dynamic_pointer_cast<thread_c>(prey);
 
-  prey_controller = boost::shared_ptr<osthread_c>( new osthread_c( "prey_controller", prey, &select, &read_notifications, pinfo ) );
+  prey_controller = boost::shared_ptr<osthread_c>( new osthread_c( "prey_controller", prey, &select, &read_notifications, &process_notifications, pinfo ) );
   prey_controller->_max_os_priority = CLIENT_OS_MAX_PRIORITY;
   prey_controller->_min_os_priority = CLIENT_OS_MIN_PRIORITY;
   prey_controller->_os_priority_step = client_os_priority_step;
@@ -848,7 +978,7 @@ void init( int argc, char* argv[] ) {
   processor->run_queue.push( pred );
   pred_thread = boost::dynamic_pointer_cast<thread_c>(pred);
 
-  pred_controller = boost::shared_ptr<osthread_c>( new osthread_c( "pred_controller", pred, &select, &read_notifications, pinfo ) );
+  pred_controller = boost::shared_ptr<osthread_c>( new osthread_c( "pred_controller", pred, &select, &read_notifications, &process_notifications, pinfo ) );
   pred_controller->_max_os_priority = CLIENT_OS_MAX_PRIORITY;
   pred_controller->_min_os_priority = CLIENT_OS_MIN_PRIORITY;
   pred_controller->_os_priority_step = client_os_priority_step;

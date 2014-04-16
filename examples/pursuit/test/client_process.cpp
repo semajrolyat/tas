@@ -263,9 +263,9 @@ int main( int argc, char* argv[] ) {
 
   while( !quit ) {
   //while( !quit.load( std::memory_order_seq_cst ) ) {
-    request_state();
+    //request_state();
     compute_command();
-    publish_command();
+    //publish_command();
     publish_yield();
   }
 

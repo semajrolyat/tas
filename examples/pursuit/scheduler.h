@@ -60,7 +60,7 @@ public:
   // --
   static thread_p schedule( const thread_p& caller, thread_heap_c& runqueue );
 
-  static void process_notifications( const thread_p& caller, osthread_p& current_thread, thread_heap_c& runqueue, thread_heap_c& waitqueue, log_c* info );
+  //static void process_notifications( const thread_p& caller, osthread_p& current_thread, thread_heap_c& runqueue, thread_heap_c& waitqueue, log_c* info );
 
   static void process_wakeups( const thread_p& caller, thread_heap_c& runqueue, thread_heap_c& waitqueue, log_c* info );
 

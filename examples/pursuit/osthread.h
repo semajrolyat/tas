@@ -27,10 +27,11 @@ public:
   // callback functions
   select_f select; 
   read_notifications_f read_notifications;
+  process_notifications_f process_notifications;
 
   osthread_c( const char* name );
   osthread_c( const char* name, const timesink_p& owner );
-  osthread_c( const char* name, const timesink_p& owner, select_f select, read_notifications_f read_notifications, log_c* info );
+  osthread_c( const char* name, const timesink_p& owner, select_f select, read_notifications_f read_notifications, process_notifications_f process_notifications, log_c* info );
   virtual ~osthread_c( void );
 
   virtual type_e type( void ) { return OSTHREAD; }

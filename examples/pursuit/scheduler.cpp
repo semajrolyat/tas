@@ -28,133 +28,6 @@ thread_p scheduler_c::schedule( const thread_p& caller, thread_heap_c& runqueue 
 }
 
 //-----------------------------------------------------------------------------
-/// API function to process notifications delivered to a thread.
-/// @param thread the current thread.
-/// @param runqueue the heap of threads ready to run for a given timesink.
-/// @param waitqueue the heap of threads pending on I/O for a given timesink.
-void scheduler_c::process_notifications( const thread_p& caller, osthread_p& thread, thread_heap_c& runqueue, thread_heap_c& waitqueue, log_c* info = NULL ) {
-  cycle_t reschedule_time;
-  char spstr[512];
-
-  // assert that the thread is valid 
-  if( !thread ) return;
-
-//#ifdef DEBUG
-  if( info != NULL && thread ) {
-    sprintf( spstr, "process_notifications( caller=%s, thread=%s, ", caller->name, thread->name );
-    info->write( spstr );
-    
-    if( thread->owner ) {
-      sprintf( spstr, "owner=%s, ... )\n", thread->owner->name );
-    } else {
-      sprintf( spstr, "owner=root, ... )\n" );
-    }
-    info->write( spstr );
-  } else {
-    sprintf( spstr, "process_notifications( caller=%s, thread=none, ... )\n", caller->name );
-    info->write( spstr );
-  }
-//#endif
-
-  // assert that the message queue is not empty
-  if( thread->message_queue.empty() ) {
-    runqueue.push( thread );
-    return;
-  }
-
-  // peek at the message at the head of the queue
-  notification_t msg = thread->message_queue.front();
-  // remove the message from the queue
-  thread->message_queue.pop();
-
-  // if an idle message compute values and do updates
-  if( msg.type == notification_t::IDLE ) {
-    // compute when to reschedule the thread
-    reschedule_time = thread->blocktill( msg.period );
-    // update the temporal progress
-    thread->temporal_progress += msg.period;
-  } else if( msg.type == notification_t::OPEN ) {
-    // encapsulated process has fully initialized
-  } else if( msg.type == notification_t::CLOSE ) {
-    // encapsulated process is dying, knows so, and had a chance to notify
-    // * NO GUARANTEES THAT THIS NOTIFICATION IS RECEIVED *
-  } else if( msg.type == notification_t::READ ) {
-    // client needs to read data from shared memory. Please service the request.
-    // * NOT SURE how to get forward this properly to dynamics in particular *
-  } else if( msg.type == notification_t::WRITE ) {
-    // client has written data to shared memory.  Please serve data to clients.
-    // * NOT SURE how to forward this properly to dynamics so it can update, or
-    //   to other clients that share the same owner/timesink *
-  } 
-
-//#ifdef DEBUG 
-  if( info != NULL ) {
-    // print the notification for debugging
-    char note_type[8];
-    char note_source[8];
-    if( msg.type == notification_t::IDLE )
-      sprintf( note_type, "IDLE" );
-    else if( msg.type == notification_t::OPEN )
-      sprintf( note_type, "OPEN" );
-    else if( msg.type == notification_t::CLOSE )
-      sprintf( note_type, "CLOSE" );
-    else if( msg.type == notification_t::READ )
-      sprintf( note_type, "READ" );
-    else if( msg.type == notification_t::WRITE )
-      sprintf( note_type, "WRITE" );
-
-    if( msg.source == notification_t::TIMER )
-      sprintf( note_source, "TIMER" );
-    else if( msg.source == notification_t::WAKEUP )
-      sprintf( note_source, "WAKEUP" );
-    else if( msg.source == notification_t::CLIENT )
-      sprintf( note_source, "CLIENT" );
-  
-    sprintf( spstr, "notification: type[%s], source[%s], ts[%llu], period[%llu] thread: computational_progress[%llu], temporal_progress[%llu]\n", note_type, note_source, msg.ts, msg.period, thread->computational_progress, thread->temporal_progress );
-    info->write( spstr );
-  }
-//#endif
-
-  // if an idle message, reschedule
-  //if( msg.type == notification_t::IDLE && reschedule_time > thread->temporal_progress ) {
-  if( msg.type == notification_t::IDLE ) {
-    if( info != NULL ) {
-      sprintf( spstr, "handling idle notification for %s\n", thread->name );
-      info->write( spstr );
-    }
-/*
-    // find the thread in the runqueue and remove it.
-    for( unsigned i = 0; i < runqueue.size(); i++ ) {
-      thread_p thd = runqueue.element(i);
-
-      // if not the searched for thread continue searching
-      if( thd != thread ) continue;
-
-      // otherwise remove and stop searching
-      runqueue.remove( i, thd );
-      break;
-    }
-    // to be comprehensive, might be inclined to check waitqueue,
-    // but logically, it cannot be in the waitqueue if it was running
-
-    // update its progress (forecasting in this way will account for 'idle time')
-*/
-    thread->temporal_progress = reschedule_time;
-
-    // add to the waitqueue
-    waitqueue.push( thread );
-
-    if( info != NULL ) {
-      sprintf( spstr, "slept %s\n", thread->name );
-      info->write( spstr );
-    }
-  } else {
-    runqueue.push( thread );
-  } 
-  // TODO - Logic for sending message to other threads if need be
-}
-
-//-----------------------------------------------------------------------------
 /// API function to determine whether a thread is ready to transition from 
 /// waiting to running.
 /// @param runqueue the heap of threads ready to run for a given timesink.
@@ -242,7 +115,7 @@ void scheduler_c::step_system( const thread_p& caller, thread_p& current_thread,
   if( next_thread->type() == thread_c::OSTHREAD ) {
     osthread_p current_osthread = boost::dynamic_pointer_cast<osthread_c>( next_thread );
     // process any messages delivered to the current thread
-    process_notifications( caller, current_osthread, runqueue, waitqueue, info );
+    current_osthread->process_notifications( caller, current_osthread, &runqueue, &waitqueue );
 
     //runqueue.push( next_thread );
   } else if( next_thread->type() == thread_c::TIMESINK ) {

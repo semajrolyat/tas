@@ -41,12 +41,13 @@ osthread_c::osthread_c( const char* name, const timesink_p& owner ) :
 }
 
 //-----------------------------------------------------------------------------
-osthread_c::osthread_c( const char* name, const timesink_p& owner, select_f select, read_notifications_f read_notifications, log_c* info = NULL ) : 
+osthread_c::osthread_c( const char* name, const timesink_p& owner, select_f select, read_notifications_f read_notifications, process_notifications_f process_notifications, log_c* info = NULL ) : 
   timesink_c( name, owner, scheduler_c::PRIORITY ) 
 {
   //sprintf( this->name, "%s", name );
   this->select = select;
   this->read_notifications = read_notifications;
+  this->process_notifications = process_notifications;
   _info = info;
 
   assert( scheduler_c::get_realtime_min_priority(_min_os_priority) == scheduler_c::ERROR_NONE );
