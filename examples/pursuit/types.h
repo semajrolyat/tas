@@ -3,6 +3,9 @@
 
 #include <boost/shared_ptr.hpp>
 
+class log_c;
+typedef boost::shared_ptr<log_c> log_p;
+
 class thread_c;
 typedef boost::shared_ptr<thread_c> thread_p;
 

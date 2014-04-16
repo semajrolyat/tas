@@ -36,6 +36,9 @@ void scheduler_c::process_notifications( const thread_p& caller, osthread_p& thr
   cycle_t reschedule_time;
   char spstr[512];
 
+  // assert that the thread is valid 
+  if( !thread ) return;
+
 //#ifdef DEBUG
   if( info != NULL && thread ) {
     sprintf( spstr, "process_notifications( caller=%s, thread=%s, ", caller->name, thread->name );
@@ -53,8 +56,8 @@ void scheduler_c::process_notifications( const thread_p& caller, osthread_p& thr
   }
 //#endif
 
-  // assert that the thread is valid and that the message queue is not empty
-  if( !thread || thread->message_queue.empty() ) {
+  // assert that the message queue is not empty
+  if( thread->message_queue.empty() ) {
     runqueue.push( thread );
     return;
   }
@@ -70,7 +73,19 @@ void scheduler_c::process_notifications( const thread_p& caller, osthread_p& thr
     reschedule_time = thread->blocktill( msg.period );
     // update the temporal progress
     thread->temporal_progress += msg.period;
-  }
+  } else if( msg.type == notification_t::OPEN ) {
+    // encapsulated process has fully initialized
+  } else if( msg.type == notification_t::CLOSE ) {
+    // encapsulated process is dying, knows so, and had a chance to notify
+    // * NO GUARANTEES THAT THIS NOTIFICATION IS RECEIVED *
+  } else if( msg.type == notification_t::READ ) {
+    // client needs to read data from shared memory. Please service the request.
+    // * NOT SURE how to get forward this properly to dynamics in particular *
+  } else if( msg.type == notification_t::WRITE ) {
+    // client has written data to shared memory.  Please serve data to clients.
+    // * NOT SURE how to forward this properly to dynamics so it can update, or
+    //   to other clients that share the same owner/timesink *
+  } 
 
 //#ifdef DEBUG 
   if( info != NULL ) {

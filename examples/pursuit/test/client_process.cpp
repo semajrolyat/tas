@@ -30,7 +30,7 @@ static int            read_fd;
 
 notification_t        command_note;
 notification_t        state_note;
-notification_t        block_note;
+notification_t        yield_note;
 notification_t        server_note;
 
 //-----------------------------------------------------------------------------
@@ -95,6 +95,8 @@ void term_sighandler( int signum ) {
 
 //-----------------------------------------------------------------------------
 void compute_command( void ) {
+
+  // Busy work
   counter = 0;
   unsigned cycles_to_run = (rand() % rand_delta) + min_cycles;
 
@@ -111,6 +113,7 @@ void request_state( void ) {
   // write the request information into the shared memory buffer
 
   // send the notification to the coordinator
+  state_note.ts = generate_timestamp();
   write( state_note );
 
   // read( block ) the notification sent back from the coordinator
@@ -129,16 +132,21 @@ bool publish_command( void ) {
   // put data in the shared memory buffer
 
   // send the notification to the coordinator
+  command_note.ts = generate_timestamp();
   write( command_note );
   
+  // probably need to force a block here
+
   return true;
 }
 
 //-----------------------------------------------------------------------------
-void publish_block( void ) {
+// May be superfluous with above
+void publish_yield( void ) {
 
   // send the notification to the coordinator
-  write( block_note );
+  yield_note.ts = generate_timestamp();
+  write( yield_note );
 
 }
 
@@ -229,10 +237,10 @@ int init( int argc, char* argv[] ) {
   command_note.pid = mythread->pid;
 
   // - block notification -
-  block_note.period = max_cycles;
-  block_note.source = notification_t::CLIENT;
-  block_note.type = notification_t::IDLE;
-  block_note.pid = mythread->pid;
+  yield_note.period = max_cycles;
+  yield_note.source = notification_t::CLIENT;
+  yield_note.type = notification_t::IDLE;
+  yield_note.pid = mythread->pid;
 
   return 0;
 }
@@ -255,10 +263,10 @@ int main( int argc, char* argv[] ) {
 
   while( !quit ) {
   //while( !quit.load( std::memory_order_seq_cst ) ) {
-    //request_state();
+    request_state();
     compute_command();
-    //publish_command();
-    publish_block();
+    publish_command();
+    publish_yield();
   }
 
   shutdown();
