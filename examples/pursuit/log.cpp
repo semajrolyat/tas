@@ -77,11 +77,11 @@ log_c::error_e log_c::flush( void ) {
   // insert target
   if( _firstwrite ) {
     // open for overwriting
-    fd = __open( _path, O_WRONLY | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH );
+    fd = __open( _path, O_WRONLY | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH | S_IWOTH );
     _firstwrite = false;
   } else {
     // open for appending
-    fd = __open( _path, O_WRONLY | O_APPEND, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH );
+    fd = __open( _path, O_WRONLY | O_APPEND, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH | S_IWOTH );
   }
 
   // validate the file descriptor returned from the open call

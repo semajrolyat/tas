@@ -178,25 +178,31 @@ void osthread_c::terminate( void ) {
 //-----------------------------------------------------------------------------
 void osthread_c::raise_priority( void ) {
 
-  if( _os_priority < _max_os_priority ) {
+  //if( _os_priority < _max_os_priority ) {
     scheduler_c::error_e error;
+    printf( "increasing_priority: pid=%d, _os_priority=%d, _os_priority_step=%d\n", pid, _os_priority, _os_priority_step );
     error = scheduler_c::increase_realtime_priority( pid, _os_priority, _os_priority_step, _max_os_priority );
     if( error != scheduler_c::ERROR_NONE ) {
       // TODO: how to recover?
+      printf( "failed to raise_priority\n" );
     }
-  }
+    printf( "after increasing_priority: pid=%d, _os_priority=%d, _os_priority_step=%d\n", pid, _os_priority, _os_priority_step );
+  //}
 }
 
 //-----------------------------------------------------------------------------
 void osthread_c::lower_priority( void ) {
 
-  if( _os_priority > _min_os_priority ) {
+  //if( _os_priority > _min_os_priority ) {
     scheduler_c::error_e error;
+    printf( "decreasing_priority: pid=%d, _os_priority=%d, _os_priority_step=%d\n", pid, _os_priority, _os_priority_step );
     error = scheduler_c::decrease_realtime_priority( pid, _os_priority, _os_priority_step, _min_os_priority );
     if( error != scheduler_c::ERROR_NONE ) {
       // TODO: how to recover?
+      printf( "failed to decrease_priority\n" );
     }
-  }
+    printf( "after decreasing_priority: pid=%d, _os_priority=%d, _os_priority_step=%d\n", pid, _os_priority, _os_priority_step );
+  //}
 }
 
 //-----------------------------------------------------------------------------

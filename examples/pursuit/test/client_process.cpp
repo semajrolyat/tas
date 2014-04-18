@@ -7,6 +7,7 @@
 #include <unistd.h>
 #include <signal.h>
 
+#include "../log.h"
 #include "../time.h"
 #include "../os.h"
 #include "../notification.h"
@@ -16,6 +17,11 @@
 #include "../osthread.h"
 
 #include <errno.h>
+
+//-----------------------------------------------------------------------------
+log_p info;
+#define LOG_CAPACITY 4096
+char spstr[512];
 
 //-----------------------------------------------------------------------------
 // Local helpers
@@ -52,38 +58,40 @@ void read( notification_t& note ) {
 
 //-----------------------------------------------------------------------------
 void write( notification_t& note ) {
+  char eno[16];
 
   // update the timestamp on the note
   note.ts = generate_timestamp();
   ssize_t bytes_written;
 
-  if( __write( write_fd, &note, sizeof(notification_t), bytes_written ) != OS_ERROR_NONE ) {
-/*
-    if( errno == EPIPE )
-      eno = " errno: EPIPE";
-    else if( errno == EAGAIN || errno == EWOULDBLOCK )
-      eno = " errno: EWOULDBLOCK";
-    else if( errno == EBADF )
-      eno = " errno: EBADF";
-    else if( errno == EDESTADDRREQ )
-      eno = " errno: EDESTADDRREQ";
-    else if( errno == EDQUOT )
-      eno = " errno: EDQUOT";
-    else if( errno == EFAULT )
-      eno = " errno: EFAULT";
-    else if( errno == EFBIG )
-      eno = " errno: EFBIG";
-    else if( errno == EINTR )
-      eno = " errno: EINTR";
-    else if( errno == EINVAL )
-      eno = " errno: EINVAL";
-    else if( errno == EIO )
-      eno = " errno: EIO";
-    else if( errno == ENOSPC )
-      eno = " errno: ENOSPC";
-    err = "(" + mythread.name + ") failed making system call write(...)" + eno;
-    printf( "ERROR: %s\n", err.c_str() );
-*/
+  os_error_e result;
+  result = __write( write_fd, &note, sizeof(notification_t), bytes_written );
+  if( result != OS_ERROR_NONE ) {
+///*
+    if( result == OS_ERROR_PIPE )
+      sprintf( eno, "EPIPE" );
+    else if( result == OS_ERROR_AGAIN )
+      sprintf( eno, "EWOULDBLOCK" );
+    else if( result == OS_ERROR_BADF )
+      sprintf( eno, "EBADF" );
+    else if( result == OS_ERROR_DESTADDRREQ )
+      sprintf( eno, "EDESTADDRREQ" );
+    else if( result == OS_ERROR_DQUOT )
+      sprintf( eno, "EDQUOT" );
+    else if( result == OS_ERROR_FAULT )
+      sprintf( eno, "EFAULT" );
+    else if( result == OS_ERROR_FBIG )
+      sprintf( eno, "EFBIG" );
+    else if( result == OS_ERROR_INTR )
+      sprintf( eno, "EINTR" );
+    else if( result == OS_ERROR_INVAL )
+      sprintf( eno, "EINVAL" );
+    else if( result == OS_ERROR_IO )
+      sprintf( eno, "EIO" );
+    else if( result == OS_ERROR_NOSPC )
+      sprintf( eno, "ENOSPC" );
+    printf( "ERROR: (%s) failed making system call write(...) errno[%s]\n", mythread->name, eno );
+//*/
   }
 }
 
@@ -158,12 +166,6 @@ int init( int argc, char* argv[] ) {
   //quit.store( 0, std::memory_order_seq_cst );
   mythread->pid = getpid();
 
-  // * install SIGTERM signal handler *
-  struct sigaction action;
-  memset( &action, 0, sizeof(struct sigaction) );
-  action.sa_handler = term_sighandler;
-  sigaction( SIGTERM, &action, NULL );
-
   if( argc < 4 ) {
     printf( "ERROR: client process[%s] was not given enough arguments\nExiting client process.\n", mythread->name );
     exit( 1 );
@@ -177,6 +179,23 @@ int init( int argc, char* argv[] ) {
   srand( rand_seed );
 
   rand_delta = max_cycles - min_cycles;
+
+  // open log * only for debugging client process ipc using test_client.cpp*
+  char logname[64];
+  sprintf( logname, "%s.log", mythread->name );
+  info = log_p( new log_c( logname, true ) );
+  log_c::error_e log_err = info->allocate( LOG_CAPACITY );
+  if( log_err != log_c::ERROR_NONE ) {
+    sprintf( spstr, "(client-process.cpp) init() failed calling log_c::allocate(...).\nExiting\n" ); 
+    printf( spstr );
+    exit( 1 );
+  }
+
+  // * install SIGTERM signal handler *
+  struct sigaction action;
+  memset( &action, 0, sizeof(struct sigaction) );
+  action.sa_handler = term_sighandler;
+  sigaction( SIGTERM, &action, NULL );
 
   // close the coordinator side channels
   __close( FD_TIMER_TO_COORDINATOR_READ_CHANNEL );
@@ -263,9 +282,9 @@ int main( int argc, char* argv[] ) {
 
   while( !quit ) {
   //while( !quit.load( std::memory_order_seq_cst ) ) {
-    //request_state();
+    request_state();
     compute_command();
-    //publish_command();
+    publish_command();
     publish_yield();
   }
 

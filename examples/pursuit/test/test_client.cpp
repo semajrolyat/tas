@@ -433,6 +433,8 @@ void process_notifications( const thread_p& caller, osthread_p& thread, thread_h
 
   // if an idle message, reschedule
   //if( msg.type == notification_t::IDLE && reschedule_time > thread->temporal_progress ) {
+  // TODO (in test_coordinator): Not checking source here before type which may
+  // result in erroneous action
   if( msg.type == notification_t::IDLE ) {
     if( info ) {
       sprintf( spstr, "handling idle notification for %s\n", thread->name );
@@ -978,7 +980,7 @@ void init( int argc, char* argv[] ) {
 
   log_c* pinfo = NULL;
   if( info ) pinfo = info.get();
-
+/*
   // - create a processor -
   processor = boost::shared_ptr<processor_c>( new processor_c( "processor_0" ) );
   timesink_p processor_timesink = boost::dynamic_pointer_cast<timesink_c>( processor );
@@ -996,7 +998,7 @@ void init( int argc, char* argv[] ) {
   //prey->priority = 0;
   processor->run_queue.push( prey );
   prey_thread = boost::dynamic_pointer_cast<thread_c>(prey);
-
+*/
   prey_controller = boost::shared_ptr<osthread_c>( new osthread_c( "prey_controller", prey, &select, &read_notifications, &process_notifications, pinfo ) );
   prey_controller->_max_os_priority = CLIENT_OS_MAX_PRIORITY;
   prey_controller->_min_os_priority = CLIENT_OS_MIN_PRIORITY;
@@ -1004,14 +1006,14 @@ void init( int argc, char* argv[] ) {
   prey_controller->_cpu_speed = cpu_speed;
   prey_controller->priority = 0;
   prey_controller->desired_period = seconds_to_cycles( controller_ceiling_seconds, cpu_speed );
-  prey->run_queue.push( prey_controller );
+  //prey->run_queue.push( prey_controller );
 
   schedulererr = scheduler_c::create( prey_controller, 3, DEFAULT_CPU, "client-process", "prey-controller", controller_seed.c_str(), controller_floor.c_str(), controller_ceiling.c_str() );
   //prey_controller->block();
 
   sprintf( spstr, "created prey-controller: pid[%d], _os_priority[%d], _os_priority_step[%d], _max_os_priority[%d], _min_os_priority[%d]\n", prey_controller->pid, prey_controller->_os_priority, prey_controller->_os_priority_step, prey_controller->_max_os_priority, prey_controller->_min_os_priority );
   if( info ) info->write( spstr );
-
+/*
   // - create predator processes -
   pred = boost::shared_ptr<timesink_c>( new timesink_c( "pred", processor_timesink, scheduler_c::PROGRESS) );
   pred->info = pinfo;
@@ -1033,7 +1035,7 @@ void init( int argc, char* argv[] ) {
 
   sprintf( spstr, "created pred-controller: pid[%d], _os_priority[%d], _os_priority_step[%d], _max_os_priority[%d], _min_os_priority[%d]\n", pred_controller->pid, pred_controller->_os_priority, pred_controller->_os_priority_step, pred_controller->_max_os_priority, pred_controller->_min_os_priority );
   if( info ) info->write( spstr );
-
+*/
   // * initialize timer *
   // set up the timer handler overhead to minimize what changes inside
   timer_note.source = notification_t::TIMER;
@@ -1078,11 +1080,11 @@ void shutdown( void ) {
   pthread_cancel( wakeup_thread );
   //sleep( 1 );
 //*/
-
+/*
   // delete the timer
   timer.block();
   timer.destroy();
-
+*/
   // wait for close messages from all clients
 /*
   bool clients_shutdown = false;
@@ -1094,11 +1096,12 @@ void shutdown( void ) {
   // wait for close messages from all clients
   int status;
 ///*
+/*
   if( pred_controller ) {
     kill( pred_controller->pid, SIGTERM );
     waitpid( pred_controller->pid, &status, 0 );
   }
-
+*/
   if( prey_controller ) {
     kill( prey_controller->pid, SIGTERM );
     waitpid( prey_controller->pid, &status, 0 );
@@ -1155,9 +1158,173 @@ int main( int argc, char* argv[] ) {
   timer.arm( timer_c::PERIODIC, TIMER_PERIOD_NSECS );
 
   //while( !quit.load( std::memory_order_seq_cst ) ) {
-  while( !quit.load( std::memory_order_relaxed ) ) {
   //while( !quit ) {
-    scheduler_c::step_system( processor_thread, current_thread, processor->run_queue, processor->block_queue, info.get() );
+
+  bool preycontroller_idle = true;
+  while( !quit.load( std::memory_order_relaxed ) ) {
+
+    int fd;
+    notification_t note;
+    ssize_t bytes;
+
+    while( !select() );
+
+    if( FD_ISSET( FD_TIMER_TO_COORDINATOR_READ_CHANNEL, &pending_fds ) != 0 ) {
+      fd = FD_TIMER_TO_COORDINATOR_READ_CHANNEL;
+      if( __read( fd, &note, sizeof(notification_t) ) == -1 ) {
+        if( info ) {
+          sprintf( spstr, "ERROR : (coordinator.cpp) read_messages() failed calling __read(FD_TIMER_TO_COORDINATOR_READ_CHANNEL,...)\n" );
+          info->write( spstr );
+        }
+      } else {
+        if( info ) {
+          sprintf( spstr, "read_notifications( note.source=TIMER, caught_timer_events=%d, actual_timer_events=%d\n", ++caught_timer_events, actual_timer_events );
+          info->write( spstr );
+        }
+
+        if( caught_timer_events >= MAX_TIMER_EVENTS ) {
+          //quit.store( 1, std::memory_order_relaxed  );
+          //quit.store( 1, std::memory_order_seq_cst  );
+          //quit = true;
+          //quit++;
+          if( info ) {
+            info->flush();
+          }
+          kill( coordinator_pid, SIGTERM );
+        }
+        if( preycontroller_idle ) {
+          //pthread_kill( wakeup_thread, SIGSTOP );
+          prey_controller->raise_priority();
+          //pthread_kill( wakeup_thread, SIGCONT );
+          preycontroller_idle = false;
+          sprintf( spstr, "raised_priority: pid=%d, _os_priority=%d)\n", prey_controller->pid, prey_controller->_os_priority );
+          info->write( spstr );
+        }
+      }
+    }
+
+    // - check for client specific notifications -
+    // prey controller
+    if( FD_ISSET( FD_PREYCONTROLLER_TO_COORDINATOR_READ_CHANNEL, &pending_fds ) != 0) {
+      fd = FD_PREYCONTROLLER_TO_COORDINATOR_READ_CHANNEL;
+      if( __read( fd, &note, sizeof(notification_t) ) == -1 ) {
+        if( info ) {
+          sprintf( spstr, "ERROR : (coordinator.cpp) read_messages() failed calling __read(FD_PREYCONTROLLER_TO_COORDINATOR_READ_CHANNEL,...)\n" );
+          info->write( spstr );
+        }
+        //printf( "%s\n", spstr );
+      } else {
+        if( info ) {
+          char note_type[8];
+          if( note.type == notification_t::IDLE )
+            sprintf( note_type, "IDLE" );
+          else if( note.type == notification_t::OPEN )
+            sprintf( note_type, "OPEN" );
+          else if( note.type == notification_t::CLOSE )
+            sprintf( note_type, "CLOSE" );
+          else if( note.type == notification_t::READ )
+            sprintf( note_type, "READ" );
+          else if( note.type == notification_t::WRITE )
+            sprintf( note_type, "WRITE" );
+
+          sprintf( spstr, "read_notifications( note.source=CLIENT, note.type=%s, client=prey_controller )\n", note_type );
+          info->write( spstr );
+        }
+
+        if( note.type == notification_t::CLOSE ) {
+          prey_controller->invalidated = true;
+        } else {
+          prey_controller->message_queue.push( note );
+        }
+      }
+    }
+
+    // check block detection first.  If client blocked, needs to be put into 
+    // blocking queue.  If falls through, might get put into run queue instead.
+    if( FD_ISSET( FD_WAKEUP_TO_COORDINATOR_READ_CHANNEL, &pending_fds) != 0 ) {
+      fd = FD_WAKEUP_TO_COORDINATOR_READ_CHANNEL;
+      if( __read( fd, &note, sizeof(notification_t) ) == -1 ) {
+        if( info ) {
+          sprintf( spstr, "ERROR : (coordinator.cpp) read_messages() failed calling __read(FD_WAKEUP_TO_COORDINATOR_READ_CHANNEL,...)\n" );
+          info->write( spstr );
+        }
+      } else {
+        if( info ) {
+          sprintf( spstr, "read_notifications( note.source=WAKEUP\n" );
+          info->write( spstr );
+        }
+
+        // reenable block detection notifications
+        wakeup_enabled.store( 1, std::memory_order_seq_cst  );
+      }
+    }
+
+/*
+    if( info ) {
+      // print the notification for debugging
+      char note_type[8];
+      char note_source[8];
+      if( note.source == notification_t::TIMER )
+        sprintf( note_source, "TIMER" );
+      else if( note.source == notification_t::WAKEUP )
+        sprintf( note_source, "WAKEUP" );
+      else if( note.source == notification_t::CLIENT )
+        sprintf( note_source, "CLIENT" );
+  
+      if( note.type == notification_t::IDLE )
+        sprintf( note_type, "IDLE" );
+      else if( note.type == notification_t::OPEN )
+        sprintf( note_type, "OPEN" );
+      else if( note.type == notification_t::CLOSE )
+        sprintf( note_type, "CLOSE" );
+      else if( note.type == notification_t::READ )
+        sprintf( note_type, "READ" );
+      else if( note.type == notification_t::WRITE )
+        sprintf( note_type, "WRITE" );
+
+      sprintf( spstr, "notification: source[%s], type[%s], ts[%llu], period[%llu]\n", note_source, note_type, note.ts, note.period );
+      info->write( spstr );
+    }
+*/
+    if( note.source == notification_t::CLIENT ) {
+      if( note.type == notification_t::IDLE ) {
+        //pthread_kill( wakeup_thread, SIGSTOP );
+        prey_controller->lower_priority();
+        //pthread_kill( wakeup_thread, SIGCONT );
+        preycontroller_idle = true;
+        sprintf( spstr, "lowered_priority: pid=%d, _os_priority=%d)\n", prey_controller->pid, prey_controller->_os_priority );
+        info->write( spstr );
+      } else if( note.type == notification_t::OPEN ) {
+
+      } else if( note.type == notification_t::CLOSE ) {
+
+      } else if( note.type == notification_t::READ ) {
+        fd = FD_COORDINATOR_TO_PREYCONTROLLER_WRITE_CHANNEL;
+        note.source = notification_t::SERVER;
+        note.type = notification_t::READ;      // the instruction to the client
+
+        sprintf( spstr, "server responding with notification: source[SERVER], type[READ]\n" );
+        info->write( spstr );
+
+        note.ts = generate_timestamp();
+        if( __write( fd, &note, sizeof(notification_t), bytes ) != OS_ERROR_NONE ) {
+          // TODO: Handle/Recover
+          if( info ) {
+          sprintf( spstr, "ERROR : (coordinator.cpp) process_notifications() failed calling __write(FD_COORDINATOR_TO_PREYCONTROLLER_WRITE_CHANNEL,...)\n" );
+          info->write( spstr );
+          }
+        }
+      } else if( note.type == notification_t::WRITE ) {
+
+      }
+    } else if( note.source == notification_t::TIMER ) {
+
+    } else if( note.source == notification_t::WAKEUP ) {
+
+    }
+
+
+    info->flush();
   }
 
   shutdown();

@@ -87,6 +87,8 @@ os_error_e __write( int fd, void* buffer, size_t bytes_to_write, ssize_t& bytes_
     bytes_written = 0;
     if( errno == EAGAIN ) {
       return OS_ERROR_AGAIN;
+    } else if( errno == EWOULDBLOCK ) {
+      return OS_ERROR_AGAIN;
     } else if( errno == EBADF ) {
       return OS_ERROR_BADF;
     } else if( errno == EDESTADDRREQ ) {

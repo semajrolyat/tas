@@ -10,5 +10,8 @@ target_link_libraries( test-log ${PURSUIT_LIBRARIES} )
 add_executable( test-coordinator ${CMAKE_CURRENT_SOURCE_DIR}/test_coordinator.cpp ${PURSUIT_HEADERS} ${PURSUIT_SOURCES} )
 target_link_libraries( test-coordinator ${PURSUIT_LIBRARIES} )
 
+add_executable( test-client ${CMAKE_CURRENT_SOURCE_DIR}/test_client.cpp ${PURSUIT_HEADERS} ${PURSUIT_SOURCES} )
+target_link_libraries( test-client ${PURSUIT_LIBRARIES} )
+
 add_executable( client-process ${CMAKE_CURRENT_SOURCE_DIR}/client_process.cpp ${PURSUIT_HEADERS} ${PURSUIT_SOURCES} )
 target_link_libraries( client-process ${PURSUIT_LIBRARIES} )

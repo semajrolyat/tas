@@ -613,7 +613,7 @@ scheduler_c::error_e scheduler_c::decrease_realtime_priority( const pid_t& pid, 
   int min_allowed;
   int target_priority;
   error_e result;
-/*
+///*
   // validate the priority offset
   result = validate_realtime_priority_offset( offset );
   if( result != ERROR_NONE ) return result;
@@ -626,7 +626,7 @@ scheduler_c::error_e scheduler_c::decrease_realtime_priority( const pid_t& pid, 
   // if min specified is not constrained to the scheduler min then fail
   if( min_priority < min_allowed ) 
     return ERROR_PRIORITY_BOUNDS;
-*/
+//*/
   // get the scheduling parameter  
   if( sched_getparam( pid, &param ) == -1 )
     return ERROR_PARAM_QUERY;
@@ -640,19 +640,19 @@ scheduler_c::error_e scheduler_c::decrease_realtime_priority( const pid_t& pid, 
   param.sched_priority = target_priority;
   if( sched_setparam( pid, &param ) == -1 )
     return ERROR_PARAM_UPDATE;
-/*  
+///*  
   // query the priority again to check the value
   if( sched_getparam( pid, &param ) == -1 )
     return ERROR_PARAM_QUERY;
-*/
+//*/
   // update the actual priority
   // Note: on ERROR_PRIORITY_VALIDATE, can look at current priority
   priority = param.sched_priority;
-/*
+///*
   // validate that the scheduler priority is now equal to the requested change
   if( param.sched_priority != target_priority )
     return ERROR_PRIORITY_VALIDATE;
-*/
+//*/
   // success
   return ERROR_NONE;
 }
@@ -671,7 +671,7 @@ scheduler_c::error_e scheduler_c::increase_realtime_priority( const pid_t& pid, 
   int max_allowed;
   int target_priority;
   error_e result;
-/*
+///*
   // validate the priority offset
   result = validate_realtime_priority_offset( offset );
   if( result != ERROR_NONE ) return result;
@@ -684,7 +684,7 @@ scheduler_c::error_e scheduler_c::increase_realtime_priority( const pid_t& pid, 
   // if max specified is not constrained to the scheduler max then fail
   if( max_priority > max_allowed ) 
     return ERROR_PRIORITY_BOUNDS;
-*/
+//*/
 
   // get the scheduling parameter  
   if( sched_getparam( pid, &param ) == -1 )
